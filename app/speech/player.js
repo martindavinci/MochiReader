@@ -19,11 +19,11 @@ export const HEADING_PAUSE_MS = 600;
 export const ITEM_PAUSE_MS = 300;
 export const ROW_PAUSE_MS = 250;
 
-export const MIN_RATE = 0.5;
-export const MAX_RATE = 3;
-export const RATE_STEP = 0.1;
+/** The speeds Windows really has: between these, a rate changes nothing. */
+export const RATE_LEVELS = Object.freeze([0.5, 0.6, 0.7, 0.8, 1.0, 1.3, 1.5, 1.7, 1.9, 2.0, 2.2, 2.5, 2.7, 2.9, 3.0]);
+export const MIN_RATE = RATE_LEVELS[0];
+export const MAX_RATE = RATE_LEVELS.at(-1);
 const DEFAULT_RATE = 1;
-const RATE_DECIMALS = 1;
 
 /** Time granted to any sentence, on top of the time that depends on its length. */
 export const SPEAK_WATCHDOG_MS = 10000;
@@ -37,6 +37,16 @@ export function speakWatchdogMs(text, rate) {
   return SPEAK_WATCHDOG_MS + (text.length * WATCHDOG_MS_PER_CHAR) / rate;
 }
 
+/** The level after this rate, for the + key. The last level stays where it is. */
+export function nextRate(rate) {
+  return RATE_LEVELS.find((level) => level > rate) ?? MAX_RATE;
+}
+
+/** The level before this rate, for the - key. The first level stays where it is. */
+export function prevRate(rate) {
+  return RATE_LEVELS.findLast((level) => level < rate) ?? MIN_RATE;
+}
+
 const clamp = (value, low, high) => Math.min(Math.max(value, low), high);
 /** A whole number to clamp, 0 for anything else. Infinity stays: it means "the last one". */
 const toIndex = (value) => (typeof value === 'number' && !Number.isNaN(value) ? Math.trunc(value) : 0);
@@ -45,6 +55,11 @@ function pauseAfter(block) {
   if (block.kind === 'heading') return HEADING_PAUSE_MS;
   if (block.kind === 'cell') return block.rowEnd ? ROW_PAUSE_MS : 0;
   return ITEM_PAUSE_MS;
+}
+
+function nearestLevel(rate) {
+  const distance = (level) => Math.abs(level - rate);
+  return RATE_LEVELS.reduce((best, level) => (distance(level) < distance(best) ? level : best));
 }
 
 const isHeading = (block) => block.kind === 'heading';
@@ -175,9 +190,10 @@ export class SpeechPlayer {
   }
 
   setRate(rate) {
-    const step = Math.round(clamp(rate, MIN_RATE, MAX_RATE) / RATE_STEP) * RATE_STEP;
-    const next = Number(step.toFixed(RATE_DECIMALS));
-    if (Number.isNaN(next) || next === this.#rate) return;
+    const wanted = clamp(rate, MIN_RATE, MAX_RATE);
+    if (Number.isNaN(wanted)) return;
+    const next = nearestLevel(wanted);
+    if (next === this.#rate) return;
     this.#rate = next;
     this.#restartIfPlaying();
   }

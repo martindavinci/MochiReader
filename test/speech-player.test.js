@@ -8,7 +8,9 @@ import {
   ROW_PAUSE_MS,
   MIN_RATE,
   MAX_RATE,
-  RATE_STEP,
+  RATE_LEVELS,
+  nextRate,
+  prevRate,
   SPEAK_WATCHDOG_MS,
   ERROR_ENGINE,
   ERROR_NOTHING_TO_READ,
@@ -147,22 +149,67 @@ test('changing the rate while paused does not start the audio', async () => {
   assert.equal(h.engine.calls.at(-1).rate, 2);
 });
 
-test('rate is clamped and stepped', () => {
+test('the rate only takes the speeds Windows has', () => {
+  assert.deepEqual(RATE_LEVELS, [0.5, 0.6, 0.7, 0.8, 1.0, 1.3, 1.5, 1.7, 1.9, 2.0, 2.2, 2.5, 2.7, 2.9, 3.0]);
   assert.equal(MIN_RATE, 0.5);
   assert.equal(MAX_RATE, 3);
-  assert.equal(RATE_STEP, 0.1);
   const { player } = harness([para('Uno.')]);
   assert.equal(player.rate, 1);
   player.setRate(0.1);
   assert.equal(player.rate, MIN_RATE);
   player.setRate(99);
   assert.equal(player.rate, MAX_RATE);
-  player.setRate(1.23);
-  assert.equal(player.rate, 1.2);
-  for (let i = 0; i < 3; i += 1) player.setRate(player.rate + RATE_STEP);
-  assert.equal(player.rate, 1.5);
-  player.setRate(Number.NaN);
-  assert.equal(player.rate, 1.5);
+  player.setRate(Infinity);
+  assert.equal(player.rate, MAX_RATE);
+  player.setRate(-Infinity);
+  assert.equal(player.rate, MIN_RATE);
+  for (const [asked, level] of [[1.23, 1.3], [1.1, 1], [1.2, 1.3], [2.05, 2], [2.75, 2.7], [2.45, 2.5], [0.84, 0.8]]) {
+    player.setRate(asked);
+    assert.equal(player.rate, level, String(asked));
+  }
+  for (const level of RATE_LEVELS) {
+    player.setRate(level);
+    assert.equal(player.rate, level);
+  }
+  player.setRate(1.5);
+  for (const notARate of [Number.NaN, undefined, 'fast']) {
+    player.setRate(notARate);
+    assert.equal(player.rate, 1.5);
+  }
+});
+
+test('a rate that snaps to the current level does not restart the sentence', async () => {
+  const h = harness([para('Uno.')]);
+  h.player.play();
+  await flush();
+  h.player.setRate(1.05);
+  await flush();
+  assert.equal(h.engine.stops, 0);
+  assert.equal(h.engine.calls.length, 1);
+});
+
+test('next and previous rate walk the levels and stop at the ends', () => {
+  const upward = [];
+  for (let rate = MIN_RATE; ; rate = nextRate(rate)) {
+    upward.push(rate);
+    if (nextRate(rate) === rate) break;
+  }
+  assert.deepEqual(upward, RATE_LEVELS);
+  const downward = [];
+  for (let rate = MAX_RATE; ; rate = prevRate(rate)) {
+    downward.push(rate);
+    if (prevRate(rate) === rate) break;
+  }
+  assert.deepEqual(downward, [...RATE_LEVELS].reverse());
+});
+
+test('next and previous rate from outside the levels go to the closest one on that side', () => {
+  assert.equal(nextRate(1.1), 1.3);
+  assert.equal(prevRate(1.1), 1);
+  assert.equal(nextRate(99), MAX_RATE);
+  assert.equal(prevRate(99), MAX_RATE);
+  assert.equal(nextRate(0.1), MIN_RATE);
+  assert.equal(prevRate(0.1), MIN_RATE);
 });
 
 test('pause then resume restarts the current sentence', async () => {
