@@ -35,6 +35,65 @@ test('the comparison handles accents, spaces and commas', () => {
   assert.equal(b.created, false);
 });
 
+for (const [name, spelling] of [
+  ['forward slashes', 'C:/x/a.md'],
+  ['mixed slashes', 'C:\\x/a.md'],
+  ['a parent segment', 'C:\\x\\sub\\..\\a.md'],
+  ['a current segment', 'C:\\x\\.\\a.md'],
+  ['a doubled separator', 'C:\\x\\\\a.md'],
+  ['the verbatim prefix of fs::canonicalize', '\\\\?\\C:\\x\\a.md'],
+  ['a parent segment past the drive root', 'C:\\..\\x\\a.md'],
+]) {
+  test(`${name} name the file already open`, () => {
+    const t = new Tabs();
+    const a = t.open('C:\\x\\a.md');
+    t.open('C:\\x\\other.md');
+    const again = t.open(spelling);
+    assert.equal(again.id, a.id);
+    assert.equal(again.created, false);
+    assert.equal(t.all().length, 2);
+    assert.equal(t.active().id, a.id);
+  });
+}
+
+for (const [name, first, second] of [
+  ['the verbatim UNC prefix', '\\\\server\\share\\a.md', '\\\\?\\UNC\\server\\share\\a.md'],
+  ['a parent segment on a network share', '\\\\server\\share\\a.md', '\\\\server\\share\\sub\\..\\a.md'],
+  ['a parent segment past the share root', '\\\\server\\share\\a.md', '\\\\server\\share\\..\\a.md'],
+  ['forward slashes on a network share', '\\\\server\\share\\a.md', '//server/share/a.md'],
+]) {
+  test(`${name} name the file already open`, () => {
+    const t = new Tabs();
+    const a = t.open(first);
+    const again = t.open(second);
+    assert.equal(again.id, a.id);
+    assert.equal(again.created, false);
+  });
+}
+
+for (const [name, first, second] of [
+  ['the same name in two folders', 'C:\\x\\a.md', 'C:\\y\\a.md'],
+  ['a parent segment that leaves the folder', 'C:\\x\\a.md', 'C:\\x\\..\\a.md'],
+  ['the same folders on two drives', 'C:\\x\\a.md', 'D:\\x\\a.md'],
+  ['the same path on two shares', '\\\\server\\one\\a.md', '\\\\server\\two\\a.md'],
+  ['a drive path and a network path', 'C:\\x\\a.md', '\\\\C:\\x\\a.md'],
+  ['a name made of dots', 'C:\\x\\..a.md', 'C:\\x\\a.md'],
+]) {
+  test(`${name} stay two tabs`, () => {
+    const t = new Tabs();
+    t.open(first);
+    assert.equal(t.open(second).created, true);
+    assert.equal(t.all().length, 2);
+  });
+}
+
+test('a tab keeps the path it was first opened with', () => {
+  const t = new Tabs();
+  t.open('C:\\x\\a.md');
+  t.open('C:/x/sub/../a.md');
+  assert.deepEqual(paths(t), ['C:\\x\\a.md']);
+});
+
 test('many files opened in one burst each become a tab', () => {
   const t = new Tabs();
   const opened = ['a', 'b', 'c', 'd', 'e'].map((n) => t.open(`C:\\x\\${n}.md`));

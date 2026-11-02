@@ -60,7 +60,7 @@ export default {
   'speech.voice': 'Voce',
   'speech.nothingToRead': 'In questo documento non c\'è nulla da leggere ad alta voce.',
   'speech.error': 'La lettura si è fermata per un errore della voce. La posizione è salva.',
-  'speech.noVoice': 'Nessuna voce in {lang}. Per aggiungerne una, vai in Impostazioni di Windows > Data/ora e lingua > Voce > Aggiungi voci, poi riavvia MochiReader.',
+  'speech.noVoice': 'Nessuna voce in {lang}. Per aggiungerne una, vai in Impostazioni di Windows > Data/ora e lingua > Riconoscimento vocale > Aggiungi voci, poi riavvia MochiReader.',
   'speech.hiddenVoice': 'Una voce già installata può comunque mancare qui, perché Windows rende alcune voci disponibili solo alle sue app. In quel caso, aggiungi un\'altra voce per questa lingua.',
   'speech.sourceLabel': 'Fonte: {name}',
 

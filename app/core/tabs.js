@@ -2,8 +2,41 @@
 
 /** @typedef {{id: number, path: string}} Tab */
 
-// Windows paths: two spellings that differ only by case are the same file.
-const samePathKey = (path) => path.toLowerCase();
+const SEP = '\\';
+const UNC_START = SEP + SEP;
+const VERBATIM_UNC = /^\\\\\?\\unc\\/;
+const VERBATIM = /^\\\\\?\\/;
+const DRIVE_ROOT = /^[a-z]:\\/;
+// The segments no parent segment can climb past: server and share, or the drive.
+const UNC_ROOT_SEGMENTS = 2;
+const DRIVE_ROOT_SEGMENTS = 1;
+
+/**
+ * The same key for every spelling of a Windows path that names one file: case, slash direction,
+ * doubled separators, dot segments and the verbatim prefix of fs::canonicalize. Only text is
+ * compared, so aliases that only the disk can reveal (links, short names) stay distinct.
+ */
+const samePathKey = (path) => {
+  const unified = path
+    .toLowerCase()
+    .replaceAll('/', SEP)
+    .replace(VERBATIM_UNC, UNC_START)
+    .replace(VERBATIM, '');
+  const isUnc = unified.startsWith(UNC_START);
+  const isDrive = DRIVE_ROOT.test(unified);
+  const rootSegments = isUnc ? UNC_ROOT_SEGMENTS : isDrive ? DRIVE_ROOT_SEGMENTS : 0;
+  const isRooted = isUnc || isDrive || unified.startsWith(SEP);
+
+  const kept = [];
+  for (const segment of unified.split(SEP)) {
+    if (segment === '' || segment === '.') continue;
+    if (segment !== '..') kept.push(segment);
+    else if (kept.length > rootSegments && kept.at(-1) !== '..') kept.pop();
+    else if (!isRooted) kept.push(segment);
+  }
+  const prefix = isUnc ? UNC_START : isRooted && !isDrive ? SEP : '';
+  return prefix + kept.join(SEP);
+};
 
 /** The open tabs, in bar order, and which one is active. Knows nothing about the DOM. */
 export class Tabs {

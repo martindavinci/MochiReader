@@ -43,6 +43,12 @@ test('both languages use the same placeholders', () => {
   for (const key of Object.keys(en)) assert.deepEqual(placeholders(it[key]), placeholders(en[key]), key);
 });
 
+// The labels of the Windows 10 Settings app: the message is useful only if its path can be followed.
+test('the missing voice message names real Windows settings pages', () => {
+  assert.ok(it['speech.noVoice'].includes('Data/ora e lingua > Riconoscimento vocale > Aggiungi voci'));
+  assert.ok(en['speech.noVoice'].includes('Time & Language > Speech > Add voices'));
+});
+
 test('the language decides the text', () => {
   setLang('it');
   assert.equal(getLang(), 'it');
