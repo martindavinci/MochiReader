@@ -1,0 +1,9 @@
+# Build output
+/src-tauri/target
+/src-tauri/gen
+/dist
+/node_modules
+
+# Local working notes and agent scratch
+docs/superpowers/
+.superpowers/
