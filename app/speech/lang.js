@@ -112,30 +112,40 @@ export function detectLang(text) {
 }
 
 // EPUB metadata says "ita" as often as "it": ISO 639-2 codes, in both forms where there are two,
-// and old or general tags, for the languages Windows has voices for.
+// old, general or neighbouring tags, for the languages Windows has voices for, and for the most
+// common languages their plain names, which are not tags but do get written there.
 const OTHER_SPELLINGS = {
-  ar: 'ara', bg: 'bul', ca: 'cat', cs: 'ces cze', cy: 'cym wel', da: 'dan', de: 'deu ger', el: 'ell gre', en: 'eng',
-  es: 'spa', et: 'est', eu: 'eus baq', fa: 'fas per', fi: 'fin', fil: 'tgl tl', fr: 'fra fre', ga: 'gle', gl: 'glg',
-  he: 'heb iw', hi: 'hin', hr: 'hrv', hu: 'hun', id: 'ind in', is: 'isl ice', it: 'ita', ja: 'jpn', ko: 'kor', lt: 'lit',
-  lv: 'lav', ms: 'msa may', nb: 'nob nor no', nl: 'nld dut', pl: 'pol', pt: 'por', ro: 'ron rum', ru: 'rus', sk: 'slk slo',
-  sl: 'slv', sr: 'srp', sv: 'swe', ta: 'tam', te: 'tel', th: 'tha', tr: 'tur', uk: 'ukr', vi: 'vie', zh: 'zho chi',
+  ar: 'ara', bg: 'bul', ca: 'cat', cs: 'ces cze', cy: 'cym wel', da: 'dan', de: 'deu ger german deutsch tedesco', el: 'ell gre', en: 'eng english inglese',
+  es: 'spa spanish español espanol castellano spagnolo', et: 'est', eu: 'eus baq', fa: 'fas per', fi: 'fin', fil: 'tgl tl', fr: 'fra fre french français francais francese', ga: 'gle', gl: 'glg',
+  he: 'heb iw', hi: 'hin', hr: 'hrv', hu: 'hun', id: 'ind in', is: 'isl ice', it: 'ita italian italiano', ja: 'jpn japanese', ko: 'kor', lt: 'lit',
+  lv: 'lav', ms: 'msa may', nb: 'nob nor no nn nno', nl: 'nld dut dutch', pl: 'pol', pt: 'por portuguese português portugues portoghese', ro: 'ron rum', ru: 'rus russian', sk: 'slk slo',
+  sl: 'slv', sr: 'srp', sv: 'swe', ta: 'tam', te: 'tel', th: 'tha', tr: 'tur', uk: 'ukr', vi: 'vie', zh: 'zho chi cmn yue chinese',
 };
 const LANGUAGE_BY_SPELLING = new Map(Object.entries(OTHER_SPELLINGS)
   .flatMap(([language, spellings]) => spellings.split(' ').map((spelling) => [spelling, language])));
 
+// ISO 639 codes that name no language: undetermined, several, no linguistic content, not coded.
+const NO_LANGUAGE = new Set(['und', 'mul', 'zxx', 'mis']);
+const NOT_LANGUAGE = { language: '', region: null, canonical: '' };
+// What comes after a tag: another language of a list, or the charset of a locale.
+const AFTER_TAG = /[,;\s.@]/;
 const TAG_SEPARATOR = /[-_]/;
 const REGION = /^(?:[a-z]{2}|\d{3})$/i;
 
 /**
- * Reads a language tag however it is spelled ("ita", "it_IT", "IT-it", "en-GB").
+ * Reads a language tag however it is spelled ("ita", "it_IT", "IT-it", "en-GB", "Italian", "en,it").
  * @param {string|null|undefined} tag
  * @returns {{language: string, region: string|null, canonical: string}} language and canonical
- *   are empty when the tag is
+ *   are empty when the tag is, or names no language ("und")
  */
 export function parseLangTag(tag) {
-  const [primary, ...rest] = String(tag ?? '').trim().split(TAG_SEPARATOR);
+  const [primary, ...rest] = String(tag ?? '').trim().split(AFTER_TAG)[0].split(TAG_SEPARATOR);
   const lowercase = primary.toLowerCase();
+  if (lowercase === '' || NO_LANGUAGE.has(lowercase)) return NOT_LANGUAGE;
   const language = LANGUAGE_BY_SPELLING.get(lowercase) ?? lowercase;
-  const region = rest.find((subtag) => REGION.test(subtag))?.toUpperCase() ?? null;
+  // A single letter opens an extension: nothing after it describes the language.
+  const extension = rest.findIndex((subtag) => subtag.length === 1);
+  const subtags = extension === -1 ? rest : rest.slice(0, extension);
+  const region = subtags.find((subtag) => REGION.test(subtag))?.toUpperCase() ?? null;
   return { language, region, canonical: region ? `${language}-${region}` : language };
 }

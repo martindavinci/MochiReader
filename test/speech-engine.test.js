@@ -211,6 +211,46 @@ test('a language with no voice still resolves as error, whatever its spelling', 
   }
 });
 
+test('a code that names no language counts as no language, whatever voices are there', async () => {
+  for (const lang of ['und', 'mul', 'zxx', 'mis', 'UND', 'und-Latn', 'und-US']) {
+    const { engine, synth } = setup([ZIRA, ELSA]);
+    engine.speak('Hi.', { voiceId: null, rate: 1, lang });
+    assert.equal(synth.spoken[0]?.voice, ZIRA, lang);
+    assert.equal(synth.spoken[0].lang, 'en-US', lang);
+  }
+});
+
+test('other tags and plain names of a language find its voice', async () => {
+  const MANDARIN = voice('Huihui', 'zh-CN');
+  const NORWEGIAN = voice('Jon', 'nb-NO');
+  const cases = [
+    [MANDARIN, ['cmn', 'yue', 'zh', 'zho', 'chi', 'cmn-Hans', 'zh-yue-HK', 'Chinese']],
+    [NORWEGIAN, ['nn', 'nno', 'nb', 'nob', 'nor', 'no', 'nn-NO']],
+    [ELSA, ['Italian', 'italiano', 'ITALIANO', 'it,en', 'it;en', 'it en', 'it, en', 'it_IT.UTF-8', 'it@euro']],
+    [ZIRA, ['English', 'english', 'inglese', 'en,it', 'en;it', 'en it']],
+  ];
+  for (const [expected, tags] of cases) {
+    for (const lang of tags) {
+      const { engine, synth } = setup([MANDARIN, NORWEGIAN, ELSA, ZIRA]);
+      engine.speak('Ciao.', { voiceId: null, rate: 1, lang });
+      assert.equal(synth.spoken[0]?.voice, expected, lang);
+    }
+  }
+});
+
+test('an extension of a tag is not read as its region', async () => {
+  const CANADA = voice('Clara', 'en-CA');
+  for (const lang of ['en-u-ca-gregory', 'en-u-co-phonebk', 'en-x-ca']) {
+    const { engine, synth } = setup([ZIRA, CANADA]);
+    engine.speak('Hi.', { voiceId: null, rate: 1, lang });
+    assert.equal(synth.spoken[0].voice, ZIRA, lang);
+    assert.equal(synth.spoken[0].lang, 'en', lang);
+  }
+  const { engine, synth } = setup([ZIRA, CANADA]);
+  engine.speak('Hi.', { voiceId: null, rate: 1, lang: 'en-CA-u-ca-gregory' });
+  assert.equal(synth.spoken[0].voice, CANADA);
+});
+
 test('a blank language counts as no language', async () => {
   const { engine, synth } = setup([ZIRA, ELSA]);
   engine.speak('Hi.', { voiceId: null, rate: 1, lang: '   ' });

@@ -132,12 +132,24 @@ test('language tags reduce to a two-letter language and a region', () => {
     'zh-Hant-TW': ['zh', 'TW', 'zh-TW'],
     'es-419': ['es', '419', 'es-419'],
     no: ['nb', null, 'nb'],
+    nn: ['nb', null, 'nb'],
+    cmn: ['zh', null, 'zh'],
+    yue: ['zh', null, 'zh'],
+    Italian: ['it', null, 'it'],
+    italiano: ['it', null, 'it'],
+    'it,en': ['it', null, 'it'],
+    'en-GB;it': ['en', 'GB', 'en-GB'],
+    'it_IT.UTF-8': ['it', 'IT', 'it-IT'],
+    'en-u-ca-gregory': ['en', null, 'en'],
+    'de-u-co-phonebk': ['de', null, 'de'],
+    'en-x-ca': ['en', null, 'en'],
+    'en-CA-u-ca-gregory': ['en', 'CA', 'en-CA'],
     constructor: ['constructor', null, 'constructor'],
   };
   for (const [tag, [language, region, canonical]] of Object.entries(cases)) {
     assert.deepEqual(parseLangTag(tag), { language, region, canonical }, tag);
   }
-  for (const empty of ['', '   ', null, undefined]) {
+  for (const empty of ['', '   ', null, undefined, 'und', 'mul', 'zxx', 'mis', 'UND', 'und-US', 'mul-Latn']) {
     assert.deepEqual(parseLangTag(empty), { language: '', region: null, canonical: '' });
   }
 });
