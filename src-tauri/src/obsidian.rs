@@ -9,6 +9,7 @@ use comrak::arena_tree::NodeEdge;
 use comrak::nodes::{AstNode, NodeLink, NodeValue};
 use comrak::Arena;
 use std::cell::OnceCell;
+use std::collections::HashSet;
 use std::ops::Range;
 use std::path::{Component, Path, PathBuf};
 
@@ -42,6 +43,27 @@ pub fn image_url(path: &Path) -> String {
 
 fn doc_url(path: &Path) -> String {
     format!("{DOC_URL_PREFIX}{}", path_token(path))
+}
+
+/// The document URLs this module wrote for one render. Nothing else may open a tab: a `mochi-doc:` URL
+/// the document wrote itself can name any path, and a network path would reach that server on a click.
+pub type IssuedDocUrls = HashSet<String>;
+
+/// Whether a browser would read `url` as a link to a document, however it is spelled.
+pub fn is_doc_url(url: &str) -> bool {
+    let plain = url
+        .chars()
+        .filter(|c| !c.is_ascii_whitespace() && !c.is_ascii_control());
+    plain
+        .take(DOC_URL_PREFIX.len())
+        .map(|c| c.to_ascii_lowercase())
+        .eq(DOC_URL_PREFIX.chars())
+}
+
+fn issue_doc_url(path: &Path, issued: &mut IssuedDocUrls) -> String {
+    let url = doc_url(path);
+    issued.insert(url.clone());
+    url
 }
 
 pub(crate) fn path_token(path: &Path) -> String {
@@ -96,15 +118,23 @@ enum Job<'a> {
     Tags(&'a AstNode<'a>),
 }
 
-pub fn rewrite<'a>(arena: &'a Arena<'a>, root: &'a AstNode<'a>, source: &str, ctx: &RenderCtx) {
+pub fn rewrite<'a>(
+    arena: &'a Arena<'a>,
+    root: &'a AstNode<'a>,
+    source: &str,
+    ctx: &RenderCtx,
+) -> IssuedDocUrls {
     let finder = Finder {
         ctx,
         folder: OnceCell::new(),
     };
     let lines = OnceCell::new();
+    let mut issued = IssuedDocUrls::new();
     for job in jobs_in(root) {
         match job {
-            Job::WikiLink { node, name, embed } => rewrite_wikilink(node, &name, embed, &finder),
+            Job::WikiLink { node, name, embed } => {
+                rewrite_wikilink(node, &name, embed, &finder, &mut issued)
+            }
             Job::Link {
                 node,
                 link,
@@ -113,7 +143,7 @@ pub fn rewrite<'a>(arena: &'a Arena<'a>, root: &'a AstNode<'a>, source: &str, ct
                 if held_image && shows_nothing(node) {
                     node.append(arena.alloc(NodeValue::Text(link.url.clone().into()).into()));
                 }
-                rewrite_link(node, link, ctx.doc_dir);
+                rewrite_link(node, link, ctx.doc_dir, &mut issued);
             }
             Job::Image {
                 node,
@@ -127,6 +157,7 @@ pub fn rewrite<'a>(arena: &'a Arena<'a>, root: &'a AstNode<'a>, source: &str, ct
             }),
         }
     }
+    issued
 }
 
 /// The source line of a text node. comrak drops the backslash of `\#tag` from the text and from its
@@ -230,7 +261,13 @@ impl Finder<'_, '_> {
     }
 }
 
-fn rewrite_wikilink<'a>(node: &'a AstNode<'a>, name: &str, embed: bool, finder: &Finder) {
+fn rewrite_wikilink<'a>(
+    node: &'a AstNode<'a>,
+    name: &str,
+    embed: bool,
+    finder: &Finder,
+    issued: &mut IssuedDocUrls,
+) {
     match finder.find(name) {
         Some(path) if embed && is_image(&path) => {
             if let Some(size) = node.first_child().filter(|label| is_image_size(label)) {
@@ -238,7 +275,9 @@ fn rewrite_wikilink<'a>(node: &'a AstNode<'a>, name: &str, embed: bool, finder: 
             }
             set_target(node, NodeValue::Image, image_url(&path));
         }
-        Some(path) if is_document(&path) => set_target(node, NodeValue::Link, doc_url(&path)),
+        Some(path) if is_document(&path) => {
+            set_target(node, NodeValue::Link, issue_doc_url(&path, issued))
+        }
         _ => unwrap_node(node),
     }
 }
@@ -274,7 +313,12 @@ fn shows_nothing<'a>(link: &'a AstNode<'a>) -> bool {
         })
 }
 
-fn rewrite_link<'a>(node: &'a AstNode<'a>, mut link: Box<NodeLink>, doc_dir: Option<&Path>) {
+fn rewrite_link<'a>(
+    node: &'a AstNode<'a>,
+    mut link: Box<NodeLink>,
+    doc_dir: Option<&Path>,
+    issued: &mut IssuedDocUrls,
+) {
     if scheme_of(&link.url).is_some() {
         return;
     }
@@ -286,7 +330,7 @@ fn rewrite_link<'a>(node: &'a AstNode<'a>, mut link: Box<NodeLink>, doc_dir: Opt
         .filter(|path| path.is_file())
     {
         Some(path) => {
-            link.url = doc_url(&path);
+            link.url = issue_doc_url(&path, issued);
             node.data_mut().value = NodeValue::Link(link);
         }
         None => unwrap_node(node),
@@ -933,6 +977,21 @@ mod tests {
         let html = in_folder(dir.path(), "[x](altra.md#sezione)\n").html;
         let expected = doc_link(dir.path().join("altra.md"));
         assert!(html.contains(&expected), "{html}");
+    }
+
+    #[test]
+    fn only_the_document_links_the_app_resolved_stay() {
+        let dir = tree(&["altra.md"]);
+        let forged = base64url(br"\192.0.2.1\share\a.md");
+        let resolved = doc_link(dir.path().join("altra.md"));
+        for source in [
+            format!("[a](altra.md) [b](mochi-doc:{forged})\n"),
+            format!("[[altra]] <a href=\"mochi-doc:{forged}\">b</a>\n"),
+        ] {
+            let html = in_folder(dir.path(), &source).html;
+            assert!(html.contains(&resolved), "{source} became {html}");
+            assert!(!html.contains(&forged), "{source} became {html}");
+        }
     }
 
     #[test]

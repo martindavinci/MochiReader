@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 use crate::comments::remove_comments;
-use crate::obsidian;
+use crate::obsidian::{self, IssuedDocUrls};
 use crate::raw_html::{
     clean_contained, contain_inline_html, repaired_source, show_unclosed_tags, RawHtmlGuard,
 };
@@ -70,13 +70,14 @@ pub struct RenderCtx<'a> {
 pub fn render_markdown(source: &str, ctx: &RenderCtx) -> Rendered {
     let source = source.strip_prefix(BOM).unwrap_or(source);
     let mut options = comrak_options();
-    let cleaner = sanitizer(ctx.doc_dir);
-    let mut guard = RawHtmlGuard::new(&cleaner);
+    // The checks on raw HTML only look at which tags survive, so they need no document links.
+    let checker = sanitizer(ctx.doc_dir, IssuedDocUrls::new());
+    let mut guard = RawHtmlGuard::new(&checker);
     let arena = Arena::new();
     let (root, source) = parse_contained(&arena, source, &mut options, &mut guard);
     remove_comments(&arena, root, &source, &mut guard);
     contain_inline_html(root, &mut guard);
-    obsidian::rewrite(&arena, root, &source, ctx);
+    let issued = obsidian::rewrite(&arena, root, &source, ctx);
 
     let mut lang = None;
     let mut headings = Vec::new();
@@ -98,7 +99,7 @@ pub fn render_markdown(source: &str, ctx: &RenderCtx) -> Rendered {
     }
 
     Rendered {
-        html: clean_html(root, &mut options, &cleaner),
+        html: clean_html(root, &mut options, &sanitizer(ctx.doc_dir, issued)),
         title: headings
             .iter()
             .find(|heading| heading.level == 1)
@@ -181,7 +182,7 @@ fn comrak_options() -> Options<'static> {
     options
 }
 
-fn sanitizer(doc_dir: Option<&Path>) -> ammonia::Builder<'static> {
+fn sanitizer(doc_dir: Option<&Path>, issued: IssuedDocUrls) -> ammonia::Builder<'static> {
     let doc_dir = doc_dir.map(Path::to_path_buf);
     let mut builder = ammonia::Builder::default();
     builder
@@ -194,6 +195,8 @@ fn sanitizer(doc_dir: Option<&Path>) -> ammonia::Builder<'static> {
         .attribute_filter(move |element, attribute, value| {
             if element == IMAGE_TAG && attribute == IMAGE_SOURCE {
                 obsidian::raw_image_src(value, doc_dir.as_deref()).map(Cow::Owned)
+            } else if obsidian::is_doc_url(value) && !issued.contains(value) {
+                None
             } else {
                 Some(Cow::Borrowed(value))
             }
@@ -1144,12 +1147,43 @@ mod tests {
                    <a href=\"mailto:x@e.org\">c</a> <a href=\"file:///C:/w\">d</a> \
                    <a href=\"data:text/html,x\">e</a> <a href=\"ftp://e.org\">f</a>\n",
         );
-        for kept in ["mochi-doc:abc", "https://e.org", "mailto:x@e.org"] {
+        for kept in ["https://e.org", "mailto:x@e.org"] {
             assert!(o.html.contains(kept), "{kept}");
         }
-        for gone in ["file:", "data:", "ftp:"] {
+        for gone in ["mochi-doc:", "file:", "data:", "ftp:"] {
             assert!(!o.html.contains(gone), "{gone}");
         }
+    }
+
+    #[test]
+    fn document_urls_the_document_wrote_itself_do_not_survive() {
+        // The token of \\192.0.2.1\share\a.md: a click on this would reach that host.
+        const TOKEN: &str = "XFwxOTIuMC4yLjFcc2hhcmVcYS5tZA";
+        let spellings = [
+            format!("[testo](mochi-doc:{TOKEN})\n"),
+            format!("<mochi-doc:{TOKEN}>\n"),
+            format!("[testo][r]\n\n[r]: mochi-doc:{TOKEN}\n"),
+            format!("<a href=\"mochi-doc:{TOKEN}\">testo</a>\n"),
+            format!("prima <a href=\"mochi-doc:{TOKEN}\">testo</a> dopo\n"),
+            format!("<a href=\"MOCHI-DOC:{TOKEN}\">testo</a>\n"),
+            format!("<a href=\"mochi&#45;doc:{TOKEN}\">testo</a>\n"),
+            format!("<a href=\" mochi-doc:{TOKEN}\">testo</a>\n"),
+            format!("<a href=\"mochi-\tdoc:{TOKEN}\">testo</a>\n"),
+            format!("<map><area href=\"mochi-doc:{TOKEN}\"></map>testo\n"),
+        ];
+        for source in spellings {
+            let html = r(&source).html;
+            assert!(!html.contains("href"), "{source} became {html}");
+        }
+    }
+
+    #[test]
+    fn text_of_a_refused_document_link_stays() {
+        let html = r("[si legge](mochi-doc:abc) e <a href=\"mochi-doc:abc\">anche qui</a>\n").html;
+        assert!(
+            html.contains("si legge") && html.contains("anche qui"),
+            "{html}"
+        );
     }
 
     #[test]
