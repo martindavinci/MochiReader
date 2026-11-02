@@ -172,9 +172,9 @@ test('the rate only takes the speeds Windows has', () => {
     assert.equal(player.rate, level);
   }
   player.setRate(1.5);
-  for (const notARate of [Number.NaN, undefined, 'fast']) {
+  for (const notARate of [Number.NaN, undefined, null, 'fast', '2', true, [], [2], {}]) {
     player.setRate(notARate);
-    assert.equal(player.rate, 1.5);
+    assert.equal(player.rate, 1.5, String(notARate));
   }
 });
 
@@ -210,6 +210,15 @@ test('next and previous rate from outside the levels go to the closest one on th
   assert.equal(prevRate(99), MAX_RATE);
   assert.equal(nextRate(0.1), MIN_RATE);
   assert.equal(prevRate(0.1), MIN_RATE);
+  assert.equal(nextRate(Infinity), MAX_RATE);
+  assert.equal(prevRate(-Infinity), MIN_RATE);
+});
+
+test('next and previous rate from what is not a rate go to the normal speed', () => {
+  for (const notARate of [Number.NaN, undefined, null, 'fast', '2', true, [], {}]) {
+    assert.equal(nextRate(notARate), 1, String(notARate));
+    assert.equal(prevRate(notARate), 1, String(notARate));
+  }
 });
 
 test('pause then resume restarts the current sentence', async () => {

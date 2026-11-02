@@ -40,13 +40,18 @@ export function speakWatchdogMs(text, rate) {
   return SPEAK_WATCHDOG_MS + (text.length * WATCHDOG_MS_PER_CHAR) / rate;
 }
 
-/** The level after this rate, for the + key. The last level stays where it is. */
+/** Infinity counts: it means "as far as it goes". */
+const isRate = (rate) => typeof rate === 'number' && !Number.isNaN(rate);
+
+/** The level after this rate, for the + key. The last level stays where it is, and what is no rate gets the normal speed. */
 export function nextRate(rate) {
+  if (!isRate(rate)) return DEFAULT_RATE;
   return RATE_LEVELS.find((level) => level > rate) ?? MAX_RATE;
 }
 
-/** The level before this rate, for the - key. The first level stays where it is. */
+/** The level before this rate, for the - key. The first level stays where it is, and what is no rate gets the normal speed. */
 export function prevRate(rate) {
+  if (!isRate(rate)) return DEFAULT_RATE;
   return RATE_LEVELS.findLast((level) => level < rate) ?? MIN_RATE;
 }
 
@@ -196,9 +201,8 @@ export class SpeechPlayer {
   }
 
   setRate(rate) {
-    const wanted = clamp(rate, MIN_RATE, MAX_RATE);
-    if (Number.isNaN(wanted)) return;
-    const next = nearestLevel(wanted);
+    if (!isRate(rate)) return;
+    const next = nearestLevel(clamp(rate, MIN_RATE, MAX_RATE));
     if (next === this.#rate) return;
     this.#rate = next;
     this.#restartIfPlaying();
