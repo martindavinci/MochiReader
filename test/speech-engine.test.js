@@ -373,3 +373,289 @@ test('a player replaced on a shared engine goes idle and leaves the new player s
   assert.equal(synth.speaking, false);
   assert.deepEqual(errors, []);
 });
+
+function queueingEngine() {
+  const synth = new QueueingSynth([ELSA]);
+  return { synth, engine: new WebSpeechEngine({ synth, Utterance: FakeUtterance }) };
+}
+
+const blocksOf = (...texts) => texts.map((text) => ({
+  kind: 'para',
+  line: null,
+  sentences: [{ text, start: null, end: null }],
+}));
+
+function sharedEngine() {
+  const { synth, engine } = queueingEngine();
+  const errors = [];
+  const playerFor = (...texts) => {
+    const gaps = [];
+    const player = new SpeechPlayer({
+      engine,
+      onError: (code) => errors.push(code),
+      sleep: () => new Promise((resolve) => gaps.push(resolve)),
+    });
+    player.load(blocksOf(...texts));
+    player.endGap = () => gaps.shift()();
+    return player;
+  };
+  const settle = async () => {
+    await flush();
+    await flush();
+  };
+  const assertOnlySpeaker = (speaker, text) => {
+    assert.equal(speaker.state, 'playing');
+    assert.equal(synth.speaking, true);
+    assert.equal(synth.spoken.at(-1).text, text);
+    assert.deepEqual(errors, []);
+  };
+  return { synth, errors, playerFor, settle, assertOnlySpeaker };
+}
+
+/** Leaves the player in the pause after its first block, with nothing being spoken. */
+async function reachGap(player, { synth, settle }) {
+  player.play();
+  await settle();
+  synth.finishCurrent();
+  await settle();
+  assert.equal(player.state, 'playing');
+  assert.equal(synth.speaking, false);
+}
+
+test('a stop right after the new player started does not silence it', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const shared = sharedEngine();
+  const a = shared.playerFor('tab A');
+  const b = shared.playerFor('tab B');
+  a.play();
+  await shared.settle();
+
+  b.play();
+  a.stop();
+  await shared.settle();
+  assert.equal(a.state, 'idle');
+  shared.assertOnlySpeaker(b, 'tab B');
+  assert.equal(shared.synth.spoken.length, 2);
+
+  shared.synth.finishCurrent();
+  await shared.settle();
+  assert.equal(b.state, 'ended');
+  assert.deepEqual(shared.errors, []);
+});
+
+test('a stop right before the new player starts does not silence it', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const shared = sharedEngine();
+  const a = shared.playerFor('tab A');
+  const b = shared.playerFor('tab B');
+  a.play();
+  await shared.settle();
+
+  a.stop();
+  b.play();
+  await shared.settle();
+  assert.equal(a.state, 'idle');
+  shared.assertOnlySpeaker(b, 'tab B');
+});
+
+test('stopping in the pause between blocks does not cut the player now speaking', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const shared = sharedEngine();
+  const a = shared.playerFor('A one', 'A two');
+  const b = shared.playerFor('tab B');
+  await reachGap(a, shared);
+
+  b.play();
+  await shared.settle();
+  const { cancels } = shared.synth;
+  a.stop();
+  await shared.settle();
+  assert.equal(shared.synth.cancels, cancels);
+  assert.equal(a.state, 'idle');
+  shared.assertOnlySpeaker(b, 'tab B');
+});
+
+test('stopping in the pause and then starting another player leaves it speaking', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const shared = sharedEngine();
+  const a = shared.playerFor('A one', 'A two');
+  const b = shared.playerFor('tab B');
+  await reachGap(a, shared);
+
+  a.stop();
+  b.play();
+  await shared.settle();
+  assert.equal(a.state, 'idle');
+  shared.assertOnlySpeaker(b, 'tab B');
+});
+
+test('a player replaced in the pause does not come back when the pause ends', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const shared = sharedEngine();
+  const a = shared.playerFor('A one', 'A two');
+  const b = shared.playerFor('tab B');
+  await reachGap(a, shared);
+
+  b.play();
+  await shared.settle();
+  assert.equal(a.state, 'idle', 'only one player reads at a time');
+  assert.deepEqual(a.current, { block: 1, sentence: 0 });
+
+  a.endGap();
+  await shared.settle();
+  shared.assertOnlySpeaker(b, 'tab B');
+  assert.equal(shared.synth.spoken.length, 2);
+});
+
+test('what a replaced player does next does not reach the player now speaking', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const actions = {
+    pause: (player) => player.pause(),
+    resume: (player) => player.resume(),
+    'load again': (player) => player.load([]),
+    'a new rate': (player) => player.setRate(2),
+    'a new voice': (player) => player.setVoice('uri:Elsa'),
+    'a jump': (player) => player.nextSentence(),
+    'a stop': (player) => player.stop(),
+    'a second stop': (player) => {
+      player.stop();
+      player.stop();
+    },
+  };
+  for (const [name, act] of Object.entries(actions)) {
+    const shared = sharedEngine();
+    const a = shared.playerFor('A one', 'A two');
+    const b = shared.playerFor('tab B');
+    a.play();
+    await shared.settle();
+
+    b.play();
+    act(a);
+    await shared.settle();
+    assert.equal(a.state, 'idle', name);
+    shared.assertOnlySpeaker(b, 'tab B');
+    assert.equal(shared.synth.spoken.length, 2, name);
+    b.stop();
+  }
+});
+
+test('a paused player stopped later does not cut the player now speaking', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const shared = sharedEngine();
+  const a = shared.playerFor('tab A');
+  const b = shared.playerFor('tab B');
+  a.play();
+  await shared.settle();
+  a.pause();
+  await shared.settle();
+
+  b.play();
+  await shared.settle();
+  assert.equal(a.state, 'paused');
+  const { cancels } = shared.synth;
+  a.stop();
+  await shared.settle();
+  assert.equal(shared.synth.cancels, cancels);
+  shared.assertOnlySpeaker(b, 'tab B');
+});
+
+test('the old player can take the engine back, and then the other one cannot cut it', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const shared = sharedEngine();
+  const a = shared.playerFor('tab A');
+  const b = shared.playerFor('tab B');
+  a.play();
+  await shared.settle();
+  b.play();
+  await shared.settle();
+
+  a.play();
+  b.stop();
+  await shared.settle();
+  assert.equal(b.state, 'idle');
+  shared.assertOnlySpeaker(a, 'tab A');
+  assert.equal(shared.synth.spoken.length, 3);
+});
+
+test('a new player stopped by a callback of the one it replaces never speaks', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { engine, synth } = queueingEngine();
+  const a = new SpeechPlayer({ engine, onState: (state) => state === 'idle' && b.stop() });
+  const b = new SpeechPlayer({ engine });
+  a.load(blocksOf('tab A'));
+  b.load(blocksOf('tab B'));
+  a.play();
+  await flush();
+
+  b.play();
+  await flush();
+  assert.equal(a.state, 'idle');
+  assert.equal(b.state, 'idle');
+  assert.deepEqual(synth.spoken.map((u) => u.text), ['tab A']);
+  assert.equal(synth.speaking, false, 'the old speech must not go on with nobody left to stop it');
+});
+
+test('a replaced player that starts again from its callback keeps the engine, once', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { engine, synth } = queueingEngine();
+  let again = true;
+  const a = new SpeechPlayer({
+    engine,
+    onState: (state) => {
+      if (state === 'idle' && again) {
+        again = false;
+        a.play();
+      }
+    },
+  });
+  const b = new SpeechPlayer({ engine });
+  a.load(blocksOf('tab A'));
+  b.load(blocksOf('tab B'));
+  a.play();
+  await flush();
+
+  b.play();
+  await flush();
+  await flush();
+  assert.equal(a.state, 'playing');
+  assert.equal(b.state, 'idle');
+  assert.equal(synth.speaking, true);
+  assert.deepEqual(synth.spoken.map((u) => u.text), ['tab A', 'tab A']);
+
+  b.stop();
+  await flush();
+  assert.equal(a.state, 'playing');
+  assert.equal(synth.speaking, true);
+});
+
+test('the player that ended leaves the engine free for the next one', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const shared = sharedEngine();
+  const a = shared.playerFor('tab A');
+  const b = shared.playerFor('tab B');
+  a.play();
+  await shared.settle();
+  shared.synth.finishCurrent();
+  await shared.settle();
+  assert.equal(a.state, 'ended');
+  const { cancels } = shared.synth;
+
+  b.play();
+  await shared.settle();
+  assert.equal(shared.synth.cancels, cancels);
+  assert.equal(a.state, 'ended', 'a player that has finished is not told to stop');
+  shared.assertOnlySpeaker(b, 'tab B');
+});
+
+test('players on different engines do not replace each other', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const a = new SpeechPlayer({ engine: queueingEngine().engine });
+  const b = new SpeechPlayer({ engine: queueingEngine().engine });
+  a.load(blocksOf('tab A'));
+  b.load(blocksOf('tab B'));
+  a.play();
+  b.play();
+  await flush();
+  assert.equal(a.state, 'playing');
+  assert.equal(b.state, 'playing');
+});

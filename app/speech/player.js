@@ -13,6 +13,9 @@
  *   onState(state)                           'idle'|'playing'|'paused'|'ended'
  *   onError(code)                            ERROR_ENGINE or ERROR_NOTHING_TO_READ
  * A callback that throws is logged: it stops neither the reading nor whoever moved the position.
+ *
+ * Players can share an engine. It says one thing at a time, so a player that starts first stops the one
+ * reading, which goes idle at once: from then on it has nothing to stop and nothing to say.
  */
 
 export const HEADING_PAUSE_MS = 600;
@@ -65,6 +68,9 @@ function nearestLevel(rate) {
 const isHeading = (block) => block.kind === 'heading';
 const defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const noop = () => {};
+
+/** The player in the 'playing' state on each engine: there is one at most. */
+const readers = new WeakMap();
 
 export class SpeechPlayer {
   #engine;
@@ -212,6 +218,7 @@ export class SpeechPlayer {
   #setState(state) {
     if (state === this.#state) return;
     this.#state = state;
+    if (state !== 'playing' && readers.get(this.#engine) === this) readers.delete(this.#engine);
     this.#guarded(this.#onState, state);
   }
 
@@ -294,10 +301,11 @@ export class SpeechPlayer {
     clearTimeout(this.#watchdog);
   }
 
+  /** During a gap nothing is being spoken, and what the engine says by then is not this player's to cut. */
   #silence() {
-    const wasPlaying = this.#state === 'playing';
+    const speaking = this.#state === 'playing' && !this.#upcoming;
     this.#cancelRun();
-    if (wasPlaying) this.#guarded(() => this.#engine.stop());
+    if (speaking) this.#guarded(() => this.#engine.stop());
   }
 
   /** Stops on purpose. A gap cut short counts as over, so the sentence just heard is not repeated. */
@@ -319,6 +327,13 @@ export class SpeechPlayer {
   #start() {
     this.#cancelRun();
     const run = this.#run;
+    const reader = readers.get(this.#engine);
+    if (reader !== this) {
+      reader?.#halt('idle');
+      // A callback of the player just halted may have stopped this one, or started another.
+      if (run !== this.#run || readers.has(this.#engine)) return;
+      readers.set(this.#engine, this);
+    }
     this.#setState('playing');
     this.#read(run).catch((error) => {
       console.error(error);

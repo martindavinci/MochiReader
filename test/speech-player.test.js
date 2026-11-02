@@ -556,6 +556,19 @@ test('stop keeps the position and silences the engine', async () => {
   assert.deepEqual(h.errors, []);
 });
 
+test('stopping or pausing in a gap leaves the engine alone', async () => {
+  for (const halt of ['stop', 'pause']) {
+    const { sleep } = holdingSleep();
+    const h = harness([item('Uno.'), item('Due.')], { sleep });
+    h.player.play();
+    await h.advance();
+    h.player[halt]();
+    await flush();
+    assert.equal(h.engine.stops, 0, halt);
+    assert.deepEqual(h.player.current, { block: 1, sentence: 0 });
+  }
+});
+
 test('load starts from a saved position and keeps it inside the document', () => {
   const blocks = [para('Uno.', 'Due.'), para(), para('Tre.')];
   const at = (position) => harness(blocks, { at: position }).player.current;
