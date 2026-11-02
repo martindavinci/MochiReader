@@ -9,19 +9,25 @@ import { isEntryPoint } from './is-entry-point.mjs';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const TAG_PREFIX = 'v';
+const MISSING_VERSION = '(missing)';
 
-export function checkTag(tag, versions) {
+export function checkTag(tag, declared) {
   if (!tag.startsWith(TAG_PREFIX)) {
     throw new Error(`tag ${tag} does not start with "${TAG_PREFIX}"`);
   }
-  if (versions.length === 0) {
+  if (declared.length === 0) {
     throw new Error('no versions to compare with the tag');
   }
   const expected = tag.slice(TAG_PREFIX.length);
-  const different = versions.filter((version) => version !== expected);
+  const different = declared.filter(({ version }) => version !== expected);
   if (different.length > 0) {
-    throw new Error(`tag ${tag} does not match version(s) ${different.join(', ')}`);
+    const lines = different.map(({ file, version }) => `  ${file}: ${version || MISSING_VERSION}`);
+    throw new Error([`tag ${tag} does not match:`, ...lines].join('\n'));
   }
+}
+
+function jsonVersion(text) {
+  return JSON.parse(text).version;
 }
 
 function cargoPackageVersion(toml) {
@@ -34,13 +40,17 @@ function cargoPackageVersion(toml) {
   return undefined;
 }
 
+const VERSION_FILES = [
+  { file: 'package.json', parse: jsonVersion },
+  { file: 'src-tauri/tauri.conf.json', parse: jsonVersion },
+  { file: 'src-tauri/Cargo.toml', parse: cargoPackageVersion },
+];
+
 export function readVersions(root) {
-  const read = (...path) => readFileSync(join(root, ...path), 'utf8');
-  return [
-    JSON.parse(read('package.json')).version,
-    JSON.parse(read('src-tauri', 'tauri.conf.json')).version,
-    cargoPackageVersion(read('src-tauri', 'Cargo.toml')),
-  ];
+  return VERSION_FILES.map(({ file, parse }) => ({
+    file,
+    version: parse(readFileSync(join(root, file), 'utf8')),
+  }));
 }
 
 if (isEntryPoint(import.meta.url)) {
