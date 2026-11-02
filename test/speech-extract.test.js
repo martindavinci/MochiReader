@@ -5,6 +5,9 @@ import { parseHTML } from 'linkedom';
 import { extractBlocks } from '../app/speech/extract.js';
 import { hostName } from '../app/speech/hostname.js';
 
+// Well above the linear time, well below the quadratic one, on a loaded machine too.
+const HUGE_BLOCK_LIMIT_MS = 3000;
+
 // linkedom leaves document.body empty unless the markup is a full document.
 const bodyOf = (html) => parseHTML(`<!doctype html><html><body>${html}</body></html>`).document.body;
 const blocks = (html, o = {}) => extractBlocks(bodyOf(html), { sourceMode: 'skip', lang: 'it', ...o });
@@ -81,6 +84,106 @@ test('URLs do not leave empty brackets or swallow punctuation', () => {
   assert.deepEqual(texts('<p><a href="https://e.org/">e.org</a></p>'), []);
 });
 
+test('URLs without a scheme are skipped', () => {
+  assert.deepEqual(
+    texts('<p>Vedi example.com/x e <a href="https://www.example.com/x">example.com</a> ok.</p>'),
+    ['Vedi e ok.'],
+  );
+  assert.deepEqual(texts('<p>Vedi bit.ly/abc, x.com/a/b?s=12 e docs.rs/x ora.</p>'), ['Vedi, e ora.']);
+  assert.deepEqual(texts('<p>Vai su example.com, bbc.co.uk o abc.com.au oggi.</p>'), ['Vai su, o oggi.']);
+  assert.deepEqual(texts('<p>Apri (example.com:8080/x) e Example.com/y ora.</p>'), ['Apri e ora.']);
+  assert.deepEqual(texts('<p>Usi sito.it? Bene.</p>'), ['Usi?', 'Bene.']);
+});
+
+test('URLs of any scheme and case are skipped', () => {
+  assert.deepEqual(texts('<p>Vedi HTTP://X.IT/a ok, ftp://x.it/a e mailto:a@b.it.</p>'), ['Vedi ok, e.']);
+  assert.deepEqual(texts('<p>Vedi file:///c/x, tel:+39061234 o magnet:?xt=urn:btih:abc ora.</p>'), ['Vedi, o ora.']);
+});
+
+test('links whose text is an address are skipped, whatever the scheme', () => {
+  assert.deepEqual(texts('<p>Vedi <a href="ftp://x.it/a">ftp://x.it/a</a> ok.</p>'), ['Vedi ok.']);
+  assert.deepEqual(texts('<p>Vedi <a href="mailto:a@b.it">mailto:a@b.it</a> ok.</p>'), ['Vedi ok.']);
+  assert.deepEqual(texts('<p>Scrivi a <a href="mailto:a@b.it">a@b.it</a> ok.</p>'), ['Scrivi a ok.']);
+  assert.deepEqual(texts('<p>Vedi <a href="https://www.amazon.com/x">Amazon.com</a> ok.</p>'), ['Vedi ok.']);
+  assert.deepEqual(texts('<p>Vedi <a href="https://x.it">x.it/</a> ok.</p>'), ['Vedi ok.']);
+  assert.deepEqual(texts('<p>Vedi <a href="https://e.org/a">HTTPS://E.ORG/A</a> ok.</p>'), ['Vedi ok.']);
+});
+
+test('names that only look like hosts are read', () => {
+  const plain = 'Usa Node.js, three.js, io.js e GLM-5.3 con v0.12 ora.';
+  assert.deepEqual(texts(`<p>${plain}</p>`), [plain]);
+  assert.deepEqual(texts('<p>Amazon.com annuncia utili.</p>'), ['Amazon.com annuncia utili.']);
+  assert.deepEqual(texts('<p>Apri README.md e docs/main.rs, poi Node.js/Deno ora.</p>'), ['Apri README.md e docs/main.rs, poi Node.js/Deno ora.']);
+  assert.deepEqual(texts('<p>Prova package.json/yarn.lock ora.</p>'), ['Prova package.json/yarn.lock ora.']);
+  assert.deepEqual(texts('<p>Scrivi a a@b.it oggi.</p>'), ['Scrivi a a@b.it oggi.']);
+  assert.equal(texts('<p>Ciao.Poi basta.</p>').join(' '), 'Ciao.Poi basta.');
+  assert.deepEqual(texts('<p>Lavoro in Hotel:123 oggi.</p>'), ['Lavoro in Hotel:123 oggi.']);
+});
+
+test('links with a relative target read their text, even when it equals the target', () => {
+  assert.deepEqual(texts('<p>Vedi <a href="note">note</a> oggi.</p>'), ['Vedi note oggi.']);
+  assert.deepEqual(
+    texts('<p>Vedi <a href="Nota">Nota</a> e <a href="README.md">README.md</a> oggi.</p>'),
+    ['Vedi Nota e README.md oggi.'],
+  );
+  assert.deepEqual(texts('<p>See <a href="LICENSE">LICENSE</a>.</p>', { lang: 'en' }), ['See LICENSE.']);
+  assert.deepEqual(texts('<p>See <a href="CHANGELOG.md">CHANGELOG.md</a>.</p>', { lang: 'en' }), ['See CHANGELOG.md.']);
+  assert.deepEqual(texts('<p>Vedi <a href="#sezione">sezione</a> ora.</p>'), ['Vedi sezione ora.']);
+  assert.deepEqual(texts('<p>Vedi <a href="mochi-doc:abc">abc</a> ora.</p>'), ['Vedi abc ora.']);
+  assert.deepEqual(texts('<p>Leggi <a href="https://x.dev">Node.js</a> ora.</p>'), ['Leggi Node.js ora.']);
+});
+
+test('comments are never read', () => {
+  assert.deepEqual(texts('<p>Uno <!-- nascosto --> due.</p><!-- blocco -->'), ['Uno due.']);
+  assert.deepEqual(texts('<!-- tutto -->'), []);
+  assert.deepEqual(texts('<p>Uno &lt;!-- nascosto --&gt; due.</p>'), ['Uno due.']);
+  assert.deepEqual(texts('<p>Uno &lt;!--https://e.org--&gt; due.</p>'), ['Uno due.']);
+  assert.deepEqual(texts('<p>Uno %%nascosto%% due.</p>'), ['Uno due.']);
+});
+
+test('Markdown tokens that survive rendering are never read', () => {
+  assert.deepEqual(
+    texts('<p>Usa ==evidenziato== e **non chiuso e __x__ fine ~~y~~.</p>'),
+    ['Usa evidenziato e non chiuso e x fine y.'],
+  );
+  assert.deepEqual(texts('<p>**Nota: **testo</p>'), ['Nota: testo']);
+  assert.deepEqual(texts('<p>*Nota:*testo e `aperto ora.</p>'), ['Nota:testo e aperto ora.']);
+  assert.deepEqual(texts('<p>** a parte ** e ***tre*** e **_misti_**.</p>'), ['a parte e tre e misti.']);
+  assert.deepEqual(texts('<p>Vedi (==qui==) ora, _x_, e (**) basta.</p>'), ['Vedi (qui) ora, x, e basta.']);
+  assert.deepEqual(texts('<p>**https://e.org/x** e ==example.com== ora.</p>'), ['e ora.']);
+  assert.deepEqual(texts('<p>**</p><p>== ==</p><p>---</p>'), []);
+});
+
+test('Markdown links that survive rendering read only their text', () => {
+  assert.deepEqual(texts('<p>Vedi [la guida](https://e.org/a b) ora.</p>'), ['Vedi la guida ora.']);
+  assert.deepEqual(texts('<p>Vedi ![foto](a b.png) ora.</p>'), ['Vedi foto ora.']);
+  assert.deepEqual(texts('<p>Testo[^nota] fine e [uno] resta.</p>'), ['Testo fine e [uno] resta.']);
+});
+
+test('characters that are not tokens stay', () => {
+  const plain = 'La snake_case e a=b, 2*3 con a = b e 2 * 3 restano.';
+  assert.deepEqual(texts(`<p>${plain}</p>`), [plain]);
+});
+
+test('inline code keeps every character', () => {
+  assert.deepEqual(
+    texts('<p>Usa <code>**kwargs</code> con <code>a == b</code> e <code>==</code> o <code>%%x%%</code> ora.</p>'),
+    ['Usa **kwargs con a == b e == o %%x%% ora.'],
+  );
+  assert.deepEqual(texts('<p>==<code>x</code>== ora.</p>'), ['x ora.']);
+});
+
+test('removed tokens do not shift sentence positions', () => {
+  const body = bodyOf('<p>==Prima== frase. **Seconda frase.</p>');
+  const [block] = extractBlocks(body, { sourceMode: 'skip', lang: 'it' });
+  const [first, second] = block.sentences;
+  const node = body.firstChild.firstChild;
+  assert.equal(first.text, 'Prima frase.');
+  assert.equal(node.data.slice(first.start.offset, first.end.offset), 'Prima== frase.');
+  assert.equal(second.text, 'Seconda frase.');
+  assert.equal(node.data.slice(second.start.offset, second.end.offset), 'Seconda frase.');
+});
+
 test('tags and emoji are skipped', () => {
   assert.deepEqual(texts('<p>Ciao 🎉 <span class="tag" data-noread>#x</span> mondo.</p>'), ['Ciao mondo.']);
   assert.deepEqual(texts('<p>Pronti \u{1F469}\u{1F3FD}‍\u{1F4BB} via \u{1F1EE}\u{1F1F9} ok 1️⃣ fine.</p>'), ['Pronti via ok fine.']);
@@ -109,11 +212,22 @@ test('EPUB notes that are not body text are skipped', () => {
   assert.deepEqual(texts('<p>Testo.</p><aside>Riquadro normale.</aside>'), ['Testo.', 'Riquadro normale.']);
 });
 
-test('the rendered Markdown footnote list is not read', () => {
+test('the text of Markdown notes is read as a normal list', () => {
   const html = '<p>Testo<sup class="footnote-ref"><a href="#fn-1" id="fnref-1">1</a></sup>.</p>'
     + '<section class="footnotes"><ol><li id="fn-1"><p>Nota. <a href="#fnref-1" class="footnote-backref">↩</a></p></li></ol></section>';
-  assert.deepEqual(texts(html), ['Testo.']);
-  assert.deepEqual(texts('<p>Testo.</p><ol><li id="fn-1"><p>Nota.</p></li></ol>'), ['Testo.']);
+  assert.deepEqual(texts(html), ['Testo.', 'Nota.']);
+  assert.deepEqual(texts('<p>Testo<sup class="footnote-ref"><a href="#fn-nota" id="fnref-nota">1</a></sup>.</p>'), ['Testo.']);
+  assert.deepEqual(texts('<ol><li id="fn-1"><p>Nota. <a href="#fnref-1" class="footnote-backref">↩</a></p></li></ol>'), ['Nota.']);
+  assert.deepEqual(
+    texts('<ol><li id="fn-1"><p>Nota. <a href="#fnref-1-2" class="footnote-backref">↩<sup class="footnote-ref">2</sup></a></p></li></ol>'),
+    ['Nota.'],
+  );
+});
+
+test('a superscript holding only a link to an anchor is skipped, whatever its text', () => {
+  assert.deepEqual(texts('<p>Testo<sup><a href="#n">nota</a></sup>.</p>'), ['Testo.']);
+  assert.deepEqual(texts('<p>Testo<sup>vedi <a href="#n">nota</a></sup>.</p>'), ['Testovedi nota.']);
+  assert.deepEqual(texts('<p>Testo<sup><a href="https://e.org/#n">nota</a></sup>.</p>'), ['Testonota.']);
 });
 
 test('tables are read cell by cell, marking the row end', () => {
@@ -161,6 +275,13 @@ test('a huge unpunctuated block is read in pieces that all keep a position', () 
     assert.ok(s.text.length <= 500);
     assert.equal(s.start.node.nodeType, 3);
   }
+});
+
+test('a huge hyphenated block is not rescanned for URLs', () => {
+  const started = performance.now();
+  const [block] = blocks(`<p>${'a-'.repeat(100000)}</p>`);
+  assert.ok(block.sentences.length > 1);
+  assert.ok(performance.now() - started < HUGE_BLOCK_LIMIT_MS);
 });
 
 test('every sentence keeps its position in the DOM', () => {

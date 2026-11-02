@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { hostName } from './hostname.js';
+import { BARE_URLS, hostName, isUrlText, namesAddress } from './hostname.js';
 import { splitSentences } from './sentences.js';
 
 /**
@@ -29,20 +29,23 @@ const BLOCK_TAGS = new Set(['address', 'article', 'aside', 'blockquote', 'body',
 const NOTE_EPUB_TYPES = new Set(['footnote', 'footnotes', 'endnote', 'endnotes', 'rearnote', 'rearnotes', 'note',
   'noteref', 'pagebreak']);
 const NOTE_ROLES = new Set(['doc-footnote', 'doc-endnote', 'doc-endnotes', 'doc-noteref', 'doc-backlink', 'doc-pagebreak']);
-const NOTE_CLASSES = new Set(['footnotes', 'footnote-ref', 'footnote-backref']);
-const NOTE_ATTRIBUTES = ['data-footnotes', 'data-footnote-ref', 'data-footnote-backref'];
+const NOTE_CLASSES = new Set(['footnote-ref', 'footnote-backref']);
+const NOTE_ATTRIBUTES = ['data-footnote-ref', 'data-footnote-backref'];
 
-const RENDERED_NOTE_ID = /^fn-/;
 const NOTE_MARKER = /^[[(]?(\d{1,4}|[*†‡]+)[\])]?$/;
 const BRACKETED = /^[[(]/;
 const HEADING = /^h([1-6])$/;
-const URL_LIKE = /^(https?:\/\/|www\.)\S*$/i;
-const HTTP_SCHEME = /^https?:\/\//i;
 const IMAGE_FILE = /\.(png|jpe?g|gif|webp|svg|bmp|avif|tiff?)$/i;
 const CODE_LIKE_WORD = /^\S*[_\d]\S*$/;
 const READABLE = /[\p{L}\p{N}]/u;
 
-const BARE_URL = /(?:https?:\/\/|www\.)[^\s<>]*[^\s<>.,;:!?)\]'"»]/gi;
+const LITERAL_COMMENTS = [/<!--[\s\S]*?(?:-->|$)/g, /%%[\s\S]*?%%/g];
+const LITERAL_LINK_MARKS = /!?\[(?=[^[\]]*\]\([^)]*\))|\](?<=\[[^[\]]*\])\([^)]*\)/g;
+const UNRESOLVED_NOTE = /\[\^[^\]\s]+\]/g;
+const DELIMITERS = /[*_`~=]+/g;
+const STANDALONE_OPERATOR = /^[*=~]$/;
+const WORD_CHARACTER = /[\p{L}\p{N}]/u;
+const SPACE = /\s/;
 const KEYCAP_EMOJI = /[0-9#*]️?⃣/gu;
 const EMOJI = /[\p{Extended_Pictographic}\p{Emoji_Modifier}\p{Regional_Indicator}‍️⃣]/gu;
 const INVISIBLE = /[­​⁠﻿]/g;
@@ -63,10 +66,16 @@ function isNoteMarker(link) {
   return inSuperscript || BRACKETED.test(text);
 }
 
+function isNoteSuperscript(sup) {
+  const [link] = sup.children;
+  return sup.children.length === 1 && link.localName === 'a'
+    && (link.getAttribute('href') ?? '').startsWith('#')
+    && sup.textContent.trim() === link.textContent.trim();
+}
+
 function isUrlLink(link) {
   const text = link.textContent.trim();
-  const href = (link.getAttribute('href') ?? '').replace(HTTP_SCHEME, '').replace(/\/$/, '');
-  return URL_LIKE.test(text) || (text !== '' && text.replace(/\/$/, '') === href);
+  return isUrlText(text) || namesAddress(text, link.getAttribute('href') ?? '');
 }
 
 function isSkipped(el) {
@@ -77,12 +86,12 @@ function isSkipped(el) {
   if (hasToken(el, 'epub:type', NOTE_EPUB_TYPES) || hasToken(el, 'role', NOTE_ROLES)) return true;
   if (hasToken(el, 'class', NOTE_CLASSES)) return true;
   if (NOTE_ATTRIBUTES.some((name) => el.hasAttribute(name))) return true;
-  if (tag === 'li' && RENDERED_NOTE_ID.test(el.getAttribute('id') ?? '')) return true;
+  if (tag === 'sup' && isNoteSuperscript(el)) return true;
   return tag === 'a' && (isNoteMarker(el) || isUrlLink(el));
 }
 
 function isRealAlt(alt) {
-  return READABLE.test(alt) && !URL_LIKE.test(alt) && !IMAGE_FILE.test(alt) && !CODE_LIKE_WORD.test(alt);
+  return READABLE.test(alt) && !isUrlText(alt) && !IMAGE_FILE.test(alt) && !CODE_LIKE_WORD.test(alt);
 }
 
 /** The text of a block, with the DOM position of every UTF-16 unit. */
@@ -91,6 +100,11 @@ class TextRun {
   nodes = [];
   offsets = [];
   links = [];
+  code = [];
+
+  isCode(index) {
+    return this.code.some(({ from, to }) => from <= index && index < to);
+  }
 
   #push(text, node, offsetOf) {
     for (let i = 0; i < text.length; i += 1) {
@@ -137,12 +151,16 @@ class TextRun {
       for (const child of el.childNodes) this.addInline(child);
       if (BLOCK_TAGS.has(tag)) this.addSpace();
       if (tag === 'a') this.links.push({ from, to: this.text.length, href: el.getAttribute('href') ?? '' });
+      if (tag === 'code') this.code.push({ from, to: this.text.length });
     }
   }
 }
 
-/** Removes matches from text, a string whose map gives each UTF-16 unit's index in its TextRun. */
-function removeMatches({ text, map }, pattern) {
+/**
+ * Removes matches from text, a string whose map gives each UTF-16 unit's index in its TextRun.
+ * With a filter, only the matches it accepts.
+ */
+function removeMatches({ text, map }, pattern, accepts = () => true) {
   let kept = '';
   const keptMap = [];
   let from = 0;
@@ -151,6 +169,7 @@ function removeMatches({ text, map }, pattern) {
     for (let i = from; i < to; i += 1) keptMap.push(map[i]);
   };
   for (const match of text.matchAll(pattern)) {
+    if (!accepts(match)) continue;
     keep(match.index);
     from = match.index + match[0].length;
   }
@@ -158,11 +177,30 @@ function removeMatches({ text, map }, pattern) {
   return { text: kept, map: keptMap };
 }
 
+/**
+ * Whether delimiters left in the text are a Markdown token. One between two word characters
+ * (snake_case, a=b, 2*3) or a spaced operator (a = b) belongs to the sentence.
+ */
+function isDelimiterToken({ 0: delimiters, index }, text) {
+  if (delimiters.length > 1) return true;
+  const before = text[index - 1] ?? ' ';
+  const after = text[index + 1] ?? ' ';
+  if (WORD_CHARACTER.test(before) && WORD_CHARACTER.test(after)) return false;
+  return !(SPACE.test(before) && SPACE.test(after) && STANDALONE_OPERATOR.test(delimiters));
+}
+
 function normalize(run) {
   let clean = { text: run.text, map: Array.from(run.nodes.keys()) };
-  for (const pattern of [BARE_URL, KEYCAP_EMOJI, EMOJI, INVISIBLE, EMPTY_BRACKETS]) {
-    clean = removeMatches(clean, pattern);
-  }
+  // Inline code is read as written, so what looks like Markdown in it stays.
+  const removeOutsideCode = (pattern, accepts = () => true) => {
+    const { text, map } = clean;
+    clean = removeMatches(clean, pattern, (match) => !run.isCode(map[match.index]) && accepts(match, text));
+  };
+  for (const pattern of LITERAL_COMMENTS) removeOutsideCode(pattern);
+  for (const pattern of [...BARE_URLS, KEYCAP_EMOJI, EMOJI, INVISIBLE]) clean = removeMatches(clean, pattern);
+  for (const pattern of [LITERAL_LINK_MARKS, UNRESOLVED_NOTE]) removeOutsideCode(pattern);
+  removeOutsideCode(DELIMITERS, isDelimiterToken);
+  clean = removeMatches(clean, EMPTY_BRACKETS);
   clean.text = clean.text.replace(/\s/g, ' ');
   for (const pattern of [REPEATED_SPACE, OUTER_SPACE, SPACE_BEFORE_PUNCTUATION]) {
     clean = removeMatches(clean, pattern);
