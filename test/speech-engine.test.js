@@ -2,6 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { WebSpeechEngine, VOICES_WAIT_MS } from '../app/speech/engine-web.js';
+import { SpeechPlayer } from '../app/speech/player.js';
 
 const voice = (name, lang, localService = true) => ({ voiceURI: `uri:${name}`, name, lang, localService });
 const ELSA = voice('Elsa', 'it-IT');
@@ -166,4 +167,85 @@ test('without a language it takes the first local voice and its language', async
   engine.speak('Hi.', { voiceId: null, rate: 1, lang: null });
   assert.equal(synth.spoken[0].voice, ZIRA);
   assert.equal(synth.spoken[0].lang, 'en-US');
+});
+
+const flush = () => new Promise((resolve) => setImmediate(resolve));
+
+function voicesArrive(synth, list) {
+  synth.list = list;
+  synth.dispatchEvent(new Event('voiceschanged'));
+}
+
+test('speak waits for the voice list when it arrives late', async () => {
+  const { engine, synth } = setup([]);
+  const done = engine.speak('Ciao.', { voiceId: null, rate: 1, lang: 'it' });
+  assert.equal(synth.spoken.length, 0);
+  voicesArrive(synth, [ELSA]);
+  await flush();
+  assert.equal(synth.spoken[0].voice, ELSA);
+  synth.spoken[0].onend();
+  assert.equal(await done, 'end');
+});
+
+test('speak does not wait forever for a voice list that never arrives', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { engine, synth } = setup([]);
+  const done = engine.speak('Ciao.', { voiceId: null, rate: 1, lang: 'it' });
+  t.mock.timers.tick(VOICES_WAIT_MS - 1);
+  await flush();
+  assert.equal(synth.spoken.length, 0);
+  t.mock.timers.tick(1);
+  assert.equal(await done, 'error');
+  assert.equal(synth.spoken.length, 0);
+});
+
+test('a late list without a usable voice resolves as error', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { engine, synth } = setup([]);
+  const done = engine.speak('Ciao.', { voiceId: null, rate: 1, lang: 'it' });
+  voicesArrive(synth, [ONLINE, ZIRA]);
+  assert.equal(await done, 'error');
+  assert.equal(synth.spoken.length, 0);
+});
+
+test('stop while waiting for the voices resolves as stopped and speaks nothing later', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { engine, synth } = setup([]);
+  const done = engine.speak('Ciao.', { voiceId: null, rate: 1, lang: 'it' });
+  engine.stop();
+  assert.equal(await done, 'stopped');
+  voicesArrive(synth, [ELSA]);
+  await flush();
+  assert.equal(synth.spoken.length, 0);
+});
+
+test('a new speak while waiting for the voices replaces the old one', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { engine, synth } = setup([]);
+  const first = engine.speak('Uno.', { voiceId: null, rate: 1, lang: 'it' });
+  const second = engine.speak('Due.', { voiceId: null, rate: 1, lang: 'it' });
+  assert.equal(await first, 'stopped');
+  voicesArrive(synth, [ELSA]);
+  await flush();
+  assert.deepEqual(synth.spoken.map((u) => u.text), ['Due.']);
+  synth.spoken[0].onend();
+  assert.equal(await second, 'end');
+});
+
+test('a player started before the voices arrive reads as soon as they do', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { engine, synth } = setup([]);
+  const errors = [];
+  const player = new SpeechPlayer({ engine, onError: (code) => errors.push(code) });
+  player.load([{ kind: 'para', line: null, sentences: [{ text: 'Ciao.', start: null, end: null }] }]);
+  player.setLang('it');
+  player.play();
+  voicesArrive(synth, [ELSA]);
+  await flush();
+  assert.equal(player.state, 'playing');
+  assert.deepEqual(errors, []);
+  assert.equal(synth.spoken[0].voice, ELSA);
+  synth.spoken[0].onend();
+  await flush();
+  assert.equal(player.state, 'ended');
 });

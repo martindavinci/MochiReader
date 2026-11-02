@@ -557,3 +557,264 @@ test('a callback that stops the player keeps the sentence from being spoken', ()
   assert.equal(player.state, 'idle');
   assert.equal(engine.calls.length, 0);
 });
+
+const holdingSleep = () => {
+  let wake;
+  return {
+    sleep: () =>
+      new Promise((resolve) => {
+        wake = resolve;
+      }),
+    wake: () => wake(),
+  };
+};
+
+test('next section from a title with only deeper sections goes to the first of them', async () => {
+  const h = harness([
+    heading('Titolo', 1),
+    para('Intro.'),
+    heading('ai', 2),
+    para('Dentro ai.'),
+    heading('crypto', 2),
+    para('Dentro crypto.'),
+  ]);
+  h.player.play();
+  h.player.nextSection();
+  assert.equal(h.engine.lastText, 'ai');
+  assert.equal(h.player.state, 'playing');
+  h.player.nextSection();
+  assert.equal(h.engine.lastText, 'crypto', 'a heading of the same level still wins');
+  h.player.nextSection();
+  await flush();
+  assert.equal(h.player.state, 'ended');
+  assert.deepEqual(h.player.current, { block: 5, sentence: 0 });
+});
+
+test('next section prefers a heading of a level not lower over a nearer deeper one', () => {
+  const h = harness([heading('A', 2), heading('A1', 3), heading('B', 2)]);
+  h.player.play();
+  h.player.nextSection();
+  assert.equal(h.engine.lastText, 'B');
+});
+
+test('during a gap the position stays on the sentence just heard', async () => {
+  const { sleep, wake } = holdingSleep();
+  const h = harness([item('Uno.'), item('Due.')], { sleep });
+  h.player.play();
+  await h.advance();
+  assert.deepEqual(h.player.current, { block: 0, sentence: 0 });
+  assert.deepEqual(h.moves, [{ block: 0, sentence: 0 }]);
+  wake();
+  await flush();
+  assert.deepEqual(h.player.current, { block: 1, sentence: 0 });
+  assert.deepEqual(h.moves, [{ block: 0, sentence: 0 }, { block: 1, sentence: 0 }]);
+  assert.equal(h.engine.lastText, 'Due.');
+});
+
+test('next sentence during a gap speaks the sentence not heard yet', async () => {
+  const { sleep, wake } = holdingSleep();
+  const h = harness([item('Uno.'), item('Due.'), item('Tre.')], { sleep });
+  h.player.play();
+  await h.advance();
+  h.player.nextSentence();
+  assert.equal(h.engine.lastText, 'Due.');
+  assert.deepEqual(h.player.current, { block: 1, sentence: 0 });
+
+  wake();
+  await flush();
+  assert.equal(h.engine.calls.length, 2, 'the expired gap does nothing');
+  assert.deepEqual(h.player.current, { block: 1, sentence: 0 });
+});
+
+test('next sentence during the last gap does not end the document', async () => {
+  const { sleep } = holdingSleep();
+  const h = harness([item('Uno.'), item('Due.')], { sleep });
+  h.player.play();
+  await h.advance();
+  h.player.nextSentence();
+  await flush();
+  assert.equal(h.player.state, 'playing');
+  assert.equal(h.engine.lastText, 'Due.');
+});
+
+test('next section during a gap does not skip a section', async () => {
+  const { sleep } = holdingSleep();
+  const h = harness(
+    [heading('A', 2), para('a1.'), heading('B', 2), para('b1.'), heading('C', 2), para('c1.')],
+    { sleep, at: { block: 1, sentence: 0 } },
+  );
+  h.player.play();
+  await h.advance();
+  h.player.nextSection();
+  assert.equal(h.engine.lastText, 'B');
+});
+
+test('previous sentence during a gap counts from the sentence just heard', async () => {
+  const { sleep } = holdingSleep();
+  const h = harness([item('Uno.'), item('Due.'), item('Tre.')], { sleep, at: { block: 1, sentence: 0 } });
+  h.player.play();
+  await h.advance();
+  h.player.prevSentence();
+  assert.equal(h.engine.lastText, 'Uno.');
+});
+
+test('previous section during the gap after a heading goes to the heading before it', async () => {
+  const { sleep } = holdingSleep();
+  const h = harness([heading('A', 2), para('a1.'), heading('B', 2), para('b1.')], {
+    sleep,
+    at: { block: 2, sentence: 0 },
+  });
+  h.player.play();
+  await h.advance();
+  h.player.prevSection();
+  assert.equal(h.engine.lastText, 'A');
+});
+
+test('pause and stop during a gap announce the next sentence and do not repeat the last', async () => {
+  for (const halt of ['pause', 'stop']) {
+    const { sleep } = holdingSleep();
+    const h = harness([item('Uno.'), item('Due.')], { sleep });
+    h.player.play();
+    await h.advance();
+    h.player[halt]();
+    assert.deepEqual(h.player.current, { block: 1, sentence: 0 });
+    assert.deepEqual(h.moves.at(-1), { block: 1, sentence: 0 });
+    h.player.play();
+    assert.equal(h.engine.lastText, 'Due.');
+  }
+});
+
+test('changing rate or voice during a gap applies from the next sentence without repeating', async () => {
+  const { sleep, wake } = holdingSleep();
+  const h = harness([item('Uno.'), item('Due.')], { sleep });
+  h.player.play();
+  await h.advance();
+  h.player.setRate(2);
+  h.player.setVoice('elsa');
+  await flush();
+  assert.equal(h.engine.stops, 0);
+  assert.equal(h.engine.calls.length, 1, 'the gap goes on');
+  wake();
+  await flush();
+  assert.deepEqual(h.engine.calls.at(-1), { text: 'Due.', voiceId: 'elsa', rate: 2, lang: null });
+});
+
+test('load during a gap forgets the sentence that was coming', async () => {
+  const { sleep, wake } = holdingSleep();
+  const h = harness([item('Uno.'), item('Due.')], { sleep });
+  h.player.play();
+  await h.advance();
+  h.player.load([para('Altro.'), para('Ancora.')], { block: 1, sentence: 0 });
+  wake();
+  await flush();
+  assert.deepEqual(h.player.current, { block: 1, sentence: 0 });
+  assert.equal(h.player.state, 'idle');
+  assert.equal(h.engine.calls.length, 1);
+});
+
+test('a throwing onSentence is logged and the reading goes on', async (t) => {
+  const logged = t.mock.method(console, 'error', () => {});
+  const engine = fakeEngine();
+  const errors = [];
+  const player = new SpeechPlayer({
+    engine,
+    onSentence: () => {
+      throw new Error('IndexSizeError');
+    },
+    onError: (code) => errors.push(code),
+  });
+  player.load([para('Uno.')]);
+  player.play();
+  assert.deepEqual(engine.calls.map((c) => c.text), ['Uno.']);
+  assert.equal(player.state, 'playing');
+  engine.answer('end');
+  await flush();
+  assert.equal(player.state, 'ended');
+  assert.deepEqual(errors, []);
+  assert.equal(logged.mock.callCount(), 1);
+});
+
+test('a throwing onSentence does not reach whoever moved the position', (t) => {
+  t.mock.method(console, 'error', () => {});
+  const player = new SpeechPlayer({
+    engine: fakeEngine(),
+    onSentence: () => {
+      throw new Error('IndexSizeError');
+    },
+  });
+  player.load([para('Uno.'), para('Due.')]);
+  player.jumpTo({ block: 1, sentence: 0 });
+  assert.deepEqual(player.current, { block: 1, sentence: 0 });
+});
+
+test('throwing onState and onError do not leave the player stuck', async (t) => {
+  t.mock.method(console, 'error', () => {});
+  const engine = fakeEngine();
+  const boom = () => {
+    throw new Error('boom');
+  };
+  const player = new SpeechPlayer({ engine, onState: boom, onError: boom });
+  player.load([para('Uno.')]);
+  player.play();
+  assert.equal(player.state, 'playing');
+  assert.equal(engine.calls.length, 1);
+  engine.answer('error');
+  await flush();
+  assert.equal(player.state, 'idle');
+  player.play();
+  assert.equal(engine.calls.length, 2);
+});
+
+test('an unexpected failure in the reading loop stops with an engine error', async (t) => {
+  const logged = t.mock.method(console, 'error', () => {});
+  const h = harness([item('Uno.'), item('Due.')], { sleep: () => Promise.reject(new Error('boom')) });
+  h.player.play();
+  await h.advance();
+  assert.equal(h.player.state, 'idle');
+  assert.deepEqual(h.errors, [ERROR_ENGINE]);
+  assert.deepEqual(h.player.current, { block: 0, sentence: 0 });
+  assert.equal(logged.mock.callCount(), 1);
+});
+
+test('an engine whose stop throws does not leave the player stuck', async (t) => {
+  t.mock.method(console, 'error', () => {});
+  const h = harness([para('Uno.')]);
+  h.engine.stop = () => {
+    throw new Error('boom');
+  };
+  h.player.play();
+  h.player.pause();
+  assert.equal(h.player.state, 'paused');
+  h.player.resume();
+  await h.advance('error');
+  assert.equal(h.player.state, 'idle');
+  assert.deepEqual(h.errors, [ERROR_ENGINE]);
+});
+
+test('load accepts a position that is partial, missing or invalid', () => {
+  const blocks = [para('Uno.', 'Due.'), para('Tre.', 'Quattro.')];
+  const at = (position) => harness(blocks, { at: position }).player.current;
+  assert.deepEqual(at({ block: 1 }), { block: 1, sentence: 0 });
+  assert.deepEqual(at({ sentence: 1 }), { block: 0, sentence: 1 });
+  assert.deepEqual(at({}), { block: 0, sentence: 0 });
+  assert.deepEqual(at(null), { block: 0, sentence: 0 });
+  assert.deepEqual(at({ block: 'x', sentence: Number.NaN }), { block: 0, sentence: 0 });
+  assert.deepEqual(at({ block: Number.NaN, sentence: null }), { block: 0, sentence: 0 });
+  assert.deepEqual(at({ block: 1.5, sentence: 1.5 }), { block: 1, sentence: 1 });
+  assert.deepEqual(at({ block: -0.5, sentence: -0.5 }), { block: 0, sentence: 0 });
+  assert.deepEqual(at({ block: Infinity, sentence: Infinity }), { block: 1, sentence: 1 });
+});
+
+test('a position with only the block plays from that block', () => {
+  const blocks = [para('Uno.'), para('Due.')];
+  const loaded = harness(blocks, { at: { block: 1 } });
+  loaded.player.play();
+  assert.equal(loaded.engine.lastText, 'Due.');
+  assert.deepEqual(loaded.player.current, { block: 1, sentence: 0 });
+
+  const jumped = harness(blocks);
+  jumped.player.play();
+  jumped.player.jumpTo({ block: 1 });
+  assert.equal(jumped.engine.lastText, 'Due.');
+  assert.deepEqual(jumped.player.current, { block: 1, sentence: 0 });
+});

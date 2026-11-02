@@ -12,6 +12,7 @@
  *   onSentence({block, sentence}, sentence)  a sentence starts, or the position moved while silent
  *   onState(state)                           'idle'|'playing'|'paused'|'ended'
  *   onError(code)                            ERROR_ENGINE or ERROR_NOTHING_TO_READ
+ * A callback that throws is logged: it stops neither the reading nor whoever moved the position.
  */
 
 export const HEADING_PAUSE_MS = 600;
@@ -37,6 +38,8 @@ export function speakWatchdogMs(text, rate) {
 }
 
 const clamp = (value, low, high) => Math.min(Math.max(value, low), high);
+/** A whole number to clamp, 0 for anything else. Infinity stays: it means "the last one". */
+const toIndex = (value) => (typeof value === 'number' && !Number.isNaN(value) ? Math.trunc(value) : 0);
 
 function pauseAfter(block) {
   if (block.kind === 'heading') return HEADING_PAUSE_MS;
@@ -63,6 +66,11 @@ export class SpeechPlayer {
   /** Bumped to cancel the reading loop in progress: a stale loop exits at its next check. */
   #run = 0;
   #watchdog = null;
+  /**
+   * Set during the gap between two blocks: the sentence that comes next, not announced yet.
+   * Until then #position stays on the sentence just heard, so moving counts from there.
+   */
+  #upcoming = null;
 
   constructor({ engine, sleep = defaultSleep, onSentence = noop, onState = noop, onError = noop }) {
     this.#engine = engine;
@@ -94,7 +102,7 @@ export class SpeechPlayer {
   play() {
     if (this.#state === 'playing') return;
     if (!this.#hasText()) {
-      this.#onError(ERROR_NOTHING_TO_READ);
+      this.#guarded(this.#onError, ERROR_NOTHING_TO_READ);
       return;
     }
     if (this.#state === 'ended') this.#position = this.#blockStart(this.#scan(0, 1));
@@ -102,9 +110,7 @@ export class SpeechPlayer {
   }
 
   pause() {
-    if (this.#state !== 'playing') return;
-    this.#silence();
-    this.#setState('paused');
+    if (this.#state === 'playing') this.#halt('paused');
   }
 
   resume() {
@@ -112,8 +118,7 @@ export class SpeechPlayer {
   }
 
   stop() {
-    this.#silence();
-    this.#setState('idle');
+    this.#halt('idle');
   }
 
   nextSentence() {
@@ -147,7 +152,8 @@ export class SpeechPlayer {
       const { block } = this.#position;
       const own = this.#scan(block, -1, isHeading);
       const level = own < 0 ? Infinity : this.#blocks[own].level;
-      return this.#blockStart(this.#scan(block + 1, 1, (b) => isHeading(b) && b.level <= level));
+      const peer = this.#scan(block + 1, 1, (b) => isHeading(b) && b.level <= level);
+      return this.#blockStart(peer >= 0 ? peer : this.#scan(block + 1, 1, isHeading));
     });
   }
 
@@ -190,7 +196,7 @@ export class SpeechPlayer {
   #setState(state) {
     if (state === this.#state) return;
     this.#state = state;
-    this.#onState(state);
+    this.#guarded(this.#onState, state);
   }
 
   #hasText() {
@@ -218,15 +224,15 @@ export class SpeechPlayer {
   }
 
   /** The readable position closest to `at`, which may come from an older version of the file. */
-  #nearest({ block, sentence }) {
-    const wanted = clamp(block, 0, this.#blocks.length - 1);
+  #nearest(at) {
+    const wanted = clamp(toIndex(at?.block), 0, this.#blocks.length - 1);
     const after = this.#scan(wanted, 1);
     const found = after >= 0 ? after : this.#scan(wanted, -1);
     if (found < 0) return { block: 0, sentence: 0 };
     const last = this.#blocks[found].sentences.length - 1;
     if (found > wanted) return { block: found, sentence: 0 };
     if (found < wanted) return { block: found, sentence: last };
-    return { block: found, sentence: clamp(sentence, 0, last) };
+    return { block: found, sentence: clamp(toIndex(at?.sentence), 0, last) };
   }
 
   /** Moves to the position computed by `target`; a null target means past the end. */
@@ -239,7 +245,8 @@ export class SpeechPlayer {
     }
     this.#position = position;
     if (this.#state === 'playing') {
-      this.#restartIfPlaying();
+      this.#silence();
+      this.#start();
       return;
     }
     if (this.#state === 'ended') this.#setState('idle');
@@ -254,22 +261,41 @@ export class SpeechPlayer {
 
   #notifySentence() {
     const { block, sentence } = this.#position;
-    this.#onSentence({ block, sentence }, this.#blocks[block].sentences[sentence]);
+    this.#guarded(this.#onSentence, { block, sentence }, this.#blocks[block].sentences[sentence]);
+  }
+
+  #guarded(call, ...args) {
+    try {
+      call(...args);
+    } catch (error) {
+      console.error(error);
+    }
   }
 
   #cancelRun() {
     this.#run += 1;
+    this.#upcoming = null;
     clearTimeout(this.#watchdog);
   }
 
   #silence() {
     const wasPlaying = this.#state === 'playing';
     this.#cancelRun();
-    if (wasPlaying) this.#engine.stop();
+    if (wasPlaying) this.#guarded(() => this.#engine.stop());
   }
 
+  /** Stops on purpose. A gap cut short counts as over, so the sentence just heard is not repeated. */
+  #halt(state) {
+    const upcoming = this.#upcoming;
+    this.#silence();
+    if (upcoming) this.#position = upcoming;
+    this.#setState(state);
+    if (upcoming) this.#notifySentence();
+  }
+
+  /** During a gap nothing is being spoken: the next sentence picks up the new settings by itself. */
   #restartIfPlaying() {
-    if (this.#state !== 'playing') return;
+    if (this.#state !== 'playing' || this.#upcoming) return;
     this.#silence();
     this.#start();
   }
@@ -278,7 +304,10 @@ export class SpeechPlayer {
     this.#cancelRun();
     const run = this.#run;
     this.#setState('playing');
-    this.#read(run);
+    this.#read(run).catch((error) => {
+      console.error(error);
+      if (run === this.#run) this.#interrupt('error');
+    });
   }
 
   async #read(run) {
@@ -298,9 +327,14 @@ export class SpeechPlayer {
         this.#setState('ended');
         return;
       }
+      const pause = next.block === block ? 0 : pauseAfter(this.#blocks[block]);
+      if (pause > 0) {
+        this.#upcoming = next;
+        await this.#sleep(pause);
+        if (run !== this.#run) return;
+        this.#upcoming = null;
+      }
       this.#position = next;
-      const pause = this.#position.block === block ? 0 : pauseAfter(this.#blocks[block]);
-      if (pause > 0) await this.#sleep(pause);
     }
   }
 
@@ -324,6 +358,6 @@ export class SpeechPlayer {
   #interrupt(outcome) {
     this.#silence();
     this.#setState('idle');
-    if (outcome === 'error') this.#onError(ERROR_ENGINE);
+    if (outcome === 'error') this.#guarded(this.#onError, ERROR_ENGINE);
   }
 }

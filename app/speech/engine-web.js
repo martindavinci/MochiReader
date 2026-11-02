@@ -27,30 +27,38 @@ export class WebSpeechEngine {
   }
 
   speak(text, { voiceId = null, rate = 1, lang = null } = {}) {
-    if (this.#utterance) this.stop();
-    const voice = this.#pickVoice(voiceId, lang);
-    if (!voice) return Promise.resolve('error');
+    if (this.#settle) this.stop();
 
     return new Promise((resolve) => {
-      const utterance = new this.#Utterance(text);
-      utterance.voice = voice;
-      utterance.rate = rate;
-      utterance.lang = lang ?? voice.lang;
       const settle = (outcome) => {
-        if (this.#utterance !== utterance) return;
+        if (this.#settle !== settle) return;
         this.#utterance = null;
         this.#settle = null;
         resolve(outcome);
       };
-      utterance.onend = () => settle('end');
-      utterance.onerror = (event) => settle(CANCEL_ERRORS.has(event.error) ? 'stopped' : 'error');
-      this.#utterance = utterance;
       this.#settle = settle;
-      try {
-        this.#synth.speak(utterance);
-      } catch {
-        settle('error');
-      }
+      const say = () => {
+        if (this.#settle !== settle) return;
+        const voice = this.#pickVoice(voiceId, lang);
+        if (!voice) {
+          settle('error');
+          return;
+        }
+        const utterance = new this.#Utterance(text);
+        utterance.voice = voice;
+        utterance.rate = rate;
+        utterance.lang = lang ?? voice.lang;
+        utterance.onend = () => settle('end');
+        utterance.onerror = (event) => settle(CANCEL_ERRORS.has(event.error) ? 'stopped' : 'error');
+        this.#utterance = utterance;
+        try {
+          this.#synth.speak(utterance);
+        } catch {
+          settle('error');
+        }
+      };
+      if (this.#synth.getVoices().length === 0) this.#voicesChanged().then(say);
+      else say();
     });
   }
 
