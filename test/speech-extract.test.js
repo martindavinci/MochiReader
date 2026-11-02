@@ -267,6 +267,34 @@ test('punctuation that starts a word keeps the space before it, outside code too
   }
 });
 
+test('a dot or a mark that opens a quote or a bracket keeps the space before it', () => {
+  for (const plain of ['Usa ."abc" ora.', 'Usa .[x] ora.', 'Usa .(x) ora.', 'Usa :"abc" ora.', 'Usa .“abc” ora.']) {
+    assert.deepEqual(texts(`<p>${plain}</p>`), [plain]);
+  }
+  assert.equal(texts('<p>Ha detto "ciao !" e via.</p>').join(' '), 'Ha detto "ciao!" e via.');
+  assert.equal(texts('<p>Ha detto “ciao !” e via.</p>').join(' '), 'Ha detto “ciao!” e via.');
+  assert.equal(texts('<p>Ha detto (ciao !) e via.</p>').join(' '), 'Ha detto (ciao!) e via.');
+});
+
+test('a mark right after something removed ends the sentence there', () => {
+  assert.deepEqual(texts('<p>Fatto 😀.Poi va.</p>'), ['Fatto.', 'Poi va.']);
+  assert.deepEqual(texts('<p>Fatto 😀!Poi va.</p>'), ['Fatto!', 'Poi va.']);
+  assert.deepEqual(texts('<p>Vedi https://x.com/a .Poi va.</p>'), ['Vedi.', 'Poi va.']);
+  assert.deepEqual(texts('<p>Vedi example.com .Poi va.</p>'), ['Vedi.', 'Poi va.']);
+  assert.deepEqual(texts('<p>Vedi 😀 .gitignore ora.</p>'), ['Vedi .gitignore ora.']);
+  assert.deepEqual(texts('<p>Vedi 😀 .NET ora.</p>'), ['Vedi .NET ora.']);
+  assert.deepEqual(texts('<p>Vedi **.Poi** ora.</p>'), ['Vedi .Poi ora.']);
+  assert.deepEqual(texts('<p>Vedi 😀 <code>.Poi</code> ora.</p>'), ['Vedi .Poi ora.']);
+});
+
+test('a marked sentence after something removed keeps its positions', () => {
+  const body = bodyOf('<p>Fatto 😀.Poi va.</p>');
+  const [first, second] = extractBlocks(body, { sourceMode: 'skip', lang: 'it' })[0].sentences;
+  const data = first.start.node.data;
+  assert.equal(data.slice(first.start.offset, first.end.offset), 'Fatto 😀.');
+  assert.equal(data.slice(second.start.offset, second.end.offset), 'Poi va.');
+});
+
 test('punctuation that ends a word still joins it', () => {
   assert.deepEqual(texts('<p>Ciao , mondo ; poi basta .</p>'), ['Ciao, mondo; poi basta.']);
   assert.deepEqual(texts('<p>Davvero ? Vedi ... forse ( qui ) e [ qui ].</p>').join(' '), 'Davvero? Vedi... forse ( qui) e [ qui].');
@@ -295,18 +323,85 @@ test('a missing space after a full stop does not lose the word before it', () =>
 
 test('a host with a word for suffix is read rather than lost', () => {
   assert.deepEqual(texts('<p>Usa socket.io e vercel.app ora.</p>'), ['Usa socket.io e vercel.app ora.']);
+  assert.deepEqual(texts('<p>Usa my-site.io ora.</p>'), ['Usa my-site.io ora.']);
+  assert.deepEqual(texts('<p>Go to socket.io now.</p>', { lang: 'en' }), ['Go to socket.io now.']);
+});
+
+const assertKept = (lang, sentences) => {
+  for (const plain of sentences) {
+    assert.deepEqual(texts(`<p>${plain}</p>`, { lang }).join(' '), plain, `${lang}: ${plain}`);
+  }
+};
+
+test('a number before a missing space keeps the number and the word', () => {
+  assertKept('it', ['Arrivo alle 12.io no.', 'Sono le 5.io vado.', 'Nel 2024.io ero via.']);
+  assertKept('en', ['At 12.it was late', 'In 2024.it was late']);
+});
+
+test('a dotted abbreviation before a missing space stays', () => {
+  assertKept('en', [
+    'We met at 5 p.m.it was late',
+    'We met at 5 a.m.it was late',
+    'Use one, e.g.it works',
+    'That is, i.e.it works',
+    'a.k.a.it was',
+  ]);
+});
+
+test('a hyphenated word before a missing space stays', () => {
+  assertKept('it', ['Ero ben-fatto.io no', 'Ero stanco.io no']);
+});
+
+test('a suffix that is a word of the language stays, whichever it is', () => {
+  assertKept('it', ['Un testo, per.es. questo', 'Vedi per.es questo', "Ho finito.ch'io vada"]);
+  assertKept('en', [
+    'I was tired.de facto it ended',
+    'I was tired.au revoir',
+    'He said no.es is Spanish',
+    'I was tired.ai is hype',
+    'I was tired.io is hype',
+    'He left.org chart changed',
+    'He left.gov shut down',
+  ]);
+  assertKept('pt', ['Está tarde.ai vai']);
+  assertKept('fr', ['Il est las.ca va']);
+  assertKept('es', ['Es tarde.ca no']);
+});
+
+test('a slash or a question mark after a lost space does not take the words with it', () => {
+  assertKept('it', [
+    'Va bene.noi/voi',
+    'Va bene.tu/lei',
+    'Va bene.si/no',
+    'Ero stanco.io/tu no',
+  ]);
+  assertKept('en', ['I was tired.it/he was late']);
+  assert.deepEqual(texts('<p>Ti piace.davvero?Sì.</p>'), ['Ti piace.davvero?', 'Sì.']);
+  assert.deepEqual(texts('<p>Ero stanco.io?no</p>'), ['Ero stanco.io?', 'no']);
+});
+
+test('hosts with a real path are still skipped', () => {
+  assert.deepEqual(texts('<p>Vedi mistral.ai/news e claude.ai/share ora.</p>'), ['Vedi e ora.']);
+  assert.deepEqual(texts('<p>Vedi grok.com/imagine, google.com/a e nasa.gov/x ora.</p>'), ['Vedi, e ora.']);
+  assert.deepEqual(texts('<p>Vedi foo.dev?x=1 ora.</p>'), ['Vedi ora.']);
+  assert.deepEqual(texts('<p>Vedi repubblica.it/a/b e lemonde.fr/x ora.</p>'), ['Vedi e ora.']);
+  assert.deepEqual(texts('<p>Go to mistral.ai/news now.</p>', { lang: 'en' }), ['Go to now.']);
+});
+
+test('a host that takes an apostrophe is a word cut short, and stays', () => {
+  assert.deepEqual(texts("<p>Vedi example.com ora e github.com's API.</p>"), ["Vedi ora e github.com's API."]);
 });
 
 test('what cannot be two words is still a host, whatever its suffix', () => {
   assert.deepEqual(texts('<p>Vedi docs.socket.io ora.</p>'), ['Vedi ora.']);
-  assert.deepEqual(texts('<p>Vedi my-site.io e web3.ai ora.</p>'), ['Vedi e ora.']);
+  assert.deepEqual(texts('<p>Vedi web3.ai e 1a.io ora.</p>'), ['Vedi e ora.']);
   assert.deepEqual(texts('<p>Vedi socket.io/docs e fly.dev:8080 ora.</p>'), ['Vedi e ora.']);
 });
 
 test('a suffix that is no word in the language of the text is still a host', () => {
   assert.deepEqual(texts('<p>Vai su sito.it ora.</p>', { lang: 'it-IT' }), ['Vai su ora.']);
   assert.deepEqual(texts('<p>Vai su sito.it ora.</p>', { lang: 'ita' }), ['Vai su ora.']);
-  assert.deepEqual(texts('<p>Go to socket.io now.</p>', { lang: 'en' }), ['Go to now.']);
+  assert.deepEqual(texts('<p>Go to lemonde.fr now.</p>', { lang: 'en' }), ['Go to now.']);
   assert.deepEqual(texts('<p>Go to example.com now.</p>', { lang: 'en' }), ['Go to now.']);
   assert.deepEqual(texts('<p>Vai su example.com ora.</p>', { lang: null }), ['Vai su ora.']);
   assert.deepEqual(texts('<p>Allez sur lemonde.fr maintenant.</p>', { lang: 'fr' }), ['Allez sur maintenant.']);
