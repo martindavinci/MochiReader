@@ -44,7 +44,7 @@ fn doc_url(path: &Path) -> String {
     format!("{DOC_URL_PREFIX}{}", path_token(path))
 }
 
-fn path_token(path: &Path) -> String {
+pub(crate) fn path_token(path: &Path) -> String {
     base64url(path.to_string_lossy().as_bytes())
 }
 

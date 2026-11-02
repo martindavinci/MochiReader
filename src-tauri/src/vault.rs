@@ -56,9 +56,13 @@ pub fn is_image(path: &Path) -> bool {
     has_extension(path, &IMAGE_EXTENSIONS)
 }
 
+pub fn is_epub(path: &Path) -> bool {
+    has_extension(path, &[EPUB_EXTENSION])
+}
+
 /// Whether the app can open the file in a tab.
 pub fn is_document(path: &Path) -> bool {
-    is_markdown(path) || has_extension(path, &[EPUB_EXTENSION])
+    is_markdown(path) || is_epub(path)
 }
 
 fn has_extension(path: &Path, extensions: &[&str]) -> bool {

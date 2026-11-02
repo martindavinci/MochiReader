@@ -1,0 +1,186 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+:root {
+  color-scheme: light dark;
+  --bg: #fbfaf7;
+  --fg: #24231f;
+  --muted: #6f6c64;
+  --line: #dedbd2;
+  --surface: #f0eee8;
+  --link: #1f5fa8;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1c1c1a;
+    --fg: #dddbd4;
+    --muted: #96938a;
+    --line: #3b3a36;
+    --surface: #2a2a27;
+    --link: #8ab8ec;
+  }
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+
+html, body { height: 100%; }
+
+body {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--fg);
+  font: 17px/1.6 "Segoe UI", system-ui, sans-serif;
+}
+
+/* Tabs */
+#tabbar {
+  display: flex;
+  flex: none;
+  overflow-x: auto;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+}
+
+.tab {
+  display: flex;
+  flex: 0 1 200px;
+  min-width: 90px;
+  border-right: 1px solid var(--line);
+}
+
+.tab.active { background: var(--bg); }
+
+.tab button {
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.tab-name {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 4px 5px 10px;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tab:not(.active) .tab-name { color: var(--muted); }
+.tab-close { padding: 0 8px; color: var(--muted); }
+.tab-close:hover { color: var(--fg); }
+
+/* One pane per tab, all stacked: a hidden tab keeps its scroll and costs no rendering. */
+#panes {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+.pane {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  visibility: hidden;
+  content-visibility: hidden;
+}
+
+.pane.active {
+  visibility: visible;
+  content-visibility: visible;
+}
+
+#home, .notice {
+  max-width: 70ch;
+  margin: 0 auto;
+  padding: 2rem 1.5rem;
+  color: var(--muted);
+}
+
+#toast {
+  position: fixed;
+  bottom: 1.5rem;
+  left: 50%;
+  max-width: 80%;
+  padding: 0.4rem 0.9rem;
+  border-radius: 6px;
+  background: var(--fg);
+  color: var(--bg);
+  font-size: 14px;
+  transform: translateX(-50%);
+}
+
+/* Text */
+article {
+  max-width: 70ch;
+  margin: 0 auto;
+  padding: 2rem 1.5rem 4rem;
+  overflow-wrap: break-word;
+}
+
+article.large > * {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 4em;
+}
+
+h1, h2, h3, h4, h5, h6 { margin: 1.6em 0 0.5em; line-height: 1.25; }
+article > :first-child { margin-top: 0; }
+h1 { font-size: 1.7em; }
+h2 { font-size: 1.35em; }
+h3 { font-size: 1.15em; }
+p, ul, ol, blockquote, pre, table { margin: 0 0 1em; }
+li { margin: 0.2em 0; }
+li > p { margin: 0 0 0.4em; }
+a { color: var(--link); }
+/* An empty target for links to the heading: it must keep its box for them to scroll to it. */
+a.anchor { visibility: hidden; }
+img { max-width: 100%; height: auto; }
+hr { border: 0; border-top: 1px solid var(--line); margin: 2em 0; }
+del { color: var(--muted); }
+
+code {
+  padding: 0.1em 0.3em;
+  border-radius: 3px;
+  background: var(--surface);
+  font: 0.9em Consolas, "Cascadia Mono", monospace;
+}
+
+pre {
+  padding: 0.8em 1em;
+  overflow-x: auto;
+  border-radius: 5px;
+  background: var(--surface);
+  line-height: 1.45;
+}
+
+pre code { padding: 0; background: none; }
+
+blockquote {
+  padding-left: 1em;
+  border-left: 3px solid var(--line);
+  color: var(--muted);
+}
+
+table { display: block; overflow-x: auto; border-collapse: collapse; }
+th, td { padding: 0.3em 0.7em; border: 1px solid var(--line); }
+th { background: var(--surface); }
+
+/* Callouts */
+.callout, .markdown-alert {
+  margin: 0 0 1em;
+  padding: 0.6em 1em;
+  border-left: 3px solid var(--link);
+  background: var(--surface);
+}
+
+.callout > :last-child, .markdown-alert > :last-child { margin-bottom: 0; }
+.callout-title, .markdown-alert-title { margin-bottom: 0.3em; font-weight: 600; }
+
+.tag { color: var(--muted); font-size: 0.9em; }
+.footnotes { color: var(--muted); font-size: 0.9em; }

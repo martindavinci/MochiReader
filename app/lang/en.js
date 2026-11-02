@@ -6,6 +6,7 @@ export default {
   'dialog.open': 'Open a file',
   'dialog.filter': 'Markdown and EPUB',
 
+  'open.loading': 'Opening the file...',
   'open.error.not_found': 'This file no longer exists.',
   'open.error.unreadable': 'This file cannot be read.',
   'open.error.unsupported': 'This file is not a Markdown or EPUB file.',
