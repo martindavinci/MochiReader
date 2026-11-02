@@ -387,7 +387,7 @@ pub fn contain_inline_html<'a>(root: &'a AstNode<'a>, guard: &mut RawHtmlGuard<'
     }
 }
 
-fn tag_name(tag: &str) -> String {
+pub fn tag_name(tag: &str) -> String {
     tag.trim_start_matches(['<', '/'])
         .chars()
         .take_while(char::is_ascii_alphanumeric)

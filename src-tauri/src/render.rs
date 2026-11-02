@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 use crate::comments::remove_comments;
+use crate::obsidian;
 use crate::raw_html::{
     clean_contained, contain_inline_html, repaired_source, show_unclosed_tags, RawHtmlGuard,
 };
@@ -25,6 +26,8 @@ const NOT_A_YAML_KEY: [char; 12] = ['*', '&', '!', '|', '>', '%', '@', '`', '[',
 const YAML_SEQUENCE_ITEM: &str = "- ";
 const YAML_EMPTY_SEQUENCE_ITEM: &str = "-";
 const URL_SCHEMES: [&str; 4] = ["http", "https", "mailto", "mochi-doc"];
+const IMAGE_TAG: &str = "img";
+const IMAGE_SOURCE: &str = "src";
 const SOURCEPOS_TAGS: [&str; 16] = [
     "p",
     "h1",
@@ -64,15 +67,16 @@ pub struct RenderCtx<'a> {
     pub vault: Option<&'a Vault>,
 }
 
-pub fn render_markdown(source: &str, _ctx: &RenderCtx) -> Rendered {
+pub fn render_markdown(source: &str, ctx: &RenderCtx) -> Rendered {
     let source = source.strip_prefix(BOM).unwrap_or(source);
     let mut options = comrak_options();
-    let cleaner = sanitizer();
+    let cleaner = sanitizer(ctx.doc_dir);
     let mut guard = RawHtmlGuard::new(&cleaner);
     let arena = Arena::new();
     let (root, source) = parse_contained(&arena, source, &mut options, &mut guard);
     remove_comments(&arena, root, &source, &mut guard);
     contain_inline_html(root, &mut guard);
+    obsidian::rewrite(&arena, root, &source, ctx);
 
     let mut lang = None;
     let mut headings = Vec::new();
@@ -177,7 +181,8 @@ fn comrak_options() -> Options<'static> {
     options
 }
 
-fn sanitizer() -> ammonia::Builder<'static> {
+fn sanitizer(doc_dir: Option<&Path>) -> ammonia::Builder<'static> {
+    let doc_dir = doc_dir.map(Path::to_path_buf);
     let mut builder = ammonia::Builder::default();
     builder
         .add_tags(&["input", "section"])
@@ -185,7 +190,14 @@ fn sanitizer() -> ammonia::Builder<'static> {
         .add_tag_attribute_values("input", "type", &["checkbox"])
         .set_tag_attribute_value("input", "disabled", "")
         .add_generic_attributes(&["class", "id", "data-noread"])
-        .url_schemes(HashSet::from(URL_SCHEMES));
+        .url_schemes(HashSet::from(URL_SCHEMES))
+        .attribute_filter(move |element, attribute, value| {
+            if element == IMAGE_TAG && attribute == IMAGE_SOURCE {
+                obsidian::raw_image_src(value, doc_dir.as_deref()).map(Cow::Owned)
+            } else {
+                Some(Cow::Borrowed(value))
+            }
+        });
     for tag in SOURCEPOS_TAGS {
         builder.add_tag_attributes(tag, &["data-sourcepos"]);
     }
