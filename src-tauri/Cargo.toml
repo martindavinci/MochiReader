@@ -26,6 +26,8 @@ serde_json = "1"
 # custom-protocol: serve the embedded pages from every build, since the app has no dev server.
 tauri = { version = "=2.12.4", features = ["custom-protocol"] }
 tauri-plugin-single-instance = "=2.5.4"
+# Already in the app through Tauri, at this version: named here for the WebView2 settings Tauri does not offer.
+webview2-com = "=0.39.1"
 windows = { version = "=0.62.2", features = [
   "Win32_Foundation",
   "Win32_Graphics_Dwm",

@@ -76,7 +76,8 @@ body {
 .tab-close { padding: 0 8px; color: var(--muted); }
 .tab-close:hover { color: var(--fg); }
 
-/* One pane per tab, all stacked: a hidden tab keeps its scroll and costs no rendering. */
+/* One pane per tab, all stacked. Only `visibility` hides one: `display: none` or `content-visibility: hidden`
+   stop its layout, and with it go its scroll offset, its position and any goTo made while it is hidden. */
 #panes {
   position: relative;
   flex: 1;
@@ -88,13 +89,13 @@ body {
   inset: 0;
   overflow: auto;
   visibility: hidden;
-  content-visibility: hidden;
+  contain: strict;
 }
 
-.pane.active {
-  visibility: visible;
-  content-visibility: visible;
-}
+.pane.active { visibility: visible; }
+
+/* It holds the focus only so that the keys scroll the text. */
+.pane:focus { outline: none; }
 
 #home, .notice {
   max-width: 70ch;

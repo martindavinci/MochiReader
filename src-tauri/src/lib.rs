@@ -45,9 +45,9 @@ fn main_window(app: &AppHandle) -> Option<WebviewWindow> {
     app.get_webview_window(MAIN_WINDOW)
 }
 
-#[tauri::command(async)]
-fn open_document(path: String, docs: State<'_, Docs>) -> Result<OpenedDoc, OpenError> {
-    docs.open(&path)
+#[tauri::command]
+async fn open_document(path: String, app: AppHandle) -> Result<OpenedDoc, OpenError> {
+    docs::off_the_workers(move || app.state::<Docs>().open(&path)).await
 }
 
 #[tauri::command]
@@ -157,6 +157,9 @@ fn create_window(app: &mut tauri::App) -> tauri::Result<()> {
     if let Ok(hwnd) = window.hwnd() {
         let _ = native::disable_open_animation(hwnd);
     }
+    window.with_webview(|webview| {
+        let _ = native::disable_browser_features(&webview.controller());
+    })?;
     let handle = app.handle().clone();
     std::thread::spawn(move || {
         std::thread::sleep(FIRST_PAINT_DEADLINE);

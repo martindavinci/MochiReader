@@ -18,6 +18,25 @@ $UnreachableFile = '\\192.0.2.1\share\report.md'
 # OPEN_TIMEOUT of docs.rs and some room for a machine under load.
 $UnreachableAnswerWithinS = 15
 
+# Ctrl+R, F5 and Ctrl+Shift+R: each reloads a page in a browser, which would lose every tab.
+$VK_SHIFT = 0x10
+$VK_CONTROL = 0x11
+$VK_R = 0x52
+$VK_F5 = 0x74
+$ReloadKeys = @(@($VK_CONTROL, $VK_R), @($VK_F5), @($VK_CONTROL, $VK_SHIFT, $VK_R))
+$KeyUp = 2
+$ReloadSettleMs = 1500
+
+Add-Type @'
+using System;
+using System.Runtime.InteropServices;
+public static class SmokeInput {
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+  [DllImport("user32.dll")] public static extern void keybd_event(byte k, byte s, uint f, UIntPtr e);
+}
+'@
+
 function Pass([string]$Message) { "PASS  $Message" }
 
 function Assert-That([bool]$Condition, [string]$Message) {
@@ -166,6 +185,58 @@ function Test-UnreachableFile {
   }
 }
 
+function Test-FailedTabRetries {
+  Wait-AppGone
+  $late = Join-Path $Work 'arriva dopo.md'
+  $app = Start-App @("`"$late`"")
+  try {
+    Wait-AppWindow $app | Out-Null
+    Wait-Tabs 1 { param($t) $t[0].status -eq 'missing' } | Out-Null
+    [System.IO.File]::WriteAllText($late, "# Ora esiste`n", (New-Object System.Text.UTF8Encoding $false))
+    Start-Second "`"$late`""
+    $tabs = Wait-Tabs 1 { param($t) $t[0].status -eq 'ok' }
+    Assert-That ($tabs[0].text.Contains('Ora esiste')) 'the text of the file that came back'
+    Assert-That ($tabs[0].notice.Length -eq 0) 'no message left from the failure'
+    Pass 'a tab that failed opens when the file is opened again'
+  } finally {
+    Stop-App $app
+  }
+}
+
+function Send-Keys([IntPtr]$Window, [byte[]]$Keys) {
+  # Real keys go to whatever is in front, so they are only sent to the app.
+  if ([SmokeInput]::GetForegroundWindow() -ne $Window) { return $false }
+  foreach ($key in $Keys) { [SmokeInput]::keybd_event($key, 0, 0, [UIntPtr]::Zero) }
+  [array]::Reverse($Keys)
+  foreach ($key in $Keys) { [SmokeInput]::keybd_event($key, 0, $KeyUp, [UIntPtr]::Zero) }
+  $true
+}
+
+function Test-BrowserKeysKeepTheSession {
+  Wait-AppGone
+  $first = New-Note 'tasti uno.md' 'Testo uno.'
+  $second = New-Note 'tasti due.md' 'Testo due.'
+  $app = Start-App @("`"$first`"")
+  try {
+    $window = Wait-AppWindow $app
+    Start-Second "`"$second`""
+    Wait-Tabs 2 { param($t) @($t | Where-Object { $_.status -eq 'ok' }).Count -eq 2 } | Out-Null
+    [void][SmokeInput]::SetForegroundWindow($window)
+    Start-Sleep -Milliseconds $SecondProcessMs
+    foreach ($keys in $ReloadKeys) {
+      if (-not (Send-Keys $window ([byte[]]$keys))) {
+        "SKIP  the app is not in front, so the reload keys were not sent and nothing was checked"
+        return
+      }
+      Start-Sleep -Milliseconds $ReloadSettleMs
+      Assert-That (@(Get-Tabs).Count -eq 2) "the tabs survive the keys $($keys -join '+')"
+    }
+    Pass 'the reload keys of the browser keep the tabs'
+  } finally {
+    Stop-App $app
+  }
+}
+
 Assert-AppNotRunning
 if (-not $NoBuild) { Build-App @('--features', 'smoke') }
 $AppExe = Join-Path $AppTarget 'debug\mochireader.exe'
@@ -176,6 +247,8 @@ try {
   Test-Burst
   Test-RunningApp
   Test-UnreachableFile
+  Test-FailedTabRetries
+  Test-BrowserKeysKeepTheSession
   'smoke: all checks passed'
 } finally {
   Get-AppMainProcesses | Stop-Process -Force -ErrorAction SilentlyContinue

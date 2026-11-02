@@ -20,6 +20,10 @@ const STATUS_OK = 'ok';
 const STATUS_ERROR = 'error';
 const STATUS_MISSING = 'missing';
 const CODE_NOT_FOUND = 'not_found';
+// The file may be back by now, so opening it again tries again.
+const RETRIED_STATUSES = [STATUS_ERROR, STATUS_MISSING];
+// Focusable from code and by click, but not one more stop for the Tab key.
+const PANE_TAB_INDEX = '-1';
 
 const tabs = new Tabs();
 /** @type {Map<number, {pane: HTMLElement, status: string, kind: string|null, reader: object|null, notice: string}>} */
@@ -43,6 +47,8 @@ function refresh() {
   const active = tabs.active();
   for (const [id, entry] of entries) entry.pane.classList.toggle('active', id === active?.id);
   home.classList.toggle('active', !active);
+  // The body does not scroll, so the keys only move the text while its pane has the focus.
+  if (active) entries.get(active.id)?.pane.focus({ preventScroll: true });
   renderTabBar(tabBar, tabs.all(), active?.id, {
     closeLabel: t('tabs.close'),
     onActivate: (id) => {
@@ -108,6 +114,15 @@ function mount(doc, entry) {
   entry.status = STATUS_OK;
 }
 
+function addEntry(id) {
+  const entry = { pane: document.createElement('section'), status: STATUS_LOADING, kind: null, reader: null, notice: '' };
+  entry.pane.className = 'pane';
+  entry.pane.setAttribute('tabindex', PANE_TAB_INDEX);
+  panes.append(entry.pane);
+  entries.set(id, entry);
+  return entry;
+}
+
 /** @returns {Promise<number|null>} The tab of `path` once its content is on the page; null if the file has no tab. */
 async function openPath(path) {
   if (!isSupported(path)) {
@@ -115,20 +130,18 @@ async function openPath(path) {
     return null;
   }
   const { id, created } = tabs.open(path);
-  if (!created) {
-    refresh();
-    return id;
-  }
-  const entry = { pane: document.createElement('section'), status: STATUS_LOADING, kind: null, reader: null, notice: '' };
-  entry.pane.className = 'pane';
-  panes.append(entry.pane);
-  entries.set(id, entry);
+  const entry = created ? addEntry(id) : entries.get(id);
   refresh();
+  if (!created && !RETRIED_STATUSES.includes(entry.status)) return id;
+  entry.status = STATUS_LOADING;
+  entry.notice = '';
+  entry.pane.replaceChildren();
   const slow = setTimeout(() => showNotice(entry, STATUS_LOADING, t('open.loading')), SLOW_OPEN_MS);
   try {
     const doc = await invoke('open_document', { path });
     clearTimeout(slow);
     entry.pane.replaceChildren();
+    entry.notice = '';
     if (entries.get(id) === entry) mount(doc, entry);
   } catch (error) {
     clearTimeout(slow);

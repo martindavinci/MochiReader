@@ -191,6 +191,16 @@ impl Docs {
     }
 }
 
+/// Waits for an opening on the blocking pool. A command's own thread is one of few async workers, as many
+/// as the processor has cores: files waiting on a hung drive would take them all and hold up healthy ones.
+pub async fn off_the_workers(
+    job: impl FnOnce() -> Result<OpenedDoc, OpenError> + Send + 'static,
+) -> Result<OpenedDoc, OpenError> {
+    tauri::async_runtime::spawn_blocking(job)
+        .await
+        .unwrap_or_else(|_| Err(OpenErrorCode::Unreadable.into()))
+}
+
 /// The paths waiting for the page. Until it first asks for them it may not be listening, so they queue.
 #[derive(Default)]
 pub struct PendingPaths {
@@ -234,6 +244,10 @@ mod tests {
     const BLOCKED_FOR: Duration = Duration::from_secs(60);
     const THREADS: usize = 8;
     const PATHS_PER_THREAD: usize = 5;
+    const HUNG_PER_WORKER: usize = 2;
+    const HUNG_FOR: Duration = Duration::from_millis(1500);
+    const LET_THE_HUNG_START: Duration = Duration::from_millis(100);
+    const HEALTHY_ANSWER: Duration = Duration::from_millis(500);
 
     fn open(path: &Path) -> Result<OpenedDoc, OpenError> {
         open_with(&path.to_string_lossy(), read_file, OPEN_TIMEOUT).map(|loaded| loaded.doc)
@@ -280,6 +294,31 @@ mod tests {
         assert_eq!(error.code, OpenErrorCode::Timeout);
         assert!(started.elapsed() < BLOCKED_FOR);
         assert_eq!(OPEN_TIMEOUT, Duration::from_secs(10));
+    }
+
+    #[test]
+    fn files_waiting_on_a_hung_drive_do_not_hold_up_the_others() {
+        let runtime_workers = thread::available_parallelism().map_or(1, |count| count.get());
+        let hung: Vec<_> = (0..runtime_workers * HUNG_PER_WORKER)
+            .map(|_| {
+                tauri::async_runtime::spawn(off_the_workers(|| {
+                    thread::sleep(HUNG_FOR);
+                    Err(OpenErrorCode::Timeout.into())
+                }))
+            })
+            .collect();
+        thread::sleep(LET_THE_HUNG_START);
+        let started = Instant::now();
+        let healthy =
+            tauri::async_runtime::spawn(off_the_workers(|| Err(OpenErrorCode::NotFound.into())));
+        let answer = tauri::async_runtime::block_on(healthy).unwrap();
+        let waited = started.elapsed();
+        assert_eq!(answer.unwrap_err().code, OpenErrorCode::NotFound);
+        assert!(waited < HEALTHY_ANSWER, "{waited:?}");
+        for job in hung {
+            let answer = tauri::async_runtime::block_on(job).unwrap();
+            assert_eq!(answer.unwrap_err().code, OpenErrorCode::Timeout);
+        }
     }
 
     #[test]

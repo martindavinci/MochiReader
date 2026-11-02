@@ -64,6 +64,16 @@ test('the position is the block at the top of the screen', () => {
   assert.deepEqual(setup({ scrollTop: 250 }).reader.position(), { kind: 'md', line: 5, sentence: 0 });
 });
 
+// goTo puts a block at the top, but the scroll offset is rounded to whole pixels, so it can land a fraction lower.
+test('a block a fraction of a pixel below the top of the screen is still the position', () => {
+  assert.deepEqual(setup({ scrollTop: 99.562 }).reader.position(), { kind: 'md', line: 3, sentence: 0 });
+  assert.equal(setup({ scrollTop: 99.562 }).reader.excerpt(), 'Primo brano');
+});
+
+test('a block clearly below the top of the screen is not the position', () => {
+  assert.deepEqual(setup({ scrollTop: 98 }).reader.position(), { kind: 'md', line: 1, sentence: 0 });
+});
+
 test('the excerpt comes from the block at the top of the screen', () => {
   assert.equal(setup({ scrollTop: 100 }).reader.excerpt(), 'Primo brano');
 });

@@ -8,6 +8,9 @@ const BLOCK_SELECTOR = '[data-sourcepos]';
 const FIRST_SENTENCE = 0;
 const NO_LINE = 0;
 const EXCERPT_CHARS = 160;
+// goTo puts a block at the top, but the scroll offset is rounded to a whole device pixel, so the block can land up
+// to half a pixel lower. Without this margin it would not count as the top block, and each save would move back one.
+const FOLD_MARGIN_PX = 1;
 
 /**
  * @param {{rendered: {html: string, lang?: string|null, headings: {text: string, line: number}[]}}} doc
@@ -28,7 +31,7 @@ export function openMarkdown(doc, host) {
   // Tops only grow in document order, so a search finds the last block that starts above the fold.
   const topBlock = () => {
     const all = blocks();
-    const fold = host.getBoundingClientRect().top;
+    const fold = host.getBoundingClientRect().top + FOLD_MARGIN_PX;
     let low = 0;
     let high = all.length - 1;
     let found = all[0] ?? null;

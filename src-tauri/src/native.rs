@@ -2,7 +2,10 @@
 //! The Windows calls the app needs and Tauri does not offer.
 use std::ffi::c_void;
 use std::mem::size_of;
-use windows::core::{w, BOOL, HSTRING};
+use webview2_com::Microsoft::Web::WebView2::Win32::{
+    ICoreWebView2Controller, ICoreWebView2Settings3,
+};
+use windows::core::{w, Interface, BOOL, HSTRING};
 use windows::Win32::Foundation::{CloseHandle, HANDLE, HWND};
 use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_TRANSITIONS_FORCEDISABLED};
 use windows::Win32::System::Threading::{CreateMutexW, ReleaseMutex, WaitForSingleObject};
@@ -24,6 +27,18 @@ pub fn disable_open_animation(hwnd: HWND) -> windows::core::Result<()> {
             (&raw const disabled).cast::<c_void>(),
             size_of::<BOOL>() as u32,
         )
+    }
+}
+
+/// Turns off what WebView2 does as a browser: Ctrl+R or F5 would reload the page and lose every tab, and the
+/// right click menu offers the same. Tauri has no option for these. The page still receives the keys.
+pub fn disable_browser_features(controller: &ICoreWebView2Controller) -> windows::core::Result<()> {
+    unsafe {
+        let settings = controller.CoreWebView2()?.Settings()?;
+        settings.SetAreDefaultContextMenusEnabled(false)?;
+        settings
+            .cast::<ICoreWebView2Settings3>()?
+            .SetAreBrowserAcceleratorKeysEnabled(false)
     }
 }
 

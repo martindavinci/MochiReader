@@ -1,11 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! `http://mochi.localhost`: the images and the books of the open documents, and nothing else.
+use crate::docs::OPEN_TIMEOUT;
 use crate::obsidian::path_token;
 use crate::vault::{is_epub, is_image};
 use std::fs;
 use std::io;
 use std::path::{Component, Path, PathBuf, Prefix};
-use std::sync::Mutex;
+use std::sync::mpsc::{self, RecvTimeoutError};
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::Duration;
 use tauri::http::header::{
     ACCESS_CONTROL_ALLOW_ORIGIN, CACHE_CONTROL, CONTENT_TYPE, X_CONTENT_TYPE_OPTIONS,
 };
@@ -40,6 +44,9 @@ const BASE64_LOWER_START: u8 = 26;
 const BASE64_DIGIT_START: u8 = 52;
 const BASE64_DASH: u8 = 62;
 const BASE64_UNDERSCORE: u8 = 63;
+
+/// The body and media type of a file, or the status that says why there is none.
+type Served = Result<(Vec<u8>, &'static str), StatusCode>;
 
 pub fn file_url(path: &Path) -> String {
     format!("{FILE_URL_PREFIX}{}", path_token(path))
@@ -160,7 +167,7 @@ fn media_type(path: &Path) -> &'static str {
         .map_or(DEFAULT_TYPE, |(_, media_type)| media_type)
 }
 
-fn serve(roots: &Roots, request_path: &str) -> Result<(Vec<u8>, &'static str), StatusCode> {
+fn serve(roots: &Roots, request_path: &str) -> Served {
     let mut parts = request_path
         .trim_start_matches(URL_SEPARATOR)
         .split(URL_SEPARATOR);
@@ -181,17 +188,38 @@ fn serve(roots: &Roots, request_path: &str) -> Result<(Vec<u8>, &'static str), S
     Ok((body, media_type(&path)))
 }
 
-/// The answer to one request. It reads the disk, so it never runs on the interface thread.
-pub fn respond(roots: &Roots, request_path: &str) -> Response<Vec<u8>> {
+/// Runs `job` on its own thread, which a hung drive may keep for a long time, and answers in time anyway.
+fn answer(job: impl FnOnce() -> Served + Send + 'static, timeout: Duration) -> Response<Vec<u8>> {
+    let (sender, receiver) = mpsc::channel();
+    // Without a thread the sender is gone, and waiting on the receiver reports it as a failure.
+    let _ = thread::Builder::new().spawn(move || {
+        let _ = sender.send(job());
+    });
+    let served = receiver.recv_timeout(timeout).unwrap_or_else(|error| {
+        Err(match error {
+            RecvTimeoutError::Timeout => StatusCode::GATEWAY_TIMEOUT,
+            RecvTimeoutError::Disconnected => StatusCode::INTERNAL_SERVER_ERROR,
+        })
+    });
     let builder = Response::builder()
         .header(ACCESS_CONTROL_ALLOW_ORIGIN, APP_ORIGIN)
         .header(X_CONTENT_TYPE_OPTIONS, NO_SNIFF)
         .header(CACHE_CONTROL, NO_STORE);
-    let response = match serve(roots, request_path) {
+    let response = match served {
         Ok((body, media_type)) => builder.header(CONTENT_TYPE, media_type).body(body),
         Err(status) => builder.status(status).body(Vec::new()),
     };
     response.expect("these headers are always valid")
+}
+
+fn respond_within(roots: &Arc<Roots>, request_path: &str, timeout: Duration) -> Response<Vec<u8>> {
+    let (roots, request_path) = (roots.clone(), request_path.to_string());
+    answer(move || serve(&roots, &request_path), timeout)
+}
+
+/// The answer to one request. It reads the disk, so it never runs on the interface thread.
+pub fn respond(roots: &Arc<Roots>, request_path: &str) -> Response<Vec<u8>> {
+    respond_within(roots, request_path, OPEN_TIMEOUT)
 }
 
 #[cfg(test)]
@@ -199,20 +227,38 @@ mod tests {
     use super::*;
     use crate::obsidian::{image_url, path_token};
     use std::fs;
-    use std::time::{Duration, Instant};
+    use std::process::Command;
+    use std::time::Instant;
 
     const WIN_INI: &str = "C:\\Windows\\win.ini";
     const LOCAL_ANSWER: Duration = Duration::from_secs(1);
+    const SHORT_TIMEOUT: Duration = Duration::from_millis(50);
+    const BLOCKED_FOR: Duration = Duration::from_secs(60);
+    // TEST-NET-1: an address that never answers, like a network drive that was disconnected.
+    const UNREACHABLE_SHARE: &str = "\\\\192.0.2.1\\share";
 
-    fn get(roots: &Roots, kind: &str, path: &Path) -> Response<Vec<u8>> {
+    fn get(roots: &Arc<Roots>, kind: &str, path: &Path) -> Response<Vec<u8>> {
         respond(roots, &format!("/{kind}/{}", path_token(path)))
     }
 
-    fn fixture() -> (tempfile::TempDir, Roots) {
+    fn fixture() -> (tempfile::TempDir, Arc<Roots>) {
         let dir = tempfile::tempdir().unwrap();
-        let roots = Roots::default();
+        let roots = Arc::new(Roots::default());
         roots.add(&[dir.path().to_path_buf()]);
         (dir, roots)
+    }
+
+    /// A root inside a folder, and in that folder, out of bounds, a file of each kind the routes serve.
+    fn fixture_with_files_outside() -> (tempfile::TempDir, PathBuf, Arc<Roots>) {
+        let parent = tempfile::tempdir().unwrap();
+        let root = parent.path().join("root");
+        fs::create_dir(&root).unwrap();
+        fs::create_dir(root.join("sub")).unwrap();
+        fs::write(parent.path().join("outside.png"), b"png").unwrap();
+        fs::write(parent.path().join("outside.epub"), b"zip").unwrap();
+        let roots = Arc::new(Roots::default());
+        roots.add(std::slice::from_ref(&root));
+        (parent, root, roots)
     }
 
     #[test]
@@ -244,20 +290,43 @@ mod tests {
 
     #[test]
     fn protocol_refuses_paths_outside_roots() {
-        let (dir, roots) = fixture();
-        let climbed = dir
-            .path()
-            .join("..\\..\\..\\..\\..\\..\\..\\Windows\\win.ini");
-        for path in [
-            PathBuf::from("..\\..\\Windows\\win.ini"),
-            PathBuf::from(WIN_INI),
-            climbed,
-        ] {
-            for kind in ["img", "file"] {
-                let status = get(&roots, kind, &path).status();
+        let (parent, root, roots) = fixture_with_files_outside();
+        for (kind, name) in [("img", "outside.png"), ("file", "outside.epub")] {
+            let paths = [
+                parent.path().join(name),
+                root.join("..").join(name),
+                root.join("sub\\..\\..").join(name),
+                root.join("..\\root\\..").join(name),
+                PathBuf::from("..").join(name),
+            ];
+            for path in &paths {
+                let status = get(&roots, kind, path).status();
                 assert_eq!(status, StatusCode::FORBIDDEN, "{kind} {path:?}");
             }
+            // The same files are served when their folder is a root: only the root check refused them.
+            let wider = Arc::new(Roots::default());
+            wider.add(&[parent.path().to_path_buf()]);
+            for path in &paths[..paths.len() - 1] {
+                let status = get(&wider, kind, path).status();
+                assert_eq!(status, StatusCode::OK, "{kind} {path:?}");
+            }
         }
+    }
+
+    #[test]
+    fn a_climb_out_of_a_root_is_refused_from_its_text_alone() {
+        let (_parent, root, roots) = fixture_with_files_outside();
+        // Not there, so a check that reached the disk would answer 404.
+        let status = get(&roots, "img", &root.join("..\\missing.png")).status();
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    #[test]
+    fn a_climb_that_stays_inside_a_root_is_served() {
+        let (_parent, root, roots) = fixture_with_files_outside();
+        fs::write(root.join("f.png"), b"png").unwrap();
+        let response = get(&roots, "img", &root.join("sub\\..\\f.png"));
+        assert_eq!(response.status(), StatusCode::OK);
     }
 
     #[test]
@@ -290,13 +359,57 @@ mod tests {
     fn a_link_that_leaves_a_root_is_refused() {
         let (dir, roots) = fixture();
         let outside = tempfile::tempdir().unwrap();
-        let target = outside.path().join("f.png");
-        fs::write(&target, b"png").unwrap();
-        let link = dir.path().join("link.png");
-        // Creating a symbolic link needs a privilege most accounts lack: then there is nothing to check.
-        if std::os::windows::fs::symlink_file(&target, &link).is_ok() {
-            assert_eq!(get(&roots, "img", &link).status(), StatusCode::FORBIDDEN);
-        }
+        fs::write(outside.path().join("f.png"), b"png").unwrap();
+        // A junction, because unlike a symbolic link it needs no privilege, so this always checks something.
+        let link = dir.path().join("link");
+        let created = Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(&link)
+            .arg(outside.path())
+            .output()
+            .unwrap();
+        assert!(created.status.success(), "{created:?}");
+        let through_link = link.join("f.png");
+        assert_eq!(fs::read(&through_link).unwrap(), b"png");
+        let status = get(&roots, "img", &through_link).status();
+        fs::remove_dir(&link).unwrap();
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    #[test]
+    fn a_stalled_drive_gets_an_answer_in_time() {
+        let started = Instant::now();
+        let response = answer(
+            || {
+                std::thread::sleep(BLOCKED_FOR);
+                Ok((Vec::new(), DEFAULT_TYPE))
+            },
+            SHORT_TIMEOUT,
+        );
+        assert!(started.elapsed() < BLOCKED_FOR);
+        assert_eq!(response.status(), StatusCode::GATEWAY_TIMEOUT);
+        assert_eq!(
+            response.headers()["access-control-allow-origin"],
+            APP_ORIGIN
+        );
+    }
+
+    #[test]
+    fn a_request_on_an_unreachable_root_does_not_wait_for_the_network() {
+        let root = PathBuf::from(UNREACHABLE_SHARE);
+        let roots = Arc::new(Roots::default());
+        roots.add(std::slice::from_ref(&root));
+        let request = format!("/img/{}", path_token(&root.join("a.png")));
+        let started = Instant::now();
+        let response = respond_within(&roots, &request, SHORT_TIMEOUT);
+        assert!(started.elapsed() < LOCAL_ANSWER, "{:?}", started.elapsed());
+        // Depending on the network here the answer is "no" at once or none in time: never a file.
+        assert_ne!(response.status(), StatusCode::OK);
+    }
+
+    #[test]
+    fn the_time_limit_is_the_one_of_opening_a_document() {
+        assert_eq!(OPEN_TIMEOUT, Duration::from_secs(10));
     }
 
     #[test]
