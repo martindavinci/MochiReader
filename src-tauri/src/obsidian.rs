@@ -86,6 +86,7 @@ enum Job<'a> {
     Link {
         node: &'a AstNode<'a>,
         link: Box<NodeLink>,
+        held_image: bool,
     },
     Image {
         node: &'a AstNode<'a>,
@@ -104,7 +105,16 @@ pub fn rewrite<'a>(arena: &'a Arena<'a>, root: &'a AstNode<'a>, source: &str, ct
     for job in jobs_in(root) {
         match job {
             Job::WikiLink { node, name, embed } => rewrite_wikilink(node, &name, embed, &finder),
-            Job::Link { node, link } => rewrite_link(node, link, ctx.doc_dir),
+            Job::Link {
+                node,
+                link,
+                held_image,
+            } => {
+                if held_image && shows_nothing(node) {
+                    node.append(arena.alloc(NodeValue::Text(link.url.clone().into()).into()));
+                }
+                rewrite_link(node, link, ctx.doc_dir);
+            }
             Job::Image {
                 node,
                 link,
@@ -131,13 +141,15 @@ fn written_line<'s>(
     source.get(start..end)
 }
 
-/// Lists the work first, because it changes the tree that is being walked. No recursion: a document
-/// can nest deep enough to overflow the stack.
+/// Lists the work first, because it changes the tree that is being walked. A link comes after the
+/// images inside it, because what they leave decides whether it still shows anything. No recursion:
+/// a document can nest deep enough to overflow the stack.
 fn jobs_in<'a>(root: &'a AstNode<'a>) -> Vec<Job<'a>> {
     let mut jobs = Vec::new();
     let mut open_links = 0usize;
     let mut open_images = 0usize;
     let mut open_raw = 0usize;
+    let mut link_held_image = false;
     for edge in root.traverse() {
         match edge {
             NodeEdge::Start(node) => match &node.data().value {
@@ -149,17 +161,13 @@ fn jobs_in<'a>(root: &'a AstNode<'a>) -> Vec<Job<'a>> {
                         embed: wikilink.embed,
                     });
                 }
-                NodeValue::Link(link) => {
+                NodeValue::Link(_) => {
+                    link_held_image &= open_links > 0;
                     open_links += 1;
-                    if scheme_of(&link.url).is_none() {
-                        jobs.push(Job::Link {
-                            node,
-                            link: link.clone(),
-                        });
-                    }
                 }
                 NodeValue::Image(link) => {
                     open_images += 1;
+                    link_held_image |= open_links > 0;
                     jobs.push(Job::Image {
                         node,
                         link: link.clone(),
@@ -183,7 +191,17 @@ fn jobs_in<'a>(root: &'a AstNode<'a>) -> Vec<Job<'a>> {
                 _ => {}
             },
             NodeEdge::End(node) => match &node.data().value {
-                NodeValue::WikiLink(_) | NodeValue::Link(_) => open_links -= 1,
+                NodeValue::WikiLink(_) => open_links -= 1,
+                NodeValue::Link(link) => {
+                    open_links -= 1;
+                    if link_held_image || scheme_of(&link.url).is_none() {
+                        jobs.push(Job::Link {
+                            node,
+                            link: link.clone(),
+                            held_image: link_held_image,
+                        });
+                    }
+                }
                 NodeValue::Image(_) => open_images -= 1,
                 value if value.block() => open_raw = 0,
                 _ => {}
@@ -242,7 +260,24 @@ fn set_target(node: &AstNode<'_>, kind: fn(Box<NodeLink>) -> NodeValue, url: Str
     }));
 }
 
+/// Whether a link has nothing left to click on: no text, and no image that the page can load.
+fn shows_nothing<'a>(link: &'a AstNode<'a>) -> bool {
+    link.descendants()
+        .skip(1)
+        .all(|node| match &node.data().value {
+            NodeValue::Text(text) => text.trim().is_empty(),
+            NodeValue::Code(_)
+            | NodeValue::Image(_)
+            | NodeValue::HtmlInline(_)
+            | NodeValue::Raw(_) => false,
+            _ => true,
+        })
+}
+
 fn rewrite_link<'a>(node: &'a AstNode<'a>, mut link: Box<NodeLink>, doc_dir: Option<&Path>) {
+    if scheme_of(&link.url).is_some() {
+        return;
+    }
     let Some(relative) = relative_path(&link.url).filter(|path| is_markdown(path)) else {
         return;
     };
@@ -766,6 +801,59 @@ mod tests {
         assert_eq!(html.matches("<a ").count(), 1, "{html}");
         assert!(html.contains("<a href=\"https://e.org\""), "{html}");
         assert!(html.contains(">a</a>") && !html.contains("<img"), "{html}");
+    }
+
+    #[test]
+    fn image_with_no_text_inside_a_link_leaves_a_link_to_read() {
+        let dir = sample_vault();
+        for source in [
+            "prima [![](https://e.org/f.png)](https://e.org/pagina) dopo\n",
+            "[![](https://e.org/f.png)](https://e.org/pagina)\n",
+            "[![](https://e.org/a.png)![](https://e.org/b.png)](https://e.org/pagina)\n",
+            "[**![](https://e.org/f.png)**](https://e.org/pagina)\n",
+            "[![](data:image/png;base64,AAAA)](https://e.org/pagina)\n",
+            "[![](/img/f.png)](https://e.org/pagina)\n",
+        ] {
+            let html = in_vault(&dir, "b", source).html;
+            assert_eq!(html.matches("<a ").count(), 1, "{source:?}: {html}");
+            assert!(
+                html.contains("https://e.org/pagina</"),
+                "{source:?}: {html}"
+            );
+            assert!(!html.contains("<img"), "{source:?}: {html}");
+            assert!(!html.contains("f.png"), "{source:?}: {html}");
+        }
+    }
+
+    #[test]
+    fn link_that_shows_something_gets_no_added_text() {
+        let dir = sample_vault();
+        let html = alone("[![](https://e.org/f.png) testo](https://e.org/pagina)\n").html;
+        assert!(html.contains("testo</a>"), "{html}");
+        assert_eq!(html.matches("https://e.org/pagina").count(), 1, "{html}");
+        let html = alone("[![](https://e.org/f.png)`codice`](https://e.org/pagina)\n").html;
+        assert_eq!(html.matches("https://e.org/pagina").count(), 1, "{html}");
+        let html = in_vault(&dir, "", "[![](img/f.png)](https://e.org/pagina)\n").html;
+        assert!(html.contains(IMAGE_MARK), "{html}");
+        assert_eq!(html.matches("https://e.org/pagina").count(), 1, "{html}");
+        let html = alone("[](https://e.org/pagina)\n").html;
+        assert_eq!(html.matches("https://e.org/pagina").count(), 1, "{html}");
+    }
+
+    #[test]
+    fn image_with_no_text_inside_a_local_link_names_the_written_target() {
+        let dir = tree(&["altra.md"]);
+        let html = in_folder(dir.path(), "[![](https://e.org/f.png)](altra.md)\n").html;
+        assert!(
+            html.contains(&doc_link(dir.path().join("altra.md"))),
+            "{html}"
+        );
+        assert!(html.contains(">altra.md</a>"), "{html}");
+        let html = in_folder(dir.path(), "[![](https://e.org/f.png)](assente.md)\n").html;
+        assert!(
+            html.contains("assente.md") && !html.contains("<a"),
+            "{html}"
+        );
     }
 
     #[test]
