@@ -194,6 +194,41 @@ test('the voice of the same region comes first', async () => {
   assert.equal(synth.spoken[0].voice, ZIRA, 'another region is better than no voice');
 });
 
+test('a tag that is loosely written reaches the installed voice', async () => {
+  const cases = {
+    Korean: 'ko-KR', Polish: 'pl-PL', Greek: 'el-GR', Anglais: 'en-US', 'it/en': 'it-IT', kr: 'ko-KR', gr: 'el-GR',
+    '(it)': 'it-IT', '"it"': 'it-IT', 'it|en': 'it-IT', jp: 'ja-JP', cn: 'zh-CN',
+  };
+  const installed = ['en-US', 'it-IT', 'ko-KR', 'pl-PL', 'el-GR', 'ja-JP', 'zh-CN'].map((lang) => voice(lang, lang));
+  for (const [lang, expected] of Object.entries(cases)) {
+    const { engine, synth } = setup(installed);
+    engine.speak('Ciao.', { voiceId: null, rate: 1, lang });
+    assert.equal(synth.spoken[0]?.voice.lang, expected, lang);
+  }
+});
+
+test('the closest voice is the one that gets the job', async () => {
+  const pick = (lang, ...langs) => {
+    const { engine, synth } = setup(langs.map((name) => voice(name, name)));
+    engine.speak('Ciao.', { voiceId: null, rate: 1, lang });
+    return synth.spoken[0]?.voice.lang;
+  };
+  const CHINESE = ['en-US', 'en-GB', 'zh-CN', 'zh-HK', 'zh-TW'];
+  assert.equal(pick('en-UK', ...CHINESE), 'en-GB');
+  assert.equal(pick('zh-Hant', ...CHINESE), 'zh-TW');
+  assert.equal(pick('zh-Hant-TW', ...CHINESE), 'zh-TW');
+  assert.equal(pick('zh-Hant-HK', ...CHINESE), 'zh-HK');
+  assert.equal(pick('yue', ...CHINESE), 'zh-HK');
+  assert.equal(pick('zh-yue', ...CHINESE), 'zh-HK');
+  assert.equal(pick('zh-Hans', 'zh-TW', 'zh-CN'), 'zh-CN');
+  assert.equal(pick('zh-Hant', 'zh-CN', 'zh-HK'), 'zh-HK', 'the other traditional voice before the simplified one');
+  assert.equal(pick('yue', 'zh-CN', 'zh-TW'), 'zh-TW');
+  assert.equal(pick('zh-TW', 'zh-CN', 'zh-HK'), 'zh-HK');
+  assert.equal(pick('zh-HK', 'zh-CN', 'zh-TW'), 'zh-TW');
+  assert.equal(pick('zh-Hant', 'zh-CN'), 'zh-CN', 'another script is better than no voice');
+  assert.equal(pick('en-AU', 'en-US', 'en-GB'), 'en-US');
+});
+
 test('the utterance gets a well-formed language tag', async () => {
   const cases = { ita: 'it', it_IT: 'it-IT', 'IT-it': 'it-IT', 'en-GB': 'en-GB', it: 'it' };
   for (const [lang, expected] of Object.entries(cases)) {

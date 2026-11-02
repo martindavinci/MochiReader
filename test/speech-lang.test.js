@@ -134,7 +134,14 @@ test('language tags reduce to a two-letter language and a region', () => {
     no: ['nb', null, 'nb'],
     nn: ['nb', null, 'nb'],
     cmn: ['zh', null, 'zh'],
-    yue: ['zh', null, 'zh'],
+    yue: ['zh', 'HK', 'zh-HK'],
+    'zh-yue': ['zh', 'HK', 'zh-HK'],
+    'yue-Hant': ['zh', 'HK', 'zh-HK'],
+    'zh-Hant': ['zh', 'TW', 'zh-TW'],
+    'zh-Hans': ['zh', 'CN', 'zh-CN'],
+    'zh-Hant-HK': ['zh', 'HK', 'zh-HK'],
+    'en-UK': ['en', 'GB', 'en-GB'],
+    en_uk: ['en', 'GB', 'en-GB'],
     Italian: ['it', null, 'it'],
     italiano: ['it', null, 'it'],
     'it,en': ['it', null, 'it'],
@@ -152,6 +159,48 @@ test('language tags reduce to a two-letter language and a region', () => {
   for (const empty of ['', '   ', null, undefined, 'und', 'mul', 'zxx', 'mis', 'UND', 'und-US', 'mul-Latn']) {
     assert.deepEqual(parseLangTag(empty), { language: '', region: null, canonical: '' });
   }
+});
+
+test('plain names of a language are read in English, Italian, its own and its neighbours', () => {
+  const names = {
+    it: 'Italien Italienisch italienne',
+    en: 'Anglais Inglés ingles Englisch',
+    fr: 'Französisch Francés',
+    de: 'Allemand Alemán',
+    es: 'Espagnol Spanisch',
+    ko: 'Korean coreano',
+    pl: 'Polish polski polacco',
+    el: 'Greek greco',
+    sv: 'Swedish svenska svedese',
+    nb: 'Norwegian norsk norvegese',
+    da: 'Danish dansk danese',
+    tr: 'Turkish turco',
+    cs: 'Czech ceco',
+    hu: 'Hungarian magyar ungherese',
+    ar: 'Arabic arabo',
+    ru: 'russo',
+    ja: 'giapponese',
+    zh: 'cinese mandarin',
+    nl: 'olandese',
+    fi: 'Finnish',
+    ro: 'Romanian',
+  };
+  for (const [language, spellings] of Object.entries(names)) {
+    for (const name of spellings.split(' ')) assert.equal(parseLangTag(name).language, language, name);
+  }
+  assert.deepEqual(parseLangTag('Cantonese'), { language: 'zh', region: 'HK', canonical: 'zh-HK' });
+});
+
+test('the code of a country stands for its language where a language has no such code', () => {
+  const codes = { kr: 'ko', jp: 'ja', cn: 'zh', gr: 'el', cz: 'cs', dk: 'da', ua: 'uk', gb: 'en' };
+  for (const [code, language] of Object.entries(codes)) assert.equal(parseLangTag(code).language, language, code);
+});
+
+test('a slash, a pipe, quotes or brackets are not part of the language', () => {
+  for (const tag of ['it/en', 'it|en', '(it)', '"it"', "'it'", '[it]', '“it”', '( it )', '"it-IT"']) {
+    assert.equal(parseLangTag(tag).language, 'it', tag);
+  }
+  assert.deepEqual(parseLangTag('"en-GB"'), { language: 'en', region: 'GB', canonical: 'en-GB' });
 });
 
 const ITALIAN_THAT_LOOKS_LIKE_OTHERS = [

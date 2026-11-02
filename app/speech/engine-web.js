@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-import { parseLangTag } from './lang.js';
+import { parseLangTag, regionsInOrder } from './lang.js';
 
 /** SpeechEngine on top of speechSynthesis. Only local voices are listed or used: no network. */
 
@@ -77,7 +77,8 @@ export class WebSpeechEngine {
     const wanted = parseLangTag(lang);
     if (!wanted.language) return local[0];
     const sameLanguage = local.filter((voice) => parseLangTag(voice.lang).language === wanted.language);
-    return sameLanguage.find((voice) => parseLangTag(voice.lang).region === wanted.region) ?? sameLanguage[0];
+    const ofRegion = (region) => sameLanguage.find((voice) => parseLangTag(voice.lang).region === region);
+    return regionsInOrder(wanted).map(ofRegion).find(Boolean) ?? sameLanguage[0];
   }
 
   #voicesChanged() {

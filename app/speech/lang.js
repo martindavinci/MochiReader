@@ -111,15 +111,58 @@ export function detectLang(text) {
   return lang;
 }
 
-// EPUB metadata says "ita" as often as "it": ISO 639-2 codes, in both forms where there are two,
-// old, general or neighbouring tags, for the languages Windows has voices for, and for the most
-// common languages their plain names, which are not tags but do get written there.
+// EPUB metadata says "ita" as often as "it": ISO 639-2 codes, in both forms where there are two, old,
+// general or neighbouring tags, for the languages Windows has voices for. Then what is not a tag but does get
+// written there: plain names, in English, in Italian, in the language itself and in its large neighbours,
+// and the code of a country whose language has another one (jp, not ja), where no language has that code.
 const OTHER_SPELLINGS = {
-  ar: 'ara', bg: 'bul', ca: 'cat', cs: 'ces cze', cy: 'cym wel', da: 'dan', de: 'deu ger german deutsch tedesco', el: 'ell gre', en: 'eng english inglese',
-  es: 'spa spanish español espanol castellano spagnolo', et: 'est', eu: 'eus baq', fa: 'fas per', fi: 'fin', fil: 'tgl tl', fr: 'fra fre french français francais francese', ga: 'gle', gl: 'glg',
-  he: 'heb iw', hi: 'hin', hr: 'hrv', hu: 'hun', id: 'ind in', is: 'isl ice', it: 'ita italian italiano', ja: 'jpn japanese', ko: 'kor', lt: 'lit',
-  lv: 'lav', ms: 'msa may', nb: 'nob nor no nn nno', nl: 'nld dut dutch', pl: 'pol', pt: 'por portuguese português portugues portoghese', ro: 'ron rum', ru: 'rus russian', sk: 'slk slo',
-  sl: 'slv', sr: 'srp', sv: 'swe', ta: 'tam', te: 'tel', th: 'tha', tr: 'tur', uk: 'ukr', vi: 'vie', zh: 'zho chi cmn yue chinese',
+  ar: 'ara arabic arabo arabe árabe arabisch',
+  bg: 'bul bulgarian bulgaro',
+  ca: 'cat catalan català catalano',
+  cs: 'ces cze czech čeština cestina ceco cz',
+  cy: 'cym wel welsh gallese',
+  da: 'dan danish dansk danese dk',
+  de: 'deu ger german deutsch tedesco allemand alemán aleman',
+  el: 'ell gre greek greco grec griego griechisch gr',
+  en: 'eng english inglese anglais inglés ingles englisch gb',
+  es: 'spa spanish español espanol castellano spagnolo espagnol spanisch',
+  et: 'est estonian estone',
+  eu: 'eus baq basque basco',
+  fa: 'fas per persian farsi persiano',
+  fi: 'fin finnish suomi finlandese',
+  fil: 'tgl tl filipino tagalog',
+  fr: 'fra fre french français francais francese französisch franzosisch francés frances',
+  ga: 'gle irish irlandese',
+  gl: 'glg galician galiziano',
+  he: 'heb iw hebrew ebraico',
+  hi: 'hin hindi',
+  hr: 'hrv croatian hrvatski croato',
+  hu: 'hun hungarian magyar ungherese',
+  id: 'ind in indonesian indonesiano',
+  is: 'isl ice icelandic islandese',
+  it: 'ita italian italiano italien italienisch italienne italiana',
+  ja: 'jpn japanese giapponese japonais japonés japanisch jp',
+  ko: 'kor korean coreano coréen koreanisch kr',
+  lt: 'lit lithuanian lituano',
+  lv: 'lav latvian lettone',
+  ms: 'msa may malay malese',
+  nb: 'nob nor no nn nno norwegian norsk norvegese',
+  nl: 'nld dut dutch nederlands olandese flemish',
+  pl: 'pol polish polski polacco',
+  pt: 'por portuguese português portugues portoghese',
+  ro: 'ron rum romanian română rumeno',
+  ru: 'rus russian russo russe ruso russisch',
+  sk: 'slk slo slovak slovacco',
+  sl: 'slv slovenian sloveno',
+  sr: 'srp serbian serbo',
+  sv: 'swe swedish svenska svedese',
+  ta: 'tam tamil',
+  te: 'tel telugu',
+  th: 'tha thai tailandese',
+  tr: 'tur turkish türkçe turco',
+  uk: 'ukr ukrainian ucraino ua',
+  vi: 'vie vietnamese vietnamita',
+  zh: 'zho chi cmn yue chinese cinese chinois chino chinesisch mandarin cantonese cn',
 };
 const LANGUAGE_BY_SPELLING = new Map(Object.entries(OTHER_SPELLINGS)
   .flatMap(([language, spellings]) => spellings.split(' ').map((spelling) => [spelling, language])));
@@ -127,25 +170,50 @@ const LANGUAGE_BY_SPELLING = new Map(Object.entries(OTHER_SPELLINGS)
 // ISO 639 codes that name no language: undetermined, several, no linguistic content, not coded.
 const NO_LANGUAGE = new Set(['und', 'mul', 'zxx', 'mis']);
 const NOT_LANGUAGE = { language: '', region: null, canonical: '' };
-// What comes after a tag: another language of a list, or the charset of a locale.
-const AFTER_TAG = /[,;\s.@]/;
+const BEFORE_TAG = /^[\s("'[{«“‘]+/;
+// What comes after a tag: another language of a list, the charset of a locale, or the end of what wraps it.
+const AFTER_TAG = /[,;\s.@/|)"'\]}»”’]/;
 const TAG_SEPARATOR = /[-_]/;
 const REGION = /^(?:[a-z]{2}|\d{3})$/i;
+const REGION_SPELLINGS = { UK: 'GB' };
+// What says where a language is spoken when the tag names no region. Cantonese goes first: it writes in
+// traditional characters too, and it is what its region is chosen by.
+const REGIONS_OF_SUBTAGS = [['yue', 'HK'], ['cantonese', 'HK'], ['hant', 'TW'], ['hans', 'CN']];
+// Chinese regions that write alike: another of them suits a text better than a voice of the other script.
+const REGIONS_THAT_WRITE_ALIKE = [['TW', 'HK', 'MO'], ['HK', 'TW', 'MO'], ['MO', 'HK', 'TW'], ['CN', 'SG'], ['SG', 'CN']];
+const CHINESE = 'zh';
+
+function regionOf(names, subtags) {
+  const region = subtags.find((subtag) => REGION.test(subtag))?.toUpperCase();
+  if (region) return REGION_SPELLINGS[region] ?? region;
+  const lowercase = names.map((name) => name.toLowerCase());
+  return REGIONS_OF_SUBTAGS.find(([subtag]) => lowercase.includes(subtag))?.[1] ?? null;
+}
 
 /**
- * Reads a language tag however it is spelled ("ita", "it_IT", "IT-it", "en-GB", "Italian", "en,it").
+ * Reads a language tag however it is spelled ("ita", "it_IT", "IT-it", "en-GB", "Italian", "en,it", "(it)").
  * @param {string|null|undefined} tag
  * @returns {{language: string, region: string|null, canonical: string}} language and canonical
  *   are empty when the tag is, or names no language ("und")
  */
 export function parseLangTag(tag) {
-  const [primary, ...rest] = String(tag ?? '').trim().split(AFTER_TAG)[0].split(TAG_SEPARATOR);
+  const [primary, ...rest] = String(tag ?? '').replace(BEFORE_TAG, '').split(AFTER_TAG)[0].split(TAG_SEPARATOR);
   const lowercase = primary.toLowerCase();
   if (lowercase === '' || NO_LANGUAGE.has(lowercase)) return NOT_LANGUAGE;
   const language = LANGUAGE_BY_SPELLING.get(lowercase) ?? lowercase;
   // A single letter opens an extension: nothing after it describes the language.
   const extension = rest.findIndex((subtag) => subtag.length === 1);
   const subtags = extension === -1 ? rest : rest.slice(0, extension);
-  const region = subtags.find((subtag) => REGION.test(subtag))?.toUpperCase() ?? null;
+  const region = regionOf([primary, ...subtags], subtags);
   return { language, region, canonical: region ? `${language}-${region}` : language };
+}
+
+/**
+ * The regions whose voices suit a language tag, the closest first.
+ * @param {{language: string, region: string|null}} tag
+ * @returns {(string|null)[]}
+ */
+export function regionsInOrder({ language, region }) {
+  const alike = language === CHINESE ? REGIONS_THAT_WRITE_ALIKE.find(([first]) => first === region) : null;
+  return alike ?? [region];
 }
