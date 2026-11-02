@@ -603,6 +603,29 @@ mod tests {
     }
 
     #[test]
+    fn a_new_render_sees_notes_added_and_removed() {
+        let dir = tree(&[".obsidian/app.json", "vecchia.md", "qui.md"]);
+        let source = "[[vecchia]] e [[nuova]]
+";
+        let html = in_vault(&dir, "", source).html;
+        assert!(
+            html.contains(&doc_link(dir.path().join("vecchia.md"))),
+            "{html}"
+        );
+
+        fs::write(dir.path().join("nuova.md"), "x").unwrap();
+        fs::remove_file(dir.path().join("vecchia.md")).unwrap();
+
+        let html = in_vault(&dir, "", source).html;
+        assert!(
+            html.contains(&doc_link(dir.path().join("nuova.md"))),
+            "{html}"
+        );
+        assert!(html.contains("vecchia e "), "{html}");
+        assert_eq!(html.matches("<a").count(), 1, "{html}");
+    }
+
+    #[test]
     fn wikilink_without_any_folder_is_plain_text() {
         let html = alone("[[nota]]\n").html;
         assert!(html.contains("nota") && !html.contains("<a"), "{html}");

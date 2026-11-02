@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, LazyLock, Mutex, OnceLock, PoisonError};
+use std::sync::OnceLock;
 
 const OBSIDIAN_DIR: &str = ".obsidian";
 const DOT: char = '.';
@@ -16,31 +16,26 @@ const MARKDOWN_EXTENSIONS: [&str; 2] = ["md", "markdown"];
 const EPUB_EXTENSION: &str = "epub";
 const IMAGE_EXTENSIONS: [&str; 8] = ["avif", "bmp", "gif", "jpeg", "jpg", "png", "svg", "webp"];
 
-type SharedIndex = Arc<OnceLock<NameIndex>>;
-
-/// One index per root for the life of the process, however many documents open from that vault.
-/// A note created after the first lookup is not found until the app restarts.
-static INDEXES: LazyLock<Mutex<HashMap<String, SharedIndex>>> = LazyLock::new(Default::default);
-
 pub struct Vault {
     pub root: PathBuf,
-    index: SharedIndex,
+    index: OnceLock<NameIndex>,
 }
 
-/// The closest folder holding `doc` that has a `.obsidian` folder.
+/// The closest folder holding `doc` that has a `.obsidian` folder. Call it for every render: a
+/// `Vault` keeps the files it found, so only a new one sees notes added or removed since.
 pub fn find_vault(doc: &Path) -> Option<Vault> {
     let root = doc
         .ancestors()
         .find(|folder| folder.join(OBSIDIAN_DIR).is_dir())?;
     Some(Vault {
         root: root.to_path_buf(),
-        index: shared_index(root),
+        index: OnceLock::new(),
     })
 }
 
 impl Vault {
-    /// The file `name` means when written in `from`, a document or its folder. The first call for
-    /// a root walks the whole vault, so documents without wikilinks never pay for it.
+    /// The file `name` means when written in `from`, a document or its folder. The first call
+    /// walks the whole vault, so documents without wikilinks never pay for it.
     pub fn resolve(&self, name: &str, from: &Path) -> Option<PathBuf> {
         self.index
             .get_or_init(|| NameIndex::of_tree(&self.root))
@@ -51,20 +46,6 @@ impl Vault {
     pub(crate) fn is_indexed(&self) -> bool {
         self.index.get().is_some()
     }
-
-    #[cfg(test)]
-    fn shares_index_with(&self, other: &Vault) -> bool {
-        Arc::ptr_eq(&self.index, &other.index)
-    }
-}
-
-fn shared_index(root: &Path) -> SharedIndex {
-    INDEXES
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .entry(root.to_string_lossy().to_lowercase())
-        .or_default()
-        .clone()
 }
 
 pub fn is_markdown(path: &Path) -> bool {
@@ -325,12 +306,22 @@ mod tests {
     }
 
     #[test]
-    fn index_is_built_once_per_root() {
-        let dir = tree(&[".obsidian/app.json", "nota.md"]);
-        let first = vault_of(&dir);
-        let second = vault_of(&dir);
-        assert!(first.shares_index_with(&second));
-        let other = tree(&[".obsidian/app.json"]);
-        assert!(!first.shares_index_with(&vault_of(&other)));
+    fn a_vault_keeps_what_it_found_and_a_new_one_looks_again() {
+        let dir = tree(&[".obsidian/app.json", "vecchia.md"]);
+        let vault = vault_of(&dir);
+        let old = Some(dir.path().join("vecchia.md"));
+        assert_eq!(vault.resolve("vecchia", dir.path()), old);
+
+        fs::write(dir.path().join("nuova.md"), "x").unwrap();
+        fs::remove_file(dir.path().join("vecchia.md")).unwrap();
+        assert_eq!(vault.resolve("vecchia", dir.path()), old);
+        assert_eq!(vault.resolve("nuova", dir.path()), None);
+
+        let vault = vault_of(&dir);
+        assert_eq!(vault.resolve("vecchia", dir.path()), None);
+        assert_eq!(
+            vault.resolve("nuova", dir.path()),
+            Some(dir.path().join("nuova.md"))
+        );
     }
 }
