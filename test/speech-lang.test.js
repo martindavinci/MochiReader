@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { detectLang } from '../app/speech/lang.js';
+import { detectLang, parseLangTag } from '../app/speech/lang.js';
 
 // The author's vault, used when it is there: real text, too personal to copy into the fixtures.
 const DAILY_DIR = 'C:/Users/marty/Documents/git/_MDV/LeonardoTechTips/00_Daily/Daily';
@@ -115,4 +115,29 @@ test('addresses do not count as words', () => {
 test('a real daily is recognized', { skip: !existsSync(DAILY_DIR) && 'the vault is not on this machine' }, () => {
   assert.equal(detectLang(readFileSync(join(DAILY_DIR, '2026-10-30.md'), 'utf8')), 'it');
   assert.equal(detectLang(readFileSync(join(DAILY_DIR, '2026-10-30-en.md'), 'utf8')), 'en');
+});
+
+test('language tags reduce to a two-letter language and a region', () => {
+  const cases = {
+    it: ['it', null, 'it'],
+    ita: ['it', null, 'it'],
+    ITA: ['it', null, 'it'],
+    eng: ['en', null, 'en'],
+    fre: ['fr', null, 'fr'],
+    fra: ['fr', null, 'fr'],
+    it_IT: ['it', 'IT', 'it-IT'],
+    'IT-it': ['it', 'IT', 'it-IT'],
+    'en-GB': ['en', 'GB', 'en-GB'],
+    ' en-gb ': ['en', 'GB', 'en-GB'],
+    'zh-Hant-TW': ['zh', 'TW', 'zh-TW'],
+    'es-419': ['es', '419', 'es-419'],
+    no: ['nb', null, 'nb'],
+    constructor: ['constructor', null, 'constructor'],
+  };
+  for (const [tag, [language, region, canonical]] of Object.entries(cases)) {
+    assert.deepEqual(parseLangTag(tag), { language, region, canonical }, tag);
+  }
+  for (const empty of ['', '   ', null, undefined]) {
+    assert.deepEqual(parseLangTag(empty), { language: '', region: null, canonical: '' });
+  }
 });

@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+import { parseLangTag } from './lang.js';
+
 /** SpeechEngine on top of speechSynthesis. Only local voices are listed or used: no network. */
 
 /** The voice list can arrive after the page loads, and on some systems it never does. */
 export const VOICES_WAIT_MS = 2000;
 
 const CANCEL_ERRORS = new Set(['canceled', 'interrupted']);
-
-const primaryLang = (tag) => tag.toLowerCase().split(/[-_]/)[0];
 
 export class WebSpeechEngine {
   #synth;
@@ -47,7 +47,7 @@ export class WebSpeechEngine {
         const utterance = new this.#Utterance(text);
         utterance.voice = voice;
         utterance.rate = rate;
-        utterance.lang = lang ?? voice.lang;
+        utterance.lang = parseLangTag(lang).canonical || voice.lang;
         utterance.onend = () => settle('end');
         utterance.onerror = (event) => settle(CANCEL_ERRORS.has(event.error) ? 'stopped' : 'error');
         this.#utterance = utterance;
@@ -74,8 +74,10 @@ export class WebSpeechEngine {
   #pickVoice(voiceId, lang) {
     const local = this.#localVoices();
     if (voiceId) return local.find((voice) => voice.voiceURI === voiceId);
-    if (!lang) return local[0];
-    return local.find((voice) => primaryLang(voice.lang) === primaryLang(lang));
+    const wanted = parseLangTag(lang);
+    if (!wanted.language) return local[0];
+    const sameLanguage = local.filter((voice) => parseLangTag(voice.lang).language === wanted.language);
+    return sameLanguage.find((voice) => parseLangTag(voice.lang).region === wanted.region) ?? sameLanguage[0];
   }
 
   #voicesChanged() {

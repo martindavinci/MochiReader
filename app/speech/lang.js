@@ -62,3 +62,32 @@ export function detectLang(text) {
   if (OTHER_LANGUAGES_WORDS.some((common) => count(common) >= best)) return null;
   return it > en ? 'it' : 'en';
 }
+
+// EPUB metadata says "ita" as often as "it": ISO 639-2 codes, in both forms where there are two,
+// and old or general tags, for the languages Windows has voices for.
+const OTHER_SPELLINGS = {
+  ar: 'ara', bg: 'bul', ca: 'cat', cs: 'ces cze', cy: 'cym wel', da: 'dan', de: 'deu ger', el: 'ell gre', en: 'eng',
+  es: 'spa', et: 'est', eu: 'eus baq', fa: 'fas per', fi: 'fin', fil: 'tgl tl', fr: 'fra fre', ga: 'gle', gl: 'glg',
+  he: 'heb iw', hi: 'hin', hr: 'hrv', hu: 'hun', id: 'ind in', is: 'isl ice', it: 'ita', ja: 'jpn', ko: 'kor', lt: 'lit',
+  lv: 'lav', ms: 'msa may', nb: 'nob nor no', nl: 'nld dut', pl: 'pol', pt: 'por', ro: 'ron rum', ru: 'rus', sk: 'slk slo',
+  sl: 'slv', sr: 'srp', sv: 'swe', ta: 'tam', te: 'tel', th: 'tha', tr: 'tur', uk: 'ukr', vi: 'vie', zh: 'zho chi',
+};
+const LANGUAGE_BY_SPELLING = new Map(Object.entries(OTHER_SPELLINGS)
+  .flatMap(([language, spellings]) => spellings.split(' ').map((spelling) => [spelling, language])));
+
+const TAG_SEPARATOR = /[-_]/;
+const REGION = /^(?:[a-z]{2}|\d{3})$/i;
+
+/**
+ * Reads a language tag however it is spelled ("ita", "it_IT", "IT-it", "en-GB").
+ * @param {string|null|undefined} tag
+ * @returns {{language: string, region: string|null, canonical: string}} language and canonical
+ *   are empty when the tag is
+ */
+export function parseLangTag(tag) {
+  const [primary, ...rest] = String(tag ?? '').trim().split(TAG_SEPARATOR);
+  const lowercase = primary.toLowerCase();
+  const language = LANGUAGE_BY_SPELLING.get(lowercase) ?? lowercase;
+  const region = rest.find((subtag) => REGION.test(subtag))?.toUpperCase() ?? null;
+  return { language, region, canonical: region ? `${language}-${region}` : language };
+}

@@ -162,6 +162,62 @@ test('language matching ignores the region and the case', async () => {
   assert.equal(synth.spoken[0].voice.name, 'Hazel');
 });
 
+test('any spelling of a language tag finds the installed voice', async () => {
+  for (const lang of ['ita', 'ITA', 'it', 'IT', 'it_IT', 'IT-it', 'it-CH', ' it-IT ']) {
+    const { engine, synth } = setup([ZIRA, ELSA]);
+    engine.speak('Ciao.', { voiceId: null, rate: 1, lang });
+    assert.equal(synth.spoken[0]?.voice, ELSA, lang);
+  }
+  for (const lang of ['eng', 'en', 'en_US', 'EN-gb', 'en-GB']) {
+    const { engine, synth } = setup([ELSA, ZIRA]);
+    engine.speak('Hi.', { voiceId: null, rate: 1, lang });
+    assert.equal(synth.spoken[0]?.voice, ZIRA, lang);
+  }
+});
+
+test('an installed voice written in another spelling is found too', async () => {
+  const underscored = voice('Android', 'it_IT');
+  const { engine, synth } = setup([ZIRA, underscored]);
+  engine.speak('Ciao.', { voiceId: null, rate: 1, lang: 'ita' });
+  assert.equal(synth.spoken[0].voice, underscored);
+});
+
+test('the voice of the same region comes first', async () => {
+  const HAZEL = voice('Hazel', 'en-GB');
+  for (const lang of ['en-GB', 'en_GB', 'EN-gb', 'eng-GB']) {
+    const { engine, synth } = setup([ZIRA, HAZEL]);
+    engine.speak('Hi.', { voiceId: null, rate: 1, lang });
+    assert.equal(synth.spoken[0].voice, HAZEL, lang);
+  }
+  const { engine, synth } = setup([ZIRA, HAZEL]);
+  engine.speak('Hi.', { voiceId: null, rate: 1, lang: 'en-AU' });
+  assert.equal(synth.spoken[0].voice, ZIRA, 'another region is better than no voice');
+});
+
+test('the utterance gets a well-formed language tag', async () => {
+  const cases = { ita: 'it', it_IT: 'it-IT', 'IT-it': 'it-IT', 'en-GB': 'en-GB', it: 'it' };
+  for (const [lang, expected] of Object.entries(cases)) {
+    const { engine, synth } = setup([ELSA, voice('Hazel', 'en-GB')]);
+    engine.speak('Ciao.', { voiceId: null, rate: 1, lang });
+    assert.equal(synth.spoken[0].lang, expected, lang);
+  }
+});
+
+test('a language with no voice still resolves as error, whatever its spelling', async () => {
+  for (const lang of ['fra', 'fre', 'fr_FR', 'xyz']) {
+    const { engine, synth } = setup([ELSA, ZIRA]);
+    assert.equal(await engine.speak('Salut.', { voiceId: null, rate: 1, lang }), 'error', lang);
+    assert.equal(synth.spoken.length, 0);
+  }
+});
+
+test('a blank language counts as no language', async () => {
+  const { engine, synth } = setup([ZIRA, ELSA]);
+  engine.speak('Hi.', { voiceId: null, rate: 1, lang: '   ' });
+  assert.equal(synth.spoken[0].voice, ZIRA);
+  assert.equal(synth.spoken[0].lang, 'en-US');
+});
+
 test('without a language it takes the first local voice and its language', async () => {
   const { engine, synth } = setup([ONLINE, ZIRA, ELSA]);
   engine.speak('Hi.', { voiceId: null, rate: 1, lang: null });
