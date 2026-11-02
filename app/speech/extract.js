@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { HOST_URLS, SCHEME_URL, hostName, isSchemeUrlText, isUrlText, namesAddress } from './hostname.js';
+import { HOST_URLS, SCHEME_URL, hostName, isSchemeUrlText, isUrlText, mayBeTwoWords, namesAddress } from './hostname.js';
 import { splitSentences } from './sentences.js';
 
 /**
@@ -52,7 +52,8 @@ const INVISIBLE = /[­​⁠﻿]/g;
 const EMPTY_BRACKETS = /\(\s*\)|\[\s*\]/g;
 const REPEATED_SPACE = /(?<=\s)\s+/g;
 const OUTER_SPACE = /^\s+|\s+$/g;
-const SPACE_BEFORE_PUNCTUATION = /\s+(?=[.,;:!?)\]])/g;
+// Punctuation that a word, a number or a path follows is where they start (.gitignore, .5, :root, ../src).
+const SPACE_BEFORE_PUNCTUATION = /\s+(?=[)\],;]|[.:!?]+(?![.:!?/\\\p{L}\p{N}]))/gu;
 const TRAILING_SOURCE = /\s*\(\s*(fonte|source)\s*\)[\s.,;:]*$/i;
 
 const tokens = (el, attribute) => (el.getAttribute(attribute) ?? '').split(/\s+/);
@@ -202,7 +203,7 @@ function isDelimiterToken({ 0: delimiters, index }, text) {
   return !(SPACE.test(before) && SPACE.test(after) && STANDALONE_OPERATOR.test(delimiters));
 }
 
-function normalize(run) {
+function normalize(run, lang) {
   let clean = { text: run.text, map: Array.from(run.nodes.keys()) };
   // Inline code is read as written, so what looks like Markdown in it stays.
   const removeOutsideCode = (pattern, accepts = () => true) => {
@@ -213,7 +214,9 @@ function normalize(run) {
   clean = removeMatches(clean, SCHEME_URL);
   // A host is only a guess from its shape, so it must not take any code with it.
   const touchesCode = ({ 0: found, index }) => run.touchesCode(clean.map[index], clean.map[index + found.length - 1]);
-  for (const pattern of HOST_URLS) removeOutsideCode(pattern, (match) => !touchesCode(match));
+  for (const pattern of HOST_URLS) {
+    removeOutsideCode(pattern, (match) => !touchesCode(match) && !mayBeTwoWords(match[0], lang));
+  }
   for (const pattern of [KEYCAP_EMOJI, EMOJI]) removeOutsideCode(pattern);
   clean = removeMatches(clean, INVISIBLE);
   for (const pattern of [LITERAL_LINK_MARKS, UNRESOLVED_NOTE]) removeOutsideCode(pattern);
@@ -221,7 +224,7 @@ function normalize(run) {
   removeOutsideCode(EMPTY_BRACKETS);
   clean.text = clean.text.replace(/\s/g, ' ');
   for (const pattern of [REPEATED_SPACE, OUTER_SPACE]) clean = removeMatches(clean, pattern);
-  // Punctuation that starts a piece of code (.gitignore, :root) is not punctuation of the sentence.
+  // Inline code starts where it starts, whatever follows its punctuation (cd .., a ?).
   removeOutsideCode(SPACE_BEFORE_PUNCTUATION, ({ 0: spaces, index }) => !run.isCode(clean.map[index + spaces.length]));
   return clean;
 }
@@ -283,7 +286,7 @@ class BlockCollector {
     for (const node of nodes) run.addInline(node);
     nodes.length = 0;
 
-    const clean = normalize(run);
+    const clean = normalize(run, this.lang);
     const hrefs = takeSources(clean, run);
     const sentences = toSentences(clean, run, this.lang);
     if (this.sourceMode === 'name') {

@@ -253,6 +253,65 @@ test('Italian abbreviations that look like hosts are read', () => {
   assert.deepEqual(texts('<p>Vai su marca.es ora.</p>'), ['Vai su ora.']);
 });
 
+test('punctuation that starts a word keeps the space before it, outside code too', () => {
+  for (const plain of [
+    'Usa .gitignore ora.',
+    'Apri .github/workflows e .env ora.',
+    'Passa a .NET ora.',
+    'Costa .5 euro.',
+    'Usa :root ora.',
+    'Vai in ../src e .\\bin ora.',
+    'Aggiungi !important ora.',
+  ]) {
+    assert.deepEqual(texts(`<p>${plain}</p>`), [plain]);
+  }
+});
+
+test('punctuation that ends a word still joins it', () => {
+  assert.deepEqual(texts('<p>Ciao , mondo ; poi basta .</p>'), ['Ciao, mondo; poi basta.']);
+  assert.deepEqual(texts('<p>Davvero ? Vedi ... forse ( qui ) e [ qui ].</p>').join(' '), 'Davvero? Vedi... forse ( qui) e [ qui].');
+  assert.deepEqual(texts('<p>Vedi 🎉, poi https://e.org/x .</p>'), ['Vedi, poi.']);
+});
+
+test('a missing space after a full stop does not lose the word before it', () => {
+  const cases = {
+    it: ['Sono stanco.io no.', 'Era bello.ai tempi nostri.', 'Ho finito.info utili sotto.', 'Provo la nuova.app ora.'],
+    'it-IT': ['Sono stanco.io no.'],
+    ita: ['Sono stanco.io no.'],
+    en: ['I was tired.it is late.', 'We are done.info is below.', 'They left.net income fell.'],
+    'en-GB': ['I was tired.it is late.'],
+    fr: ['Je suis parti.au revoir.', 'Tu es parti.de la ville.'],
+    es: ['Estoy cansado.es tarde.', 'Vengo cansado.de la ciudad.'],
+    pt: ['Estou cansado.eu acho.', 'Estou cansado.com fome.'],
+    de: ['Ich bin müde.es ist spät.'],
+    [null]: ['Sono stanco.io no.', 'I was tired.it is late.'],
+  };
+  for (const [lang, sentences] of Object.entries(cases)) {
+    for (const plain of sentences) {
+      assert.deepEqual(texts(`<p>${plain}</p>`, { lang: lang === 'null' ? null : lang }).join(' '), plain, `${lang}: ${plain}`);
+    }
+  }
+});
+
+test('a host with a word for suffix is read rather than lost', () => {
+  assert.deepEqual(texts('<p>Usa socket.io e vercel.app ora.</p>'), ['Usa socket.io e vercel.app ora.']);
+});
+
+test('what cannot be two words is still a host, whatever its suffix', () => {
+  assert.deepEqual(texts('<p>Vedi docs.socket.io ora.</p>'), ['Vedi ora.']);
+  assert.deepEqual(texts('<p>Vedi my-site.io e web3.ai ora.</p>'), ['Vedi e ora.']);
+  assert.deepEqual(texts('<p>Vedi socket.io/docs e fly.dev:8080 ora.</p>'), ['Vedi e ora.']);
+});
+
+test('a suffix that is no word in the language of the text is still a host', () => {
+  assert.deepEqual(texts('<p>Vai su sito.it ora.</p>', { lang: 'it-IT' }), ['Vai su ora.']);
+  assert.deepEqual(texts('<p>Vai su sito.it ora.</p>', { lang: 'ita' }), ['Vai su ora.']);
+  assert.deepEqual(texts('<p>Go to socket.io now.</p>', { lang: 'en' }), ['Go to now.']);
+  assert.deepEqual(texts('<p>Go to example.com now.</p>', { lang: 'en' }), ['Go to now.']);
+  assert.deepEqual(texts('<p>Vai su example.com ora.</p>', { lang: null }), ['Vai su ora.']);
+  assert.deepEqual(texts('<p>Allez sur lemonde.fr maintenant.</p>', { lang: 'fr' }), ['Allez sur maintenant.']);
+});
+
 test('Italian titles with a slash are read', () => {
   for (const plain of [
     'Gent.mo/a Cliente, la informiamo.',

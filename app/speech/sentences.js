@@ -18,6 +18,8 @@ const OPENING_PUNCTUATION = /^[^\p{L}\p{N}]+/u;
 const JOINED_START = /^.*['’/]/u;
 const INITIAL = /^\p{Lu}\.$/u;
 const LIST_NUMBER = /^\d+\.$/;
+// A mark with a space before it and none after opens the next word: Passa a .NET ora.
+const OPENS_NEXT_WORD = /\s[.!?]$/;
 const LOW_SURROGATE = /[\uDC00-\uDFFF]/;
 const WHITESPACE = /\s/;
 
@@ -42,6 +44,7 @@ function abbreviationsFor(lang) {
 }
 
 function continuesAfter(segment, abbreviations) {
+  if (OPENS_NEXT_WORD.test(segment)) return true;
   const trimmed = segment.trim();
   if (LIST_NUMBER.test(trimmed)) return true;
   const lastWord = trimmed.split(/\s+/).at(-1).replace(OPENING_PUNCTUATION, '').replace(JOINED_START, '');

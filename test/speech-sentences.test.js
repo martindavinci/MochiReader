@@ -61,6 +61,11 @@ test('decimals and versions do not end a sentence', () => {
   assert.deepEqual(parts('La v0.12 costa 3.5 euro. Fine.'), ['La v0.12 costa 3.5 euro.', 'Fine.']);
 });
 
+test('a dot that opens the next word does not end a sentence', () => {
+  assert.deepEqual(parts('Passa a .NET ora. Poi basta.'), ['Passa a .NET ora.', 'Poi basta.']);
+  assert.deepEqual(parts('Finito . Poi basta.'), ['Finito .', 'Poi basta.']);
+});
+
 test('a huge unpunctuated sentence is cut', () => {
   const text = 'parola '.repeat(2000);
   const spans = splitSentences(text, 'it');

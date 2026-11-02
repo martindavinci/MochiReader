@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import { parseLangTag } from './lang.js';
 
 const TWO_LEVEL_SUFFIXES = new Set([
   'ac.uk', 'co.uk', 'gov.uk', 'org.uk', 'me.uk',
@@ -47,6 +48,33 @@ export const HOST_URLS = [HOST_WITH_PATH, BARE_HOST];
 const whole = ({ source, flags }) => new RegExp(`^(?:${source})$`, flags.replace('g', ''));
 const WHOLE_SCHEME_URL = whole(SCHEME_URL);
 const WHOLE_HOST_URLS = HOST_URLS.map(whole);
+
+// Suffixes that are everyday words of a language, or of no language in particular: a sentence can start
+// with them, and a space lost after the full stop then looks like a host. Reading a host aloud costs
+// little, losing a word costs the sentence, so in doubt it stays. Any other language gets the whole list,
+// but for "com", too common a host to give up for a word of one language.
+const WORDS_IN_EVERY_LANGUAGE = ['app', 'dev', 'info', 'net', 'tv'];
+const SUFFIX_WORDS = new Map(Object.entries({
+  it: ['io', 'ai'],
+  en: ['it'],
+  pt: ['com', 'de', 'eu'],
+}).map(([language, words]) => [language, new Set([...words, ...WORDS_IN_EVERY_LANGUAGE])]));
+const SUFFIX_WORDS_OF_ANY_LANGUAGE = new Set(['io', 'ai', 'it', 'au', 'de', 'es', 'eu', ...WORDS_IN_EVERY_LANGUAGE]);
+const TWO_PLAIN_WORDS = /^[a-z]+\.([a-z]+)$/;
+
+/**
+ * Whether what looks like a bare host may be two words of a sentence with the space lost between them
+ * ("stanco.io no"). Only a suffix that is a word counts, after a single plain word: with one more dot,
+ * a digit, a hyphen, a port or a path it was never prose.
+ * @param {string} host
+ * @param {string|null} lang
+ * @returns {boolean}
+ */
+export function mayBeTwoWords(host, lang) {
+  const suffix = TWO_PLAIN_WORDS.exec(host)?.[1];
+  const words = SUFFIX_WORDS.get(parseLangTag(lang).language) ?? SUFFIX_WORDS_OF_ANY_LANGUAGE;
+  return words.has(suffix);
+}
 
 const ADDRESS_SCHEME = /^(?:https?:\/\/|ftp:\/\/|mailto:)/i;
 const LEADING_WWW = /^www\./;
