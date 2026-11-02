@@ -18,12 +18,12 @@ jobs:
     env:
       TAURI_CLI_VERSION: 2.12.3
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@1.99.1
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
       - name: Install test dependencies
@@ -42,7 +42,7 @@ jobs:
       # run on main is what spares later tags from compiling tauri-cli again.
       - name: Cache tauri-cli
         id: tauri-cli
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cargo/bin/cargo-tauri.exe
           key: cargo-tauri-${{ env.TAURI_CLI_VERSION }}-windows-2022
@@ -51,7 +51,7 @@ jobs:
         run: cargo install tauri-cli --version "$env:TAURI_CLI_VERSION" --locked
       - name: Installer
         run: cargo tauri build
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: installer
           path: src-tauri/target/release/bundle/nsis/*-setup.exe
@@ -64,7 +64,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
