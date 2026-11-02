@@ -29,3 +29,19 @@ test('epub key uses the main title of a language map', async () => {
 test('epub key accepts a book without a title', async () => {
   assert.equal(await epubKey({ identifier: 'x', title: null }, noHash), 'epub:x|');
 });
+
+test('epub key tells apart volumes that share an identifier and a title', async () => {
+  const metadata = { identifier: 'https://example.test/novel', title: 'Shadow Slave' };
+  assert.equal(
+    await epubKey(metadata, noHash, 99),
+    'epub:https://example.test/novel|Shadow Slave|99',
+  );
+  assert.equal(
+    await epubKey(metadata, noHash, 259),
+    'epub:https://example.test/novel|Shadow Slave|259',
+  );
+});
+
+test('epub key without identifier ignores the section count', async () => {
+  assert.equal(await epubKey({ title: 'T' }, async () => 'h', 99), 'sha256:h');
+});

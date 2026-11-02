@@ -6,7 +6,8 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
+import { isEntryPoint } from './is-entry-point.mjs';
 
 export const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -215,7 +216,7 @@ function main(args) {
   writeFileSync(OUTPUT_FILE, renderLicenses(components));
 }
 
-if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
+if (isEntryPoint(import.meta.url)) {
   try {
     main(process.argv.slice(2));
   } catch (error) {

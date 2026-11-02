@@ -4,7 +4,8 @@
 // that declare it. Usage: node tools/check-tag.mjs v1.2.3
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
+import { isEntryPoint } from './is-entry-point.mjs';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const TAG_PREFIX = 'v';
@@ -42,7 +43,7 @@ export function readVersions(root) {
   ];
 }
 
-if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
+if (isEntryPoint(import.meta.url)) {
   try {
     checkTag(process.argv[2] ?? '', readVersions(REPO_ROOT));
   } catch (error) {
