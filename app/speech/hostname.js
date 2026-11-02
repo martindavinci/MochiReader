@@ -8,12 +8,19 @@ const TWO_LEVEL_SUFFIXES = new Set([
   'com.ar', 'com.cn', 'com.hk', 'com.mx', 'com.sg', 'com.tr', 'com.tw',
 ]);
 const IPV4 = /^\d+\.\d+\.\d+\.\d+$/;
+const WWW = 'www';
 
 // A word followed by a dot is usually a name or a file, not a host. Alone it counts only with one
 // of these suffixes, in lowercase: "Amazon.com" and "Node.js" in a sentence are names to read.
 const BARE_HOST_SUFFIXES = 'com|org|net|edu|gov|info|biz|io|ai|app|dev|co|tv|xyz|it|eu|uk|de|fr|es|ch|nl|au|jp|br|ca';
-// Followed by a path almost any suffix is a host, except what names a file or an Italian title.
-const NOT_HOST_SUFFIXES = 'js|jsx|ts|tsx|json|html?|css|xml|ya?ml|toml|txt|csv|log|pdf|png|jpe?g|exe|dll|lock|ssa|ra|na';
+// Abbreviations written like a lowercase host with one of those suffixes.
+const NOT_BARE_HOSTS = 'p\\.es|ad\\.es|c\\.ca|co\\.co\\.co';
+// Followed by a path almost any suffix is a host, except what names a file or an Italian title (Gent.mo/a).
+const FILE_SUFFIXES = 'js|mjs|jsx|ts|tsx|json|html?|css|scss|xml|ya?ml|toml|ini|cfg|conf|txt|md|csv|log|pdf|epub|docx?|xlsx?|pptx?'
+  + '|png|jpe?g|gif|svg|webp|zip|gz|tar|exe|dll|lock|py|rb|go|java|kt|swift|cpp|hpp|cs|php|sql|bat|lua|ipynb|vue';
+const TITLE_ENDINGS = 'ssa|ra|na|mo|ma|mi|ri|re|le';
+// Real domains (docs.rs/x, bun.sh/x, onet.pl/x), but an anchor after them points into a file.
+const FILE_OR_HOST_SUFFIXES = 'rs|sh|pl|cc';
 const OPAQUE_SCHEMES = 'mailto|tel|sms|magnet|urn';
 
 const URL_TAIL = '[^\\s<>]*[^\\s<>.,;:!?)\\]\'"»]';
@@ -24,20 +31,22 @@ const LOWERCASE_LABELS = '(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\\.)+';
 const PORT = '(?::\\d+)?';
 
 // The bound keeps a long hyphenated word from being rescanned at every hyphen.
-const SCHEME_URL = new RegExp(`${NOT_AFTER_WORD}(?:[a-z][a-z0-9+-]{0,31}://|www\\.|(?:${OPAQUE_SCHEMES}):)${URL_TAIL}`, 'giu');
+export const SCHEME_URL = new RegExp(`${NOT_AFTER_WORD}(?:[a-z][a-z0-9+-]{0,31}://|www\\.|(?:${OPAQUE_SCHEMES}):)${URL_TAIL}`, 'giu');
 const HOST_WITH_PATH = new RegExp(
-  `${NOT_INSIDE_NAME}${ANY_CASE_LABELS}(?!(?:${NOT_HOST_SUFFIXES})\\b)[a-z]{2,}${PORT}(?:/(?:${URL_TAIL})?|[?#]${URL_TAIL})`,
+  `${NOT_INSIDE_NAME}${ANY_CASE_LABELS}(?!(?:${FILE_SUFFIXES}|${TITLE_ENDINGS})\\b|(?:${FILE_OR_HOST_SUFFIXES})#)[a-z]{2,}${PORT}(?:/(?:${URL_TAIL})?|[?#]${URL_TAIL})`,
   'gu',
 );
 const BARE_HOST = new RegExp(
-  `${NOT_INSIDE_NAME}${LOWERCASE_LABELS}(?:${BARE_HOST_SUFFIXES})${PORT}(?![\\p{L}\\p{N}@_-]|\\.[\\p{L}\\p{N}])`,
+  `${NOT_INSIDE_NAME}(?!(?:${NOT_BARE_HOSTS})(?![\\p{L}\\p{N}]))${LOWERCASE_LABELS}(?:${BARE_HOST_SUFFIXES})${PORT}(?![\\p{L}\\p{N}@_-]|\\.[\\p{L}\\p{N}])`,
   'gu',
 );
 
-/** Everything in running text that is a URL, to remove in this order. */
-export const BARE_URLS = [SCHEME_URL, HOST_WITH_PATH, BARE_HOST];
+/** Text that is a URL by its shape alone, a guess that inline code is exempt from. To remove in this order. */
+export const HOST_URLS = [HOST_WITH_PATH, BARE_HOST];
 
-const WHOLE_URLS = BARE_URLS.map(({ source, flags }) => new RegExp(`^(?:${source})$`, flags.replace('g', '')));
+const whole = ({ source, flags }) => new RegExp(`^(?:${source})$`, flags.replace('g', ''));
+const WHOLE_SCHEME_URL = whole(SCHEME_URL);
+const WHOLE_HOST_URLS = HOST_URLS.map(whole);
 
 const ADDRESS_SCHEME = /^(?:https?:\/\/|ftp:\/\/|mailto:)/i;
 const LEADING_WWW = /^www\./;
@@ -45,12 +54,21 @@ const TRAILING_SLASH = /\/$/;
 const PATH_START = /[/?#]/;
 
 /**
+ * Whether the whole of a text is a URL with a scheme or www.
+ * @param {string} text
+ * @returns {boolean}
+ */
+export function isSchemeUrlText(text) {
+  return WHOLE_SCHEME_URL.test(text);
+}
+
+/**
  * Whether the whole of a text is a URL.
  * @param {string} text
  * @returns {boolean}
  */
 export function isUrlText(text) {
-  return WHOLE_URLS.some((url) => url.test(text));
+  return isSchemeUrlText(text) || WHOLE_HOST_URLS.some((url) => url.test(text));
 }
 
 const plainAddress = (value) => value.toLowerCase()
@@ -88,7 +106,9 @@ export function hostName(url) {
 
   const labels = host.split('.');
   if (labels.length < 2) return host;
+  if (labels.length > 2 && labels[0] === WWW) labels.shift();
   const suffixLength = TWO_LEVEL_SUFFIXES.has(labels.slice(-2).join('.')) ? 2 : 1;
-  const name = labels.at(-suffixLength - 1);
-  return (name ?? host).replaceAll('-', ' ');
+  // A suffix that is the whole host, like gov.uk, names itself by its first label.
+  const name = labels.at(-suffixLength - 1) ?? labels[0];
+  return name.replaceAll('-', ' ');
 }

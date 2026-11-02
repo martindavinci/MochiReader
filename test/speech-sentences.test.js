@@ -26,6 +26,28 @@ test('abbreviations are found in a parenthesis and with a regional language tag'
   assert.deepEqual(parts('La sig. Bianchi legge.', 'it-IT'), ['La sig. Bianchi legge.']);
 });
 
+test('an elided abbreviation does not end a sentence', () => {
+  assert.deepEqual(parts("L'ing. Rossi arriva. L'avv. Bianchi no."), ["L'ing. Rossi arriva.", "L'avv. Bianchi no."]);
+  assert.deepEqual(parts('Chiedi dell\u2019avv. Bianchi subito.'), ['Chiedi dell\u2019avv. Bianchi subito.']);
+  assert.deepEqual(parts("Vedi l'es. Roma e dell'art. Primo. Fine."), ["Vedi l'es. Roma e dell'art. Primo.", 'Fine.']);
+  assert.deepEqual(parts("Scrive (l'ing. Rossi) qui."), ["Scrive (l'ing. Rossi) qui."]);
+});
+
+test('an abbreviation after a slash does not end a sentence', () => {
+  assert.deepEqual(parts('La Dott.ssa/Dott. Rossi legge. Fine.'), ['La Dott.ssa/Dott. Rossi legge.', 'Fine.']);
+  assert.deepEqual(parts('Il Sig./Sig.ra Rossi legge. Fine.'), ['Il Sig./Sig.ra Rossi legge.', 'Fine.']);
+});
+
+test('an elided word that is not an abbreviation ends a sentence', () => {
+  assert.deepEqual(parts("Parla dell'arte. Poi basta."), ["Parla dell'arte.", 'Poi basta.']);
+  assert.deepEqual(parts("I know it's. Then done.", 'en'), ["I know it's.", 'Then done.']);
+});
+
+test('abbreviations written with an inner dot do not end a sentence', () => {
+  assert.deepEqual(parts('Alcuni, p.es. Roma, vanno. Fine.'), ['Alcuni, p.es. Roma, vanno.', 'Fine.']);
+  assert.deepEqual(parts('Alcuni, ad.es. Roma, vanno. Fine.'), ['Alcuni, ad.es. Roma, vanno.', 'Fine.']);
+});
+
 test('an abbreviation of the other language still ends a sentence', () => {
   assert.equal(parts('He plays the games es. Then he left.', 'en').length, 2);
 });

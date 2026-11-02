@@ -4,7 +4,7 @@ export const MAX_SENTENCE_CHARS = 500;
 
 const SHARED_ABBREVIATIONS = ['e.g.', 'i.e.', 'vs.', 'dr.', 'prof.', 'mr.', 'mrs.', 'ms.'];
 const ABBREVIATIONS = {
-  it: ['es.', 'dott.', 'dott.ssa', 'sig.', 'sig.ra', 'sig.na', 'ing.', 'avv.', 'arch.', 'geom.',
+  it: ['es.', 'p.es.', 'ad.es.', 'dott.', 'dott.ssa', 'sig.', 'sig.ra', 'sig.na', 'ing.', 'avv.', 'arch.', 'geom.',
     'cfr.', 'art.', 'pag.', 'pagg.', 'vol.', 'cap.', 'fig.', 'tel.', 'n.', 'nn.', 'p.', 'pp.'],
   en: ['jr.', 'sr.', 'st.', 'fig.', 'vol.', 'pp.', 'approx.', 'dept.'],
 };
@@ -14,6 +14,8 @@ const ABBREVIATIONS_BY_LANG = Object.fromEntries(
 );
 
 const OPENING_PUNCTUATION = /^[^\p{L}\p{N}]+/u;
+// The start of a word elided or joined to the last one: l'ing., Dott.ssa/Dott.
+const JOINED_START = /^.*['’/]/u;
 const INITIAL = /^\p{Lu}\.$/u;
 const LIST_NUMBER = /^\d+\.$/;
 const LOW_SURROGATE = /[\uDC00-\uDFFF]/;
@@ -42,7 +44,7 @@ function abbreviationsFor(lang) {
 function continuesAfter(segment, abbreviations) {
   const trimmed = segment.trim();
   if (LIST_NUMBER.test(trimmed)) return true;
-  const lastWord = trimmed.split(/\s+/).at(-1).replace(OPENING_PUNCTUATION, '');
+  const lastWord = trimmed.split(/\s+/).at(-1).replace(OPENING_PUNCTUATION, '').replace(JOINED_START, '');
   return INITIAL.test(lastWord) || abbreviations.has(lastWord.toLowerCase());
 }
 

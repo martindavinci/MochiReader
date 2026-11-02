@@ -64,6 +64,21 @@ test('host names drop www, subdomains and suffixes', () => {
   assert.equal(hostName('https://globo.com.br/'), 'globo');
 });
 
+test('host names drop www before a two-level suffix', () => {
+  assert.equal(hostName('https://www.gov.uk/x'), 'gov');
+  assert.equal(hostName('https://gov.uk/x'), 'gov');
+  assert.equal(hostName('https://www.bbc.co.uk/'), 'bbc');
+  assert.equal(hostName('https://www.ox.ac.uk/'), 'ox');
+  assert.deepEqual(
+    texts('<ul><li>Fatto (<a href="https://www.gov.uk/x">fonte</a>)</li></ul>', { sourceMode: 'name' }),
+    ['Fatto', 'Fonte: gov'],
+  );
+});
+
+test('a www that is the name of the site stays', () => {
+  assert.equal(hostName('https://www.com/'), 'www');
+});
+
 test('host names survive what is not a public web address', () => {
   assert.equal(hostName('not a url'), '');
   assert.equal(hostName('mailto:a@b.org'), '');
@@ -171,6 +186,100 @@ test('inline code keeps every character', () => {
     ['Usa **kwargs con a == b e == o %%x%% ora.'],
   );
   assert.deepEqual(texts('<p>==<code>x</code>== ora.</p>'), ['x ora.']);
+});
+
+test('inline code that looks like a host is read', () => {
+  assert.deepEqual(texts('<p>Chiama <code>console.info</code> ora.</p>'), ['Chiama console.info ora.']);
+  assert.deepEqual(texts('<p>Usa <code>logger.info</code> e <code>java.io</code> ora.</p>'), ['Usa logger.info e java.io ora.']);
+  assert.deepEqual(texts('<p>Usa <code>Promise.all/race</code> ora.</p>'), ['Usa Promise.all/race ora.']);
+  assert.deepEqual(texts('<p>Imposta <code>config.app</code> a true.</p>'), ['Imposta config.app a true.']);
+  assert.deepEqual(texts('<p>Chiama <code>socket.io</code> e poi <code>state.dev</code> ora.</p>'), ['Chiama socket.io e poi state.dev ora.']);
+  assert.deepEqual(texts('<p>Apri <code>README.md#install</code> e <code>foo.bar/baz</code> ora.</p>'), ['Apri README.md#install e foo.bar/baz ora.']);
+});
+
+test('a block holding only inline code that looks like a host is kept', () => {
+  assert.deepEqual(texts('<p><code>java.net</code></p>'), ['java.net']);
+});
+
+test('a host next to inline code never removes the code', () => {
+  assert.deepEqual(texts('<p>Vedi example.<code>com</code> ora.</p>'), ['Vedi example.com ora.']);
+  assert.deepEqual(texts('<p>Vedi foo.bar/<code>baz</code> ora.</p>'), ['Vedi foo.bar/baz ora.']);
+});
+
+test('a URL with a scheme in inline code is still skipped', () => {
+  assert.deepEqual(texts('<p>Apri <code>https://e.org/x</code> ora.</p>'), ['Apri ora.']);
+  assert.deepEqual(texts('<p><code>https://e.org/x</code></p>'), []);
+});
+
+test('hosts outside inline code are still skipped next to it', () => {
+  assert.deepEqual(texts('<p>Usa <code>java.net</code> su example.com ora.</p>'), ['Usa java.net su ora.']);
+});
+
+test('a link around inline code that looks like a host reads the code', () => {
+  assert.deepEqual(texts('<p>Chiama <a href="api.html"><code>console.info</code></a> ora.</p>'), ['Chiama console.info ora.']);
+  assert.deepEqual(texts('<p>Chiama <code><a href="api.html">java.net</a></code> ora.</p>'), ['Chiama java.net ora.']);
+});
+
+test('a link around inline code that only repeats an address is skipped', () => {
+  assert.deepEqual(texts('<p>Vedi <a href="https://e.org/"><code>e.org</code></a> ora.</p>'), ['Vedi ora.']);
+  assert.deepEqual(texts('<p>Vedi <a href="note.html"><code>https://e.org/</code></a> ora.</p>'), ['Vedi ora.']);
+});
+
+test('brackets and emoji in inline code stay', () => {
+  assert.deepEqual(texts('<p>Chiama <code>foo()</code> e <code>a[ ]</code> ora.</p>'), ['Chiama foo() e a[ ] ora.']);
+  assert.deepEqual(texts('<p>Scrivi <code>a\u{1F389}b</code> ora.</p>'), ['Scrivi a\u{1F389}b ora.']);
+  assert.deepEqual(texts('<p>Vedi () e \u{1F389} ora.</p>'), ['Vedi e ora.']);
+});
+
+test('inline code that starts with punctuation keeps the space before it', () => {
+  assert.deepEqual(texts('<p>Apri <code>.gitignore</code> ora.</p>'), ['Apri .gitignore ora.']);
+  assert.deepEqual(texts('<p>Usa <code>:root</code> e <code>cd ..</code> ora.</p>'), ['Usa :root e cd .. ora.']);
+});
+
+test('inline code that looks like a source is read', () => {
+  assert.deepEqual(texts('<ul><li>Chiama <code>(source)</code></li></ul>'), ['Chiama (source)']);
+});
+
+test('Italian abbreviations that look like hosts are read', () => {
+  for (const plain of [
+    'Usa un sinonimo, p.es. questo qui.',
+    'Alcuni colori, p.es. rosso, vanno bene.',
+    'Alcuni colori, ad.es. rosso, vanno bene.',
+    'Costa c.ca cento euro.',
+    'Ha un contratto co.co.co. da un anno.',
+  ]) {
+    assert.deepEqual(texts(`<p>${plain}</p>`), [plain]);
+  }
+  assert.deepEqual(texts('<p>Vai su marca.es ora.</p>'), ['Vai su ora.']);
+});
+
+test('Italian titles with a slash are read', () => {
+  for (const plain of [
+    'Gent.mo/a Cliente, la informiamo.',
+    'Gent.ma/o Cliente, la informiamo.',
+    'Gent.mi/e Clienti, vi informiamo.',
+    'Ill.mo/a Presidente, la informiamo.',
+    'Spett.le/i Ditte, vi informiamo.',
+    'Sig.ri/re Rossi, vi informiamo.',
+    'Dott.ssa/Dott. Rossi, la informiamo.',
+  ]) {
+    assert.deepEqual(texts(`<p>${plain}</p>`), [plain]);
+  }
+});
+
+test('file references with an anchor are read', () => {
+  for (const plain of [
+    'Vedi altra.md#sezione per i dettagli.',
+    'Il bug sta in main.py#L10 e in parser.rs#L3 come detto.',
+    'Lancia run.sh#L3 e main.go#L7 ora.',
+  ]) {
+    assert.deepEqual(texts(`<p>${plain}</p>`), [plain]);
+  }
+});
+
+test('hosts that share a suffix with a file are still skipped', () => {
+  assert.deepEqual(texts('<p>Vedi docs.rs/x, bun.sh/docs e onet.pl/y ora.</p>'), ['Vedi, e ora.']);
+  assert.deepEqual(texts('<p>Vedi t.me/x e example.com/main.py#L10 ora.</p>'), ['Vedi e ora.']);
 });
 
 test('removed tokens do not shift sentence positions', () => {

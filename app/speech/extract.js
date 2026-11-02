@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { BARE_URLS, hostName, isUrlText, namesAddress } from './hostname.js';
+import { HOST_URLS, SCHEME_URL, hostName, isSchemeUrlText, isUrlText, namesAddress } from './hostname.js';
 import { splitSentences } from './sentences.js';
 
 /**
@@ -73,9 +73,17 @@ function isNoteSuperscript(sup) {
     && sup.textContent.trim() === link.textContent.trim();
 }
 
+/** Whether a link's text is inline code, either inside code or wrapped around it. */
+function readsAsCode(link) {
+  const [only] = link.children;
+  return link.closest('code') !== null
+    || (link.children.length === 1 && only.localName === 'code' && only.textContent.trim() === link.textContent.trim());
+}
+
 function isUrlLink(link) {
   const text = link.textContent.trim();
-  return isUrlText(text) || namesAddress(text, link.getAttribute('href') ?? '');
+  if (namesAddress(text, link.getAttribute('href') ?? '')) return true;
+  return readsAsCode(link) ? isSchemeUrlText(text) : isUrlText(text);
 }
 
 function isSkipped(el) {
@@ -104,6 +112,11 @@ class TextRun {
 
   isCode(index) {
     return this.code.some(({ from, to }) => from <= index && index < to);
+  }
+
+  /** Whether any unit from first to last, both included, is inline code. */
+  touchesCode(first, last) {
+    return this.code.some(({ from, to }) => from <= last && first < to);
   }
 
   #push(text, node, offsetOf) {
@@ -197,14 +210,19 @@ function normalize(run) {
     clean = removeMatches(clean, pattern, (match) => !run.isCode(map[match.index]) && accepts(match, text));
   };
   for (const pattern of LITERAL_COMMENTS) removeOutsideCode(pattern);
-  for (const pattern of [...BARE_URLS, KEYCAP_EMOJI, EMOJI, INVISIBLE]) clean = removeMatches(clean, pattern);
+  clean = removeMatches(clean, SCHEME_URL);
+  // A host is only a guess from its shape, so it must not take any code with it.
+  const touchesCode = ({ 0: found, index }) => run.touchesCode(clean.map[index], clean.map[index + found.length - 1]);
+  for (const pattern of HOST_URLS) removeOutsideCode(pattern, (match) => !touchesCode(match));
+  for (const pattern of [KEYCAP_EMOJI, EMOJI]) removeOutsideCode(pattern);
+  clean = removeMatches(clean, INVISIBLE);
   for (const pattern of [LITERAL_LINK_MARKS, UNRESOLVED_NOTE]) removeOutsideCode(pattern);
   removeOutsideCode(DELIMITERS, isDelimiterToken);
-  clean = removeMatches(clean, EMPTY_BRACKETS);
+  removeOutsideCode(EMPTY_BRACKETS);
   clean.text = clean.text.replace(/\s/g, ' ');
-  for (const pattern of [REPEATED_SPACE, OUTER_SPACE, SPACE_BEFORE_PUNCTUATION]) {
-    clean = removeMatches(clean, pattern);
-  }
+  for (const pattern of [REPEATED_SPACE, OUTER_SPACE]) clean = removeMatches(clean, pattern);
+  // Punctuation that starts a piece of code (.gitignore, :root) is not punctuation of the sentence.
+  removeOutsideCode(SPACE_BEFORE_PUNCTUATION, ({ 0: spaces, index }) => !run.isCode(clean.map[index + spaces.length]));
   return clean;
 }
 
@@ -213,6 +231,7 @@ function takeSources(clean, run) {
   const hrefs = [];
   for (let match = TRAILING_SOURCE.exec(clean.text); match; match = TRAILING_SOURCE.exec(clean.text)) {
     const word = clean.map[match.index + match[0].indexOf(match[1])];
+    if (run.isCode(word)) break;
     const link = run.links.find(({ from, to }) => from <= word && word < to);
     if (link) hrefs.unshift(link.href);
     clean.text = clean.text.slice(0, match.index);
