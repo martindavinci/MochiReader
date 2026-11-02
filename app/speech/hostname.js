@@ -14,8 +14,8 @@ const WWW = 'www';
 // A word followed by a dot is usually a name or a file, not a host. Alone it counts only with one
 // of these suffixes, in lowercase: "Amazon.com" and "Node.js" in a sentence are names to read.
 const BARE_HOST_SUFFIXES = 'com|org|net|edu|gov|info|biz|io|ai|app|dev|co|tv|xyz|it|eu|uk|de|fr|es|ch|nl|au|jp|br|ca';
-// Abbreviations written like a lowercase host with one of those suffixes.
-const NOT_BARE_HOSTS = 'p\\.es|ad\\.es|per\\.es|c\\.ca|co\\.co\\.co';
+// Abbreviations written like a lowercase host with one of those suffixes, also after a lost space (formati.es. PNG).
+const NOT_BARE_HOSTS = 'p\\.es|ad\\.es|per\\.es|c\\.ca|co\\.co\\.co|(?:[a-z-]+|\\d+)\\.es(?=\\.(?!\\p{L}))';
 // Followed by a path a suffix of two letters is a host, except what names a file or an Italian title
 // (Gent.mo/a), and so is one of these: any longer word would take a sentence with it (Va bene.noi/voi).
 const LONG_HOST_SUFFIXES = 'com|org|net|edu|gov|mil|int|info|biz|name|pro|app|dev|xyz|icu|top|site|online|store|shop|tech|blog'
@@ -52,21 +52,29 @@ const whole = ({ source, flags }) => new RegExp(`^(?:${source})$`, flags.replace
 const WHOLE_SCHEME_URL = whole(SCHEME_URL);
 const WHOLE_HOST_URLS = HOST_URLS.map(whole);
 
-// Suffixes that are everyday words of a language, or of no language in particular: a sentence can start
-// with them, and a space lost after the full stop then looks like a host. Reading a host aloud costs
-// little, losing a word costs the sentence, so in doubt it stays. Any other language gets the whole list,
-// but for "com", too common a host to give up for a word of one language, and for what is a word in English
-// alone. Those of two letters that no bare host has only matter before a slash (Va bene.tu/lei).
-const WORDS_IN_EVERY_LANGUAGE = ['app', 'dev', 'info', 'net', 'tv', 'ca', 'tu', 'si', 'se', 'no', 'la', 'lo', 'ti', 'te', 'ne'];
+// Suffixes that a word or a name can start with: a sentence can open with them, and a space lost after the
+// full stop then looks like a host. Reading a host aloud costs little, losing a word costs the sentence, so in
+// doubt it stays. Any other language gets the whole list, but for "com", too common a host to give up for a word
+// of one language, and for what is a word in English alone. Only what no sentence opens with is left to delete.
+// Those of two letters that no bare host has only matter before a slash (Va bene.tu/lei).
+const WORDS_IN_EVERY_LANGUAGE = ['app', 'dev', 'info', 'net', 'tv', 'ca', 'co', 'biz', 'uk', 'de', 'eu',
+  'tu', 'si', 'se', 'no', 'la', 'lo', 'ti', 'te', 'ne', 'me'];
 const SUFFIX_WORDS = new Map(Object.entries({
   it: ['io', 'ai'],
-  en: ['it', 'de', 'ai', 'io', 'au', 'es', 'org', 'gov'],
-  pt: ['com', 'de', 'eu', 'ai'],
+  en: ['it', 'ai', 'io', 'au', 'es', 'org', 'gov', 'be', 'at'],
+  pt: ['com', 'ai'],
 }).map(([language, words]) => [language, new Set([...words, ...WORDS_IN_EVERY_LANGUAGE])]));
-const SUFFIX_WORDS_OF_ANY_LANGUAGE = new Set(['io', 'ai', 'it', 'au', 'de', 'es', 'eu', ...WORDS_IN_EVERY_LANGUAGE]);
-// A word, a compound or a number, after any dotted initials (p.m., a.k.a.), then at most one short word
-// joined by a slash or a question mark (noi/voi): a longer one is the path of a URL.
-const TWO_PLAIN_WORDS = /^(?:[a-z]\.)*(?:[a-z-]+|\d+)\.([a-z]+)(?:[/?]\p{L}{1,3})?$/u;
+const SUFFIX_WORDS_OF_ANY_LANGUAGE = new Set(['io', 'ai', 'it', 'au', 'es', ...WORDS_IN_EVERY_LANGUAGE]);
+// Before a path these are hosts, unless they are words and the path is one short word too. Any other suffix
+// there is more likely a word (Yes.on/off, Scrivi Rev.do/a), and a host that has one is rare enough to read.
+const SUFFIXES_OF_HOSTS_WITH_A_PATH = new Set(`com org net edu gov mil info app dev xyz io ai co tv me it fr de es uk eu
+  ch nl au jp br ca ru cn rs sh pl cc ly gg be at dk fi pt gr tr kr tw hk sg nz za mx ar cl ie cz sk hu ro bg hr ua vn`
+  .split(/\s+/));
+// A capitalized or lowercase word, a compound or a number, or any dotted initials before a word (p.m., a.k.a.),
+// then the words joined to it. A single letter alone is the name of a short link (t.co).
+const TWO_PLAIN_WORDS = /^(?:(?:[a-z]\.)+[a-z-]+|\p{Lu}[a-z-]+|[a-z-]{2,}|\d+)\.([a-z]+)((?:[/?]\p{L}+)*)$/u;
+const ONE_SHORT_WORD = /^[/?]\p{L}{1,3}$/u;
+const AT_MOST_TWO_WORDS = /^(?:[/?]\p{L}{1,8}){1,2}$/u;
 
 /**
  * Whether what looks like a host may be two words of a sentence with the space lost between them
@@ -77,9 +85,13 @@ const TWO_PLAIN_WORDS = /^(?:[a-z]\.)*(?:[a-z-]+|\d+)\.([a-z]+)(?:[/?]\p{L}{1,3}
  * @returns {boolean}
  */
 export function mayBeTwoWords(host, lang) {
-  const suffix = TWO_PLAIN_WORDS.exec(host)?.[1];
+  const match = TWO_PLAIN_WORDS.exec(host);
+  if (!match) return false;
+  const [, suffix, joined] = match;
   const words = SUFFIX_WORDS.get(parseLangTag(lang).language) ?? SUFFIX_WORDS_OF_ANY_LANGUAGE;
-  return words.has(suffix);
+  if (joined === '') return words.has(suffix);
+  if (words.has(suffix) && ONE_SHORT_WORD.test(joined)) return true;
+  return !SUFFIXES_OF_HOSTS_WITH_A_PATH.has(suffix) && AT_MOST_TWO_WORDS.test(joined);
 }
 
 const ADDRESS_SCHEME = /^(?:https?:\/\/|ftp:\/\/|mailto:)/i;

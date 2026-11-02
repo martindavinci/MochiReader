@@ -380,6 +380,61 @@ test('a slash or a question mark after a lost space does not take the words with
   assert.deepEqual(texts('<p>Ero stanco.io?no</p>'), ['Ero stanco.io?', 'no']);
 });
 
+test('a suffix that a word can start with keeps the word before it after a lost space', () => {
+  assertKept('it', [
+    'Ci sono molti formati.es. PNG e JPEG.',
+    'Si parla di animali.es. cani e gatti.',
+    'Il ministro ha parlato.de Rossi ha risposto.',
+    'Secondo il sig.de Luca.',
+    'Vedi art. 3.co. 2 della legge.',
+    'Erano in tre.eu non lo so.',
+  ]);
+  assertKept('en', ['he said.uk sales fell.', 'and we left.co founders stayed.', 'we won.biz is good.']);
+  assertKept('pl', ['Nie wiem.co teraz robić.']);
+  assertKept('fr', ['Il est parti.co fondateur.']);
+});
+
+test('a bare host that cannot be taken for a lost space still goes', () => {
+  assert.deepEqual(texts('<p>Vai su marca.es ora.</p>'), ['Vai su ora.']);
+  assert.deepEqual(texts('<p>Vai su docs.marca.es. Poi basta.</p>'), ['Vai su.', 'Poi basta.']);
+  assert.deepEqual(texts('<p>Vai su sito.it. Poi basta.</p>'), ['Vai su.', 'Poi basta.']);
+  assert.deepEqual(texts('<p>Vedi t.co e g.co ora.</p>'), ['Vedi e ora.']);
+  assert.deepEqual(texts('<p>Vedi t.co/abc ora.</p>'), ['Vedi ora.']);
+});
+
+test('two words joined by a slash after a lost space stay, in any case', () => {
+  assertKept('it', [
+    'Va bene.il/la va.',
+    'Va bene.un/una va.',
+    'Va bene.di/da va.',
+    'Va bene.tu/loro va.',
+    'Va bene.si/forse va.',
+    'Scrivi Rev.do/a padre.',
+    'Scrivi a Egr.gi/e signori.',
+    'Scrivi agli Avv.ti/e presenti.',
+  ]);
+  assertKept('en', [
+    'Yes.on/off works.',
+    'Done.he/she can.',
+    'Done.he/she/they can.',
+    'Fine.my/your choice.',
+    'He left.in/out.',
+    'Ok.up/down.',
+    'Yes.be/at works.',
+    'Yes.one/two works.',
+    'Yes.online/offline works.',
+  ]);
+});
+
+test('hosts of well known suffixes keep going before a short path, also with a capital', () => {
+  assert.deepEqual(texts('<p>Vedi Mistral.ai/news e Repubblica.it/x ora.</p>'), ['Vedi e ora.']);
+  assert.deepEqual(texts('<p>Vedi nu.nl/c e spiegel.de/news ora.</p>'), ['Vedi e ora.']);
+  assert.deepEqual(texts('<p>Vedi youtu.be/abc e orf.at/abc ora.</p>'), ['Vedi e ora.']);
+  assert.deepEqual(texts('<p>Vedi bit.ly/abc e foo.gg/abc ora.</p>'), ['Vedi e ora.']);
+  assert.deepEqual(texts('<p>Vedi foo.sk/a-b-c e foo.ph/2024 ora.</p>'), ['Vedi e ora.']);
+  assert.deepEqual(texts('<p>Go to foo.com/about now.</p>', { lang: 'en' }), ['Go to now.']);
+});
+
 test('hosts with a real path are still skipped', () => {
   assert.deepEqual(texts('<p>Vedi mistral.ai/news e claude.ai/share ora.</p>'), ['Vedi e ora.']);
   assert.deepEqual(texts('<p>Vedi grok.com/imagine, google.com/a e nasa.gov/x ora.</p>'), ['Vedi, e ora.']);
