@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 use crate::comments::remove_comments;
-use crate::raw_html::{clean_contained, contain_inline_html, repaired_source, RawHtmlGuard};
+use crate::raw_html::{
+    clean_contained, contain_inline_html, repaired_source, show_unclosed_tags, RawHtmlGuard,
+};
 use crate::vault::Vault;
 use comrak::nodes::{AstNode, NodeValue};
 use comrak::{format_html, parse_document, Arena, Options};
@@ -9,8 +11,9 @@ use std::borrow::Cow;
 use std::collections::HashSet;
 use std::path::Path;
 
-// Each pass is a full parse, and only one raw block that swallows the rest of the document can be
-// seen per pass. Only a document built for it needs this many: `clean_html` handles what is left.
+// Each pass is a full parse, and only one type of raw block that swallows the rest of the document
+// can be seen per pass. Only a document built for it needs this many: what is left stays raw, and
+// `clean_html` then shows it as text.
 const MAX_REPAIR_PASSES: usize = 8;
 const BOM: char = '\u{feff}';
 const BOM_BYTES: &[u8] = b"\xEF\xBB\xBF";
@@ -67,8 +70,8 @@ pub fn render_markdown(source: &str, _ctx: &RenderCtx) -> Rendered {
     let cleaner = sanitizer();
     let mut guard = RawHtmlGuard::new(&cleaner);
     let arena = Arena::new();
-    let root = parse_contained(&arena, source, &mut options, &mut guard);
-    remove_comments(root, &mut guard);
+    let (root, source) = parse_contained(&arena, source, &mut options, &mut guard);
+    remove_comments(&arena, root, &source, &mut guard);
     contain_inline_html(root, &mut guard);
 
     let mut lang = None;
@@ -106,12 +109,13 @@ pub fn decode_text(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).into_owned()
 }
 
-fn parse_contained<'a>(
+/// Returns the document and the source it was parsed from, with the repairs in it.
+fn parse_contained<'a, 's>(
     arena: &'a Arena<'a>,
-    source: &str,
+    source: &'s str,
     options: &mut Options,
     guard: &mut RawHtmlGuard<'_, '_>,
-) -> &'a AstNode<'a> {
+) -> (&'a AstNode<'a>, Cow<'s, str>) {
     let mut root = parse_document(arena, source, options);
     if root.first_child().is_some_and(is_false_front_matter) {
         options.extension.front_matter_delimiter = None;
@@ -125,11 +129,12 @@ fn parse_contained<'a>(
         source = Cow::Owned(repaired);
         root = parse_document(arena, &source, options);
     }
-    root
+    (root, source)
 }
 
-/// Falls back to showing all raw HTML as text if the checks on single fragments were not enough:
-/// no raw HTML is worth the rest of the document.
+/// Shows as text any concealing tag the document leaves open, and falls back to showing all raw
+/// HTML as text if the checks on single fragments were not enough: no raw HTML is worth the rest
+/// of the document. Comments are gone from the document by now, so neither step can show them.
 fn clean_html<'a>(
     root: &'a AstNode<'a>,
     options: &mut Options,
@@ -140,7 +145,14 @@ fn clean_html<'a>(
         format_html(root, options, &mut unsafe_html).expect("writing to a String cannot fail");
         unsafe_html
     };
-    clean_contained(cleaner, &format(options)).unwrap_or_else(|| {
+    let cleaned = match clean_contained(cleaner, &format(options)) {
+        Err(open) if !open.is_empty() => {
+            show_unclosed_tags(root, &open);
+            clean_contained(cleaner, &format(options))
+        }
+        cleaned => cleaned,
+    };
+    cleaned.unwrap_or_else(|_| {
         options.render.escape = true;
         cleaner.clean(&format(options)).to_string()
     })
@@ -250,6 +262,8 @@ mod tests {
 
     const SAMPLER: &[u8] = include_bytes!("../tests/fixtures/obsidian-sampler.md");
     const NESTING_DEPTH: usize = 5_000;
+    const MANY_BLOCKS: usize = 40;
+    const MIN_FENCE: usize = 3;
     const LIST_NESTING_DEPTH: usize = 1_000;
     const LARGE_FILE_ENTRY: &str = "- Voce con **testo** e [link](https://e.org/x) ok\n";
     const LARGE_FILE_ENTRIES: usize = 200_000;
@@ -545,12 +559,15 @@ mod tests {
     fn comments_opening_after_text_can_span_lines() {
         for (source, expected) in [
             ("uno %%nota\nnota%% due\n", "uno due"),
-            ("uno <!-- nota\n\nnota --> due\n", "uno"),
+            ("uno <!-- nota\n\nnota -->\n\ndue\n", "uno"),
             ("- uno %%nota\n  nota%% due\n", "uno due"),
             ("> uno %%nota\n> nota%% due\n", "uno due"),
             ("uno %%nota\n\n## Nota\n\n- nota\n\nnota%% due\n", "uno"),
             ("uno %%*nota\nnota*%% due\n", "uno due"),
-            ("uno <!-- `nota`\n\n```\nnota\n```\n\nnota --> due\n", "uno"),
+            (
+                "uno <!-- `nota`\n\n```\nnota\n```\n\nnota -->\n\ndue\n",
+                "uno",
+            ),
         ] {
             let o = r(source);
             assert!(o.html.contains(expected), "{source:?}: {}", o.html);
@@ -583,7 +600,7 @@ mod tests {
 
     #[test]
     fn several_comments_in_one_block_are_all_removed() {
-        let o = r("uno %%a\nb%% due %%c\nd%% tre <!-- e\n\nf --> quattro\n");
+        let o = r("uno %%a\nb%% due %%c\nd%% tre <!-- e\n\nf -->\n\nquattro\n");
         for gone in ["%%", "a\n", "b%", "c\n", "&lt;!--", "--&gt;"] {
             assert!(!o.html.contains(gone), "{gone:?}: {}", o.html);
         }
@@ -629,6 +646,361 @@ mod tests {
     fn spaced_markers_are_a_comment_inside_their_block() {
         let o = r("uno %% nota\nnota %% due\n");
         assert!(o.html.contains("uno due"), "{}", o.html);
+    }
+
+    fn raw_tag_shown(html: &str, tag: &str) -> bool {
+        html.contains(&format!("&lt;{tag}")) && !html.contains(&format!("<{tag}"))
+    }
+
+    #[test]
+    fn a_tag_in_prose_leaves_comments_hidden_and_other_html_working() {
+        for source in [
+            "Chiude </pre> qui e apre <pre>\n\n<!-- segreto -->\n",
+            "<!-- segreto -->\n\nIl tag <pre> qui.\n\nTesto dopo.\n",
+            "Paragrafo con <!-- segreto --> inline e il tag <pre> citato.\n\nTesto dopo.\n",
+        ] {
+            let html = r(source).html;
+            assert!(!html.contains("segreto"), "{source:?}: {html}");
+            assert!(raw_tag_shown(&html, "pre"), "{source:?}: {html}");
+        }
+
+        let source = "Il tag <pre> qui.\n\nTesto.\n\n<!-- segreto -->\n\n\
+                      x <!-- segreto2 --> y\n\n<b>bold</b>\n\n## Sezione\n";
+        let o = r(source);
+        assert!(!o.html.contains("segreto"), "{}", o.html);
+        assert!(o.html.contains("<b>bold</b>"), "{}", o.html);
+        assert!(o.html.contains("<h2 "), "{}", o.html);
+        assert_eq!(o.headings.len(), 1);
+    }
+
+    #[test]
+    fn comments_inside_image_alt_text_are_gone() {
+        for source in [
+            "![a <!-- segreto --> b](x.png)\n",
+            "![a %%segreto%% b](x.png)\n",
+        ] {
+            let html = r(source).html;
+            assert!(!html.contains("segreto"), "{source:?}: {html}");
+            assert!(html.contains("<img"), "{source:?}: {html}");
+        }
+    }
+
+    #[test]
+    fn comments_inside_raw_blocks_are_gone_when_a_tag_is_shown() {
+        let html = r("Il tag <pre> qui.\n\n<div><!-- segreto --></div>\n").html;
+        assert!(!html.contains("segreto"), "{html}");
+        assert!(html.contains("<div"), "{html}");
+    }
+
+    #[test]
+    fn unclosed_blocks_that_only_the_end_of_file_ends_keep_the_rest() {
+        for opening in ["<?php echo 1;", "<![CDATA[ x", "<!X y", "<!DOCTYPE html"] {
+            let body = "Testo *dopo*.\n\n%%segreto%%\n\n## Sezione\n";
+            let o = r(&format!("{opening}\n\n{body}"));
+            assert!(o.html.contains("<em>dopo</em>"), "{opening}: {}", o.html);
+            assert!(!o.html.contains("segreto"), "{opening}: {}", o.html);
+            assert!(o.html.contains(&opening[1..]), "{opening}: {}", o.html);
+            assert_eq!(o.headings.len(), 1, "{opening}");
+            assert_rest_survives(&format!("{opening}\n\nTesto dopo.\n\n## Sezione\n"));
+            assert_rest_survives(&format!("> {opening}\n\nTesto dopo.\n\n## Sezione\n"));
+            assert_rest_survives(&format!("- {opening}\n\nTesto dopo.\n\n## Sezione\n"));
+        }
+    }
+
+    #[test]
+    fn closed_processing_and_cdata_blocks_are_still_hidden() {
+        for source in [
+            "<?php echo 1; ?>\n\nTesto dopo.\n\n## Sezione\n",
+            "<![CDATA[ x ]]>\n\nTesto dopo.\n\n## Sezione\n",
+        ] {
+            assert_rest_survives(source);
+            let html = r(source).html;
+            assert!(!html.contains("echo") && !html.contains("CDATA"), "{html}");
+        }
+    }
+
+    #[test]
+    fn elements_that_hide_their_content_cannot_take_the_rest_when_left_open() {
+        for tag in ["details", "rp", "rt", "rtc", "ruby"] {
+            for source in [
+                format!("Il tag <{tag}> serve qui.\n\nTesto dopo.\n\n## Sezione\n"),
+                format!("<{tag}>\nTesto sulla riga.\n\nTesto dopo.\n\n## Sezione\n"),
+            ] {
+                assert_rest_survives(&source);
+                let html = r(&source).html;
+                assert!(raw_tag_shown(&html, tag), "{source:?}: {html}");
+            }
+            assert_rest_survives(&format!("> <{tag}>\n\nTesto dopo.\n\n## Sezione\n"));
+        }
+    }
+
+    #[test]
+    fn a_tag_left_open_next_to_a_closed_one_is_the_only_one_shown() {
+        let source = "Il tag <details> qui.\n\n<details>\n<summary>Titolo</summary>\n\n\
+                      Corpo *nascosto*.\n\n</details>\n\nTesto dopo.\n\n## Sezione\n";
+        let o = r(source);
+        assert!(o.html.contains("&lt;details&gt;"), "{}", o.html);
+        assert_eq!(o.html.matches("<details").count(), 1, "{}", o.html);
+        assert!(o.html.contains("<summary>Titolo</summary>"), "{}", o.html);
+        assert_rest_survives(source);
+    }
+
+    #[test]
+    fn elements_closed_in_a_later_block_or_in_their_own_run_are_left_alone() {
+        let html = r("<details>\n<summary>T</summary>\n\nCorpo *md*.\n\n</details>\n\nDopo\n").html;
+        assert!(html.contains("<details>"), "{html}");
+        assert!(html.contains("</details>"), "{html}");
+        assert!(html.contains("<em>md</em>"), "{html}");
+
+        let html = r("<ruby>a<rp>(</rp><rt>b</rt><rp>)</rp></ruby>\n\nDopo\n").html;
+        assert!(
+            html.contains("<rt>b</rt>") && !html.contains("&lt;"),
+            "{html}"
+        );
+
+        let html = r("<ruby>a<rp>(<rt>b<rp>)</ruby> fine\n\nDopo\n").html;
+        assert!(html.contains("<rt>b") && !html.contains("&lt;"), "{html}");
+
+        let html = r("Da <pre>\n\nriga\n\nfine </pre> qui\n\nDopo\n").html;
+        assert!(html.contains("<pre>") && !html.contains("&lt;"), "{html}");
+    }
+
+    #[test]
+    fn a_tag_closed_by_its_container_needs_no_repair() {
+        let html = r("- Il tag <details> qui\n- Altra voce\n\nTesto dopo.\n").html;
+        assert!(html.contains("Testo dopo."), "{html}");
+        let html = r("<div><pre>uno</div>\n\nTesto dopo.\n").html;
+        assert!(html.contains("<pre>"), "{html}");
+    }
+
+    const SECRET_THEN_HEADING: &str = "<!-- segreto -->\n\n## Sezione finale\n";
+    const HEADING: &str = "## Sezione finale\n";
+
+    fn blocks_then(openings: impl Iterator<Item = String>, tail: &str) -> String {
+        let blocks: String = openings.map(|opening| format!("{opening}\n\n")).collect();
+        format!("{blocks}{tail}")
+    }
+
+    #[test]
+    fn many_raw_blocks_left_open_all_end_where_the_author_meant() {
+        for (opening, shown) in [
+            ("<pre>", true),
+            ("<script>", true),
+            ("<?php ", true),
+            ("<![CDATA[ ", true),
+            ("<!-- ", false),
+        ] {
+            let openings = (0..MANY_BLOCKS).map(|n| format!("{opening}a{n}"));
+            let o = r(&blocks_then(openings, SECRET_THEN_HEADING));
+            for n in 0..MANY_BLOCKS {
+                let text = format!("a{n}");
+                assert_eq!(o.html.contains(&text), shown, "{text}: {}", o.html);
+            }
+            assert!(!o.html.contains("segreto"), "{}", o.html);
+            assert!(o.html.contains("<h2 "), "{}", o.html);
+            assert_eq!(o.headings.len(), 1);
+        }
+
+        let openings = (0..MANY_BLOCKS).map(|n| format!("<!-- a{n}"));
+        let o = r(&blocks_then(openings, HEADING));
+        assert!(
+            !o.html.contains("a0") && !o.html.contains("a39"),
+            "{}",
+            o.html
+        );
+        assert_eq!(heading_tags(&o.html), 1, "{}", o.html);
+
+        let mixed = (0..MANY_BLOCKS).map(|n| match n % 4 {
+            0 => format!("<pre>a{n}"),
+            1 => format!("<?php a{n}"),
+            2 => format!("<!-- b{n}"),
+            _ => format!("<![CDATA[ a{n}"),
+        });
+        let o = r(&blocks_then(mixed, HEADING));
+        assert_eq!(heading_tags(&o.html), 1, "{}", o.html);
+        assert!(o.html.contains("a39"), "{}", o.html);
+        assert!(!o.html.contains("b38"), "{}", o.html);
+    }
+
+    #[test]
+    fn repair_of_many_open_blocks_leaves_fenced_code_alone() {
+        let source = "<pre>a\n\n```\n<pre>in codice\n```\n\n~~~~\n<!-- x\n~~~\n~~~~\n\n\
+                      <pre>b\n\n## Sezione\n";
+        let o = r(source);
+        assert!(o.html.contains("&lt;pre&gt;in codice"), "{}", o.html);
+        assert!(!o.html.contains('\\'), "{}", o.html);
+        assert!(o.html.contains("&lt;pre&gt;a"), "{}", o.html);
+        assert!(o.html.contains("&lt;pre&gt;b"), "{}", o.html);
+        assert_eq!(o.headings.len(), 1);
+    }
+
+    #[test]
+    fn blocks_past_the_repair_limit_are_shown_and_lose_nothing() {
+        // A `<div>` hides from the repair that the line in it is no fence, and each one looks too
+        // short to end the one before: this leaves the repair one block a pass.
+        let count = MAX_REPAIR_PASSES * 2;
+        let openings = |opening: &'static str| {
+            (0..count).map(move |n| {
+                let fence = "`".repeat(MIN_FENCE + count - n);
+                format!("<div>\n{fence}\n\n{opening}a{n}")
+            })
+        };
+        let last = format!("a{}", count - 1);
+        let html = r(&blocks_then(openings("<pre>"), SECRET_THEN_HEADING)).html;
+        assert!(html.contains("Sezione finale"), "{html}");
+        assert!(html.contains(&last), "{html}");
+        assert!(!html.contains("segreto"), "{html}");
+
+        let html = r(&blocks_then(openings("<!-- "), HEADING)).html;
+        assert!(html.contains("Sezione finale"), "{html}");
+        assert!(html.contains(&last), "{html}");
+    }
+
+    #[test]
+    fn escaped_comment_markers_are_text() {
+        const SHOWN: &str = "&lt;!-- nota --&gt;";
+        const SHOWN_OFM: &str = "%%nota%%";
+        for (source, shown) in [
+            (
+                "Scrivi: &lt;!-- nota --&gt; in HTML.\n\nTesto dopo.\n",
+                SHOWN,
+            ),
+            ("Scrivi \\<!-- nota --> in HTML.\n\nTesto dopo.\n", SHOWN),
+            ("Scrivi <\\!-- nota --> in HTML.\n\nTesto dopo.\n", SHOWN),
+            ("Scrivi &#60;!-- nota --&#62; in HTML.\n", SHOWN),
+            ("Usa &#37;&#37;nota&#37;&#37; in Obsidian.\n", SHOWN_OFM),
+            ("Usa \\%%nota%% in Obsidian.\n\nTesto dopo.\n", SHOWN_OFM),
+            ("Usa %\\%nota%\\% in Obsidian.\n\nTesto dopo.\n", SHOWN_OFM),
+            ("> Cita &lt;!-- nota --&gt; qui.\n>\n> Testo dopo.\n", SHOWN),
+            ("> Prima riga\n> poi &lt;!-- nota --&gt; qui.\n", SHOWN),
+            ("  Prima riga\n  poi &lt;!-- nota --&gt; qui.\n", SHOWN),
+            ("- Voce\n\n  Con &lt;!-- nota --&gt; qui.\n", SHOWN),
+            ("1. Voce *con &lt;!-- nota --&gt; qui*.\n", SHOWN),
+            ("# Titolo &lt;!-- nota --&gt; qui\n", SHOWN),
+            ("Titolo &lt;!-- nota --&gt;\n=====\n", SHOWN),
+            ("|a|\n|-|\n|&lt;!-- nota --&gt;|\n", SHOWN),
+            (
+                "|a|b|\n|-|-|\n|x \\| y|`c` &#37;&#37;nota&#37;&#37;|\n",
+                SHOWN_OFM,
+            ),
+            ("Un [link &lt;!-- nota --&gt; qui](https://e.org).\n", SHOWN),
+            ("https://e.org e &lt;!-- nota --&gt; qui\n", SHOWN),
+            ("- [x] fatto &lt;!-- nota --&gt; qui\n", SHOWN),
+            ("Nota[^1]\n\n[^1]: Con &lt;!-- nota --&gt; qui.\n", SHOWN),
+            (
+                "---\nlang: it\n---\n\nCon &lt;!-- nota --&gt; qui.\n",
+                SHOWN,
+            ),
+            ("`x` e &lt;!-- nota --&gt; qui con è `y`\n", SHOWN),
+        ] {
+            let html = r(source).html;
+            assert!(html.contains(shown), "{source:?}: {html}");
+        }
+    }
+
+    #[test]
+    fn written_markers_are_recognised_wherever_their_text_sits() {
+        for source in [
+            "è perché %%nota\nnota%% due\n",
+            "  rientro %%nota\n  nota%% due\n",
+            "> > doppia %%nota\n> > nota%% due\n",
+            "1. voce\n\n   testo %%nota\n   nota%% due\n",
+            "> pigra\ncontinua %%nota\nnota%% due\n",
+            "*enfasi %%nota\nnota%% due*\n",
+            "uno %%nota\r\nnota%% due\r\n",
+            "|a \\| è %%x|b|\n|-|-|\n|c|d%% due|\n",
+            "[link %%nota\nnota%% due](https://e.org)\n",
+            "uno\tcon tab %%nota\nnota%% due\n",
+            "- [ ] voce %%nota\n  nota%% due\n",
+            "https://e.org %%nota\nnota%% due\n",
+            "&amp; prima %%nota\nnota%% due\n",
+            "\\* prima %%nota\nnota%% due\n",
+            "`x` prima %%nota\nnota%% due\n",
+            "a\0 prima %%nota\nnota%% due\n",
+        ] {
+            let html = r(source).html;
+            assert!(!html.contains("nota"), "{source:?}: {html}");
+            assert!(!html.contains("%%"), "{source:?}: {html}");
+            assert!(html.contains("due"), "{source:?}: {html}");
+        }
+    }
+
+    #[test]
+    fn escaped_markers_cannot_pair_with_real_text_further_on() {
+        let o = r("Si apre con \\<!-- e basta.\n\n## Sezione\n\nImportante.\n\nA --> B\n");
+        for kept in ["&lt;!-- e basta.", "Importante.", "A --&gt; B"] {
+            assert!(o.html.contains(kept), "{kept}: {}", o.html);
+        }
+        assert_eq!(o.headings.len(), 1);
+
+        let o = r("Uno &#37;&#37;nota\n\n## Sezione\n\nImportante.\n\nnota%% due\n");
+        for kept in ["%%nota", "Importante.", "nota%% due"] {
+            assert!(o.html.contains(kept), "{kept}: {}", o.html);
+        }
+
+        let o = r("Uno <!-- aperto\n\nTesto.\n\nFine --&gt;\n");
+        for kept in ["&lt;!-- aperto", "Testo.", "Fine --&gt;"] {
+            assert!(o.html.contains(kept), "{kept}: {}", o.html);
+        }
+    }
+
+    #[test]
+    fn written_and_escaped_markers_are_told_apart_in_one_document() {
+        let o = r("&lt;!-- mostrato --&gt;\n\nVero <!-- nascosto --> commento %%nascosto%%.\n");
+        assert!(o.html.contains("&lt;!-- mostrato --&gt;"), "{}", o.html);
+        assert!(!o.html.contains("nascosto"), "{}", o.html);
+
+        let o = r("<script> uno\n\nCon &lt;!-- mostrato --&gt; qui.\n");
+        assert!(o.html.contains("&lt;!-- mostrato --&gt;"), "{}", o.html);
+
+        let o = r("Vero <!-- nascosto\n\nnascosto \\\\-->\n\ndue backslash\n");
+        assert!(!o.html.contains("nascosto"), "{}", o.html);
+        assert!(o.html.contains("due backslash"), "{}", o.html);
+    }
+
+    #[test]
+    fn a_prose_arrow_does_not_close_a_comment_opened_in_text() {
+        for (source, kept) in [
+            (
+                "Commenta con <!-- e chiudi cosi.\n\n## Sezione\n\nImportante da leggere.\n\n\
+                 Passo 1 --> Passo 2\n",
+                ["Importante da leggere.", "Passo 1 --&gt; Passo 2"],
+            ),
+            (
+                "Commenta con <!-- e chiudi cosi.\n\nImportante da leggere.\n\n\
+                 Passo 1 --> Passo 2\n\n## Sezione\n",
+                ["Importante da leggere.", "Passo 1 --&gt; Passo 2"],
+            ),
+            (
+                "Commenta con <!-- e chiudi cosi.\n\n## Sezione\n\nImportante da leggere.\n\n\
+                 Fine -->\n",
+                ["Importante da leggere.", "Fine --&gt;"],
+            ),
+        ] {
+            let o = r(source);
+            assert!(
+                o.html.contains("&lt;!-- e chiudi"),
+                "{source:?}: {}",
+                o.html
+            );
+            for kept in kept {
+                assert!(o.html.contains(kept), "{source:?}: {}", o.html);
+            }
+            assert_eq!(o.headings.len(), 1, "{source:?}");
+        }
+    }
+
+    #[test]
+    fn an_opener_that_finds_no_end_does_not_stop_later_comments() {
+        let o = r("Uso <!-- e A --> B\n\nTesto.\n\nAltro <!-- nascosto\n\nnascosto -->\n\nFine\n");
+        assert!(!o.html.contains("nascosto"), "{}", o.html);
+        for kept in ["Testo.", "Fine", "Altro"] {
+            assert!(o.html.contains(kept), "{kept}: {}", o.html);
+        }
+
+        let o = r("# Uso <!-- qui\n\nSeconda <!-- nascosto\n\nnascosto -->\n\nFine\n");
+        assert!(!o.html.contains("nascosto"), "{}", o.html);
+        assert!(o.html.contains("&lt;!-- qui"), "{}", o.html);
     }
 
     #[test]

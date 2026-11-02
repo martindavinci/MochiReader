@@ -9,13 +9,26 @@
 //! `%%` is also ordinary text, as in the `%d%%` of a format string, and a wrong pair would hide
 //! everything between two of them. So it opens a comment only after a space or at the start of
 //! the text, and a comment reaches past its block only if it hugs its text on both sides.
-use crate::raw_html::{Containment, RawHtmlGuard, COMMENT_END};
+//!
+//! `-->` is an arrow in prose, and the text between it and a `<!--` mentioned earlier would vanish
+//! with no sign. So a `<!--` opened after text reaches past its block only to a `-->` that ends
+//! its line, and no comment reaches past its block across a heading.
+//!
+//! Markers the author wrote with an escape or an entity are text, and comrak has already decoded
+//! them, so the source tells them apart.
+use crate::raw_html::{
+    comment_end_lines, line_spans, Containment, RawHtmlGuard, COMMENT_END, COMMENT_START,
+};
 use comrak::nodes::{AstNode, NodeValue};
+use comrak::Arena;
 use std::collections::HashSet;
 use std::ptr;
 
 const OFM_MARKER: &str = "%%";
-const HTML_OPEN: &str = "<!--";
+const ESCAPE: u8 = b'\\';
+/// How far into an HTML comment its end can already start, as `<!-->` is a whole comment.
+const COMMENT_END_SEARCH_OFFSET: usize = 2;
+const MARKERS: [&str; 3] = [OFM_MARKER, COMMENT_START, COMMENT_END];
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Kind {
@@ -29,10 +42,16 @@ struct Opener {
     at: Option<usize>,
 }
 
-pub fn remove_comments<'a>(root: &'a AstNode<'a>, guard: &mut RawHtmlGuard<'_, '_>) {
+pub fn remove_comments<'a>(
+    arena: &'a Arena<'a>,
+    root: &'a AstNode<'a>,
+    source: &str,
+    guard: &mut RawHtmlGuard<'_, '_>,
+) {
+    split_escaped_markers(arena, root, source);
     let nodes: Vec<_> = root.descendants().filter(|node| holds_text(node)).collect();
     let last_far_end = nodes.iter().rposition(|node| far_end(node).is_some());
-    let mut html_has_end = true;
+    let html_ends = HtmlEnds::new(&nodes);
     let mut index = 0;
     let mut from = 0;
     while let Some(&node) = nodes.get(index) {
@@ -41,17 +60,13 @@ pub fn remove_comments<'a>(root: &'a AstNode<'a>, guard: &mut RawHtmlGuard<'_, '
                 kind: Kind::Html,
                 at: None,
             }
-        } else if let Some(opener) = first_opener(node, from, html_has_end) {
+        } else if let Some(opener) = first_opener(node, from) {
             opener
         } else {
             index += 1;
             from = 0;
             continue;
         };
-        if opener.kind == Kind::Html && !html_has_end {
-            index += 1;
-            continue;
-        }
 
         if let Some(at) = opener.at {
             if let Some(end) = end_in_same_text(node, at, opener.kind) {
@@ -61,19 +76,204 @@ pub fn remove_comments<'a>(root: &'a AstNode<'a>, guard: &mut RawHtmlGuard<'_, '
             }
         }
 
-        match find_end(&nodes, index, &opener, last_far_end) {
+        match find_end(&nodes, index, &opener, last_far_end, &html_ends) {
             Some((closing, end)) => {
                 remove_range(root, node, opener.at, nodes[closing], end);
                 index = closing;
                 from = 0;
             }
-            None if opener.kind == Kind::Html => {
-                html_has_end = false;
-                index += usize::from(opener.at.is_none());
-            }
-            None => from = opener.at.unwrap_or_default() + OFM_MARKER.len(),
+            None => match opener.at {
+                Some(at) => from = at + marker_of(opener.kind).len(),
+                None => {
+                    index += 1;
+                    from = 0;
+                }
+            },
         }
     }
+    remove_raw_comments(root);
+}
+
+fn marker_of(kind: Kind) -> &'static str {
+    match kind {
+        Kind::Ofm => OFM_MARKER,
+        Kind::Html => COMMENT_START,
+    }
+}
+
+/// Splits every marker decoded from an escape or an entity across two text nodes, so that nothing
+/// later can read it as a marker. They render as one piece of text again.
+fn split_escaped_markers<'a>(arena: &'a Arena<'a>, root: &'a AstNode<'a>, source: &str) {
+    let marked: Vec<_> = root
+        .descendants()
+        .filter(|node| {
+            in_text(node, |text| MARKERS.iter().any(|m| text.contains(m))).unwrap_or_default()
+        })
+        .collect();
+    if marked.is_empty() {
+        return;
+    }
+    let lines = line_spans(source);
+    for node in marked {
+        let Some(written) = written_text(node, source, &lines) else {
+            continue;
+        };
+        let mut splits =
+            in_text(node, |text| escaped_marker_splits(text, written)).unwrap_or_default();
+        splits.sort_unstable();
+        splits.dedup();
+        for at in splits.into_iter().rev() {
+            split_text(arena, node, at);
+        }
+    }
+}
+
+/// The source of a text node, which never spans lines. Its columns can be off on a line comrak
+/// had to change, as with a NUL, and the whole line is still the closest thing to it.
+fn written_text<'s>(
+    node: &AstNode<'_>,
+    source: &'s str,
+    lines: &[(usize, usize)],
+) -> Option<&'s str> {
+    let position = node.data().sourcepos;
+    let &(start, end) = lines.get(position.start.line.checked_sub(1)?)?;
+    let line = &source[start..end];
+    let columns = position.start.column.checked_sub(1)?..position.end.column;
+    Some(line.get(columns).unwrap_or(line))
+}
+
+/// Where to split the decoded `text` so that the markers not found as such in `written` break up.
+/// A text mixing both ways of writing the same marker cannot be told apart, and all of it stays
+/// text: a comment that shows is better than text that vanishes.
+fn escaped_marker_splits(text: &str, written: &str) -> Vec<usize> {
+    let mut splits = Vec::new();
+    for marker in MARKERS {
+        let decoded: Vec<_> = text.match_indices(marker).map(|(at, _)| at + 1).collect();
+        if written_marker_count(written, marker) < decoded.len() {
+            splits.extend(decoded);
+        }
+    }
+    splits
+}
+
+fn written_marker_count(written: &str, marker: &str) -> usize {
+    written
+        .match_indices(marker)
+        .filter(|(at, _)| {
+            let backslashes = written.as_bytes()[..*at]
+                .iter()
+                .rev()
+                .take_while(|byte| **byte == ESCAPE)
+                .count();
+            backslashes % 2 == 0
+        })
+        .count()
+}
+
+fn split_text<'a>(arena: &'a Arena<'a>, node: &'a AstNode<'a>, at: usize) {
+    let mut data = node.data_mut();
+    if let NodeValue::Text(text) = &mut data.value {
+        let tail = text[at..].to_string();
+        text.to_mut().truncate(at);
+        let tail = arena.alloc(NodeValue::Text(tail.into()).into());
+        tail.data_mut().sourcepos = data.sourcepos;
+        node.insert_after(tail);
+    }
+}
+
+/// Removes comments that are whole inside a raw node. The sanitizer would drop them too, but not
+/// where comrak escapes raw HTML itself, as in the text of an image, or when all of it is shown.
+fn remove_raw_comments<'a>(root: &'a AstNode<'a>) {
+    let raw: Vec<_> = root.descendants().collect();
+    for node in raw {
+        let emptied = match &mut node.data_mut().value {
+            NodeValue::HtmlInline(literal) => literal.starts_with(COMMENT_START),
+            NodeValue::CommentInline(_) => true,
+            NodeValue::HtmlBlock(block) => {
+                strip_whole_comments(&mut block.literal);
+                block.literal.trim().is_empty()
+            }
+            _ => false,
+        };
+        if emptied {
+            let parent = node.parent();
+            node.detach();
+            if let Some(parent) = parent {
+                prune_empty(root, parent);
+            }
+        }
+    }
+}
+
+fn strip_whole_comments(literal: &mut String) {
+    let mut from = 0;
+    while let Some(start) = literal[from..].find(COMMENT_START).map(|at| from + at) {
+        let search = start + COMMENT_END_SEARCH_OFFSET;
+        let Some(end) = literal[search..].find(COMMENT_END) else {
+            return;
+        };
+        literal.replace_range(start..search + end + COMMENT_END.len(), "");
+        from = start;
+    }
+}
+
+/// Where comments can end, by index in the list of nodes that hold text.
+struct HtmlEnds {
+    anywhere: Vec<usize>,
+    at_line_end: Vec<usize>,
+    headings: Vec<usize>,
+}
+
+impl HtmlEnds {
+    fn new<'a>(nodes: &[&'a AstNode<'a>]) -> Self {
+        let mut ends = Self {
+            anywhere: Vec::new(),
+            at_line_end: Vec::new(),
+            headings: Vec::new(),
+        };
+        for (index, node) in nodes.iter().enumerate() {
+            if in_text(node, |text| text.contains(COMMENT_END)).unwrap_or_default() {
+                ends.anywhere.push(index);
+                if ends_its_line(node) {
+                    ends.at_line_end.push(index);
+                }
+            }
+            if matches!(block_of(node).data().value, NodeValue::Heading(_)) {
+                ends.headings.push(index);
+            }
+        }
+        ends
+    }
+
+    /// The index of the node that ends a comment opened at `index`, if no heading is in the way,
+    /// the one the comment opens in included.
+    fn after(&self, index: usize, in_text: bool) -> Option<usize> {
+        let ends = if in_text {
+            &self.at_line_end
+        } else {
+            &self.anywhere
+        };
+        let closing = first_from(ends, index + 1)?;
+        let blocked = first_from(&self.headings, index).is_some_and(|heading| heading <= closing);
+        (!blocked).then_some(closing)
+    }
+}
+
+fn first_from(sorted: &[usize], index: usize) -> Option<usize> {
+    sorted
+        .get(sorted.partition_point(|item| *item < index))
+        .copied()
+}
+
+fn ends_its_line(node: &AstNode<'_>) -> bool {
+    let closes = in_text(node, |text| text.trim_end().ends_with(COMMENT_END)).unwrap_or_default();
+    closes
+        && node.next_sibling().is_none_or(|next| {
+            matches!(
+                next.data().value,
+                NodeValue::SoftBreak | NodeValue::LineBreak
+            )
+        })
 }
 
 fn holds_text(node: &AstNode<'_>) -> bool {
@@ -94,29 +294,30 @@ fn has_space_before(text: &str, at: usize) -> bool {
     at == 0 || text[..at].ends_with(char::is_whitespace)
 }
 
-/// Closes a comment left open at the end of a raw block, and reports that it was there.
+/// Closes a comment left open at the end of a raw block, and reports that it was there. One with
+/// a blank line in it is one the repair ran out of passes for: it may hold the rest of the document,
+/// so it stays open for the check on the whole document, which shows it.
 fn close_open_block(node: &AstNode<'_>, guard: &mut RawHtmlGuard<'_, '_>) -> bool {
     let mut data = node.data_mut();
     let NodeValue::HtmlBlock(block) = &mut data.value else {
         return false;
     };
-    if guard.containment(&block.literal) != Containment::OpenComment {
+    if guard.containment(&block.literal) != Containment::OpenComment
+        || !comment_end_lines(&block.literal).is_empty()
+    {
         return false;
     }
     block.literal.push_str(COMMENT_END);
     true
 }
 
-fn first_opener(node: &AstNode<'_>, from: usize, html_has_end: bool) -> Option<Opener> {
+fn first_opener(node: &AstNode<'_>, from: usize) -> Option<Opener> {
     in_text(node, |text| {
         let ofm = text[from..]
             .match_indices(OFM_MARKER)
             .map(|(at, _)| from + at)
             .find(|at| has_space_before(text, *at));
-        let html = text[from..]
-            .find(HTML_OPEN)
-            .map(|at| from + at)
-            .filter(|_| html_has_end);
+        let html = text[from..].find(COMMENT_START).map(|at| from + at);
         match (ofm, html) {
             (Some(ofm), Some(html)) if html < ofm => Some((Kind::Html, html)),
             (Some(ofm), _) => Some((Kind::Ofm, ofm)),
@@ -131,7 +332,7 @@ fn first_opener(node: &AstNode<'_>, from: usize, html_has_end: bool) -> Option<O
 fn end_in_same_text(node: &AstNode<'_>, at: usize, kind: Kind) -> Option<usize> {
     let (open, close) = match kind {
         Kind::Ofm => (OFM_MARKER, OFM_MARKER),
-        Kind::Html => (HTML_OPEN, COMMENT_END),
+        Kind::Html => (COMMENT_START, COMMENT_END),
     };
     in_text(node, |text| {
         let inner = at + open.len();
@@ -167,17 +368,21 @@ fn find_end<'a>(
     index: usize,
     opener: &Opener,
     last_far_end: Option<usize>,
+    html_ends: &HtmlEnds,
 ) -> Option<(usize, usize)> {
     let opening = nodes[index];
     if opener.kind == Kind::Html {
-        return nodes
-            .iter()
-            .enumerate()
-            .skip(index + 1)
-            .find_map(|(i, node)| {
-                let at = in_text(node, |text| text.find(COMMENT_END)).flatten()?;
-                Some((i, at + COMMENT_END.len()))
-            });
+        let in_text_node = opener.at.is_some();
+        let closing = html_ends.after(index, in_text_node)?;
+        let at = in_text(nodes[closing], |text| {
+            if in_text_node {
+                text.rfind(COMMENT_END)
+            } else {
+                text.find(COMMENT_END)
+            }
+        })
+        .flatten()?;
+        return Some((closing, at + COMMENT_END.len()));
     }
 
     let block = block_of(opening);
