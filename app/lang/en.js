@@ -1,0 +1,69 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+export default {
+  'app.noFile': 'Open a file with Ctrl+O, or drop one on this window.',
+  'app.unsupported': '{name} is not a Markdown or EPUB file.',
+
+  'dialog.open': 'Open a file',
+  'dialog.filter': 'Markdown and EPUB',
+
+  'open.error.not_found': 'This file no longer exists.',
+  'open.error.unreadable': 'This file cannot be read.',
+  'open.error.unsupported': 'This file is not a Markdown or EPUB file.',
+  'open.error.timeout': 'The file did not answer in time. The drive may be slow or disconnected.',
+
+  'file.deleted': 'This file is no longer on disk. You are reading the last version opened.',
+  'epub.error': 'This book cannot be opened: it is damaged or protected by DRM.',
+
+  'tabs.close': 'Close tab',
+
+  'recents.title': 'Recent files',
+  'recents.empty': 'No recent files yet.',
+  'recents.missing': 'File not found',
+  'recents.remove': 'Remove from the list',
+
+  'bookmarks.title': 'Bookmarks',
+  'bookmarks.empty': 'No bookmarks yet. Press Ctrl+D to add one.',
+  'bookmarks.added': 'Bookmark added',
+  'bookmarks.removed': 'Bookmark removed',
+  'bookmarks.missingFile': 'The file of this bookmark is no longer available: {name}',
+
+  'toc.title': 'Contents',
+  'toc.empty': 'This document has no contents.',
+
+  'options.title': 'Options',
+  'options.theme': 'Theme',
+  'options.themeSystem': 'Same as Windows',
+  'options.themeLight': 'Light',
+  'options.themeDark': 'Dark',
+  'options.textSize': 'Text size',
+  'options.voice': 'Default voice',
+  'options.source': 'Sources at the end of an item, when reading aloud',
+  'options.sourceSkip': 'Skip them',
+  'options.sourceName': 'Read the name of the site',
+  'options.epubView': 'EPUB view',
+  'options.epubPaginated': 'Pages',
+  'options.epubScrolled': 'Continuous scrolling',
+  'options.language': 'Language',
+
+  'speech.readFromHere': 'Read from here',
+  'speech.follow': 'Follow',
+  'speech.reading': 'Reading {name}',
+  'speech.play': 'Play',
+  'speech.pause': 'Pause',
+  'speech.resume': 'Resume',
+  'speech.stop': 'Stop',
+  'speech.prevSentence': 'Previous sentence',
+  'speech.nextSentence': 'Next sentence',
+  'speech.slower': 'Slower',
+  'speech.faster': 'Faster',
+  'speech.rate': '{rate}×',
+  'speech.voice': 'Voice',
+  'speech.nothingToRead': 'There is nothing to read aloud in this document.',
+  'speech.error': 'Reading stopped because of a voice error. Your position is saved.',
+  'speech.noVoice': 'No {lang} voice. To add one, go to Windows Settings > Time & Language > Speech > Add voices, then restart MochiReader.',
+  'speech.hiddenVoice': 'A voice already installed may still be missing here, because Windows makes some voices available only to its own apps. If so, add a different voice for this language.',
+  'speech.sourceLabel': 'Source: {name}',
+
+  'lang.it': 'Italian',
+  'lang.en': 'English',
+};
