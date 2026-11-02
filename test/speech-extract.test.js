@@ -279,12 +279,20 @@ test('a dot or a mark that opens a quote or a bracket keeps the space before it'
 test('a mark right after something removed ends the sentence there', () => {
   assert.deepEqual(texts('<p>Fatto 😀.Poi va.</p>'), ['Fatto.', 'Poi va.']);
   assert.deepEqual(texts('<p>Fatto 😀!Poi va.</p>'), ['Fatto!', 'Poi va.']);
-  assert.deepEqual(texts('<p>Vedi https://x.com/a .Poi va.</p>'), ['Vedi.', 'Poi va.']);
-  assert.deepEqual(texts('<p>Vedi example.com .Poi va.</p>'), ['Vedi.', 'Poi va.']);
+  assert.deepEqual(texts('<p>Fatto &lt;!-- x --&gt;.Poi va.</p>'), ['Fatto.', 'Poi va.']);
   assert.deepEqual(texts('<p>Vedi 😀 .gitignore ora.</p>'), ['Vedi .gitignore ora.']);
   assert.deepEqual(texts('<p>Vedi 😀 .NET ora.</p>'), ['Vedi .NET ora.']);
   assert.deepEqual(texts('<p>Vedi **.Poi** ora.</p>'), ['Vedi .Poi ora.']);
   assert.deepEqual(texts('<p>Vedi 😀 <code>.Poi</code> ora.</p>'), ['Vedi .Poi ora.']);
+});
+
+test('a word that opens with a mark stays whole when a space keeps it from what was removed', () => {
+  assert.deepEqual(texts('<p>Apri .Net ora.</p>'), ['Apri .Net ora.']);
+  assert.deepEqual(texts('<p>Usa 😀 .Net ora.</p>'), ['Usa .Net ora.']);
+  assert.deepEqual(texts('<p>Vai su https://a.it/b .Net ora.</p>'), ['Vai su .Net ora.']);
+  assert.deepEqual(texts('<p>Vedi https://a.it .Docker poi.</p>'), ['Vedi .Docker poi.']);
+  assert.deepEqual(texts('<p>Vedi example.com .Docker poi.</p>'), ['Vedi .Docker poi.']);
+  assert.deepEqual(texts('<p>Usa 😀 !Important ora.</p>'), ['Usa !Important ora.']);
 });
 
 test('a marked sentence after something removed keeps its positions', () => {
@@ -293,6 +301,16 @@ test('a marked sentence after something removed keeps its positions', () => {
   const data = first.start.node.data;
   assert.equal(data.slice(first.start.offset, first.end.offset), 'Fatto 😀.');
   assert.equal(data.slice(second.start.offset, second.end.offset), 'Poi va.');
+});
+
+test('a comma or a semicolon that opens a word keeps the space before it', () => {
+  assert.deepEqual(
+    texts('<p>Capital One compra Brex per ,15B; TikTok crea una joint venture.</p>'),
+    ['Capital One compra Brex per ,15B; TikTok crea una joint venture.'],
+  );
+  assert.deepEqual(texts('<p>Vale ,5 punti.</p>'), ['Vale ,5 punti.']);
+  assert.deepEqual(texts('<p>Scrivi ;commento qui.</p>'), ['Scrivi ;commento qui.']);
+  assert.deepEqual(texts('<p>Usa ,"abc" e ;(x) ora.</p>'), ['Usa ,"abc" e ;(x) ora.']);
 });
 
 test('punctuation that ends a word still joins it', () => {

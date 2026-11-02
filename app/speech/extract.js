@@ -52,13 +52,12 @@ const INVISIBLE = /[­​⁠﻿]/g;
 const EMPTY_BRACKETS = /\(\s*\)|\[\s*\]/g;
 const REPEATED_SPACE = /(?<=\s)\s+/g;
 const OUTER_SPACE = /^\s+|\s+$/g;
-// Punctuation that a word, a number or a path follows is where they start (.gitignore, .5, :root, ../src).
+// Punctuation that a word, a number or a path follows is where they start (.gitignore, .5, ,15B, :root, ../src).
 // So do a quote or a bracket that it opens (."abc", .[x]).
-const SPACE_BEFORE_PUNCTUATION = /\s+(?=[)\],;]|[.:!?]+(?![.:!?/\\\p{L}\p{N}[({“«‘]|["'][\p{L}\p{N}]))/gu;
-// A mark with the space before it, as a removed part leaves it, and a sentence after it. Only a capital
-// and then a small letter say so: .gitignore and .NET open a word whatever came before them.
+const SPACE_BEFORE_PUNCTUATION = /\s+(?=[)\]]|[,;.:!?]+(?![,;.:!?/\\\p{L}\p{N}[({“«‘]|["'][\p{L}\p{N}]))/gu;
+// A mark with the space before it and a sentence after it. Only a capital and then a small letter say so:
+// .gitignore and .NET open a word whatever came before them.
 const MARK_BEFORE_SENTENCE = /\s+[.!?](?=\p{Lu}\p{Ll})/gu;
-const NOT_SPACE = /\S/;
 const TRAILING_SOURCE = /\s*\(\s*(fonte|source)\s*\)[\s.,;:]*$/i;
 
 const tokens = (el, attribute) => (el.getAttribute(attribute) ?? '').split(/\s+/);
@@ -208,13 +207,16 @@ function isDelimiterToken({ 0: delimiters, index }, text) {
   return !(SPACE.test(before) && SPACE.test(after) && STANDALONE_OPERATOR.test(delimiters));
 }
 
-/** Moves a mark that followed removed text back to the end of its sentence (Fatto 😀.Poi va). */
+/**
+ * Moves a mark that touched removed text back to the end of its sentence (Fatto 😀.Poi va).
+ * With a space between them it opens a word, as it does anywhere else (Usa 😀 .Net ora).
+ */
 function closeSentencesBeforeRemoved(clean, run) {
   let { text } = clean;
   const map = [...clean.map];
   for (const { 0: found, index } of clean.text.matchAll(MARK_BEFORE_SENTENCE)) {
     const mark = index + found.length - 1;
-    if (run.isCode(map[mark]) || !NOT_SPACE.test(run.text.slice(map[index], map[mark]))) continue;
+    if (run.isCode(map[mark]) || SPACE.test(run.text[map[mark] - 1])) continue;
     text = text.slice(0, index) + text[mark] + text.slice(index, mark) + text.slice(mark + 1);
     map.splice(index, found.length, map[mark], ...map.slice(index, mark));
   }
