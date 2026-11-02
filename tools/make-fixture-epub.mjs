@@ -6,6 +6,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { crc32 } from 'node:zlib';
+import { isEntryPoint } from './is-entry-point.mjs';
 
 const FIXTURES_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'test', 'fixtures');
 
@@ -85,8 +86,22 @@ const CONTAINER = `<?xml version="1.0" encoding="UTF-8"?>
 </container>
 `;
 
-// `identifier` is left out of the metadata altogether when it is null.
-function epub({ identifier, title, chapters }) {
+// An encryption method that is not font obfuscation, which is what marks a book as
+// DRM protected. The chapter stays readable: only that check may refuse the book.
+const DRM_ENCRYPTION = `<?xml version="1.0" encoding="UTF-8"?>
+<encryption xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <EncryptedData xmlns="http://www.w3.org/2001/04/xmlenc#">
+    <EncryptionMethod Algorithm="http://www.w3.org/2001/04/xmlenc#aes256-cbc"/>
+    <CipherData>
+      <CipherReference URI="OEBPS/chapter-1.xhtml"/>
+    </CipherData>
+  </EncryptedData>
+</encryption>
+`;
+
+// `identifier` is left out of the metadata altogether when it is null, and
+// `encryption` adds META-INF/encryption.xml with that content.
+function epub({ identifier, title, chapters, encryption }) {
   const uniqueIdentifier = identifier ? ' unique-identifier="book-id"' : '';
   const identifierElement = identifier
     ? `    <dc:identifier id="book-id">${identifier}</dc:identifier>\n`
@@ -127,6 +142,7 @@ ${spineItems}
   return zip([
     ['mimetype', 'application/epub+zip'],
     ['META-INF/container.xml', CONTAINER],
+    ...(encryption ? [['META-INF/encryption.xml', encryption]] : []),
     ['OEBPS/content.opf', opf],
     ['OEBPS/nav.xhtml', nav],
     ...chapters.map(({ title: label, body }, index) => [
@@ -172,7 +188,7 @@ const plain = epub({
   chapters: PROSE_CHAPTERS,
 });
 
-const FIXTURES = {
+export const FIXTURES = {
   'plain.epub': plain,
   'scripted.epub': epub({
     identifier: 'urn:uuid:6f1d6a51-3c0e-4e0a-9b52-0d7a3f2c1e02',
@@ -180,11 +196,19 @@ const FIXTURES = {
     chapters: SCRIPTED_CHAPTERS,
   }),
   'no-id.epub': epub({ identifier: null, title: 'No Identifier Fixture', chapters: PROSE_CHAPTERS }),
+  'drm.epub': epub({
+    identifier: 'urn:uuid:6f1d6a51-3c0e-4e0a-9b52-0d7a3f2c1e03',
+    title: 'DRM Fixture',
+    chapters: PROSE_CHAPTERS,
+    encryption: DRM_ENCRYPTION,
+  }),
   // A real ZIP signature whose central directory has been cut away.
   'corrupt.epub': plain.subarray(0, Math.floor(plain.length / 2)),
 };
 
-mkdirSync(FIXTURES_DIR, { recursive: true });
-for (const [name, bytes] of Object.entries(FIXTURES)) {
-  writeFileSync(join(FIXTURES_DIR, name), bytes);
+if (isEntryPoint(import.meta.url)) {
+  mkdirSync(FIXTURES_DIR, { recursive: true });
+  for (const [name, bytes] of Object.entries(FIXTURES)) {
+    writeFileSync(join(FIXTURES_DIR, name), bytes);
+  }
 }

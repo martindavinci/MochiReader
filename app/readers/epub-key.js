@@ -2,7 +2,7 @@
 
 // foliate-js gives a plain string, or a map from language to title whose first
 // entry is the title the book itself declares as its main one.
-const mainTitle = (title) =>
+export const mainTitle = (title) =>
   (title && typeof title === 'object' ? Object.values(title)[0] : title) ?? '';
 
 /**

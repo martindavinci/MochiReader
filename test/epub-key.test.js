@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { epubKey } from '../app/readers/epub-key.js';
+import { epubKey, mainTitle } from '../app/readers/epub-key.js';
 
 const noHash = () => assert.fail('the hash must not be computed');
 
@@ -44,4 +44,18 @@ test('epub key tells apart volumes that share an identifier and a title', async 
 
 test('epub key without identifier ignores the section count', async () => {
   assert.equal(await epubKey({ title: 'T' }, async () => 'h', 99), 'sha256:h');
+});
+
+test('main title of a plain string is that string', () => {
+  assert.equal(mainTitle('T'), 'T');
+});
+
+test('main title of a language map is its first entry', () => {
+  assert.equal(mainTitle({ it: 'Il titolo', ja: 'Daimei' }), 'Il titolo');
+});
+
+test('main title of a missing title is empty', () => {
+  assert.equal(mainTitle(null), '');
+  assert.equal(mainTitle(undefined), '');
+  assert.equal(mainTitle({}), '');
 });

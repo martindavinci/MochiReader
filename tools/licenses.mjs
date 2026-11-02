@@ -2,7 +2,8 @@
 //
 // Lists the licenses of everything MochiReader distributes.
 //   node tools/licenses.mjs           writes app/licenses.txt
-//   node tools/licenses.mjs --check   fails on an AGPL or unknown license
+//   node tools/licenses.mjs --check   only checks
+// Both fail on an AGPL or unknown license and on a component with no license text.
 import { execFileSync } from 'node:child_process';
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -39,6 +40,19 @@ export const VENDORED = [
     licenseFile: 'tools/vendored-licenses/fflate-LICENSE',
   },
 ];
+
+// Crates published without a license file, although their license must travel with
+// them. These stand in for what the package folder lacks.
+//   webview2-rs: github.com/wravery/webview2-rs, LICENSE at edc2caf8
+//   alloc-no-stdlib: github.com/dropbox/rust-alloc-no-stdlib, LICENSE at 0a81fd69
+//   MPL-2.0: the license text alone, because github.com/servo/stylo has no such file
+export const CRATE_LICENSE_FILES = {
+  'alloc-stdlib': 'tools/vendored-licenses/alloc-no-stdlib-LICENSE',
+  selectors: 'tools/vendored-licenses/MPL-2.0-LICENSE',
+  'webview2-com': 'tools/vendored-licenses/webview2-rs-LICENSE',
+  'webview2-com-macros': 'tools/vendored-licenses/webview2-rs-LICENSE',
+  'webview2-com-sys': 'tools/vendored-licenses/webview2-rs-LICENSE',
+};
 
 // Licenses that can be part of a GPL-3.0-or-later work. Anything else is unknown
 // until someone reads it and adds it here.
@@ -153,14 +167,25 @@ const normalizeText = (text) => text.replace(/\r\n/g, '\n').trim();
 
 const RULE_WIDTH = 72;
 
+// A declared license is not enough: MIT and BSD, for two, require their text and
+// the copyright notice to ship with the program.
+export function checkLicenseTexts(components) {
+  const missing = components.filter(({ texts }) => !texts.some((text) => normalizeText(text)));
+  if (missing.length > 0) {
+    const lines = missing.map(({ name, version }) => `  ${name} ${version}`);
+    throw new Error(
+      `No license text, add one to CRATE_LICENSE_FILES in tools/licenses.mjs:\n${lines.join('\n')}`,
+    );
+  }
+}
+
 // Most crates carry the same license text, so each distinct text appears once,
 // after the list of components it belongs to.
 export function renderLicenses(components) {
+  checkLicenseTexts(components);
   const blocks = new Map();
   for (const component of components) {
-    const body =
-      component.texts.map(normalizeText).join('\n\n') ||
-      `No license text ships with this component. Its declared license is ${component.license}.`;
+    const body = component.texts.map(normalizeText).join('\n\n');
     blocks.set(body, [...(blocks.get(body) ?? []), component]);
   }
   const ordered = [...blocks].map(([body, owners]) => {
@@ -191,20 +216,21 @@ function cargoMetadata() {
   return JSON.parse(output);
 }
 
-function crateLicenseTexts({ manifest_path: manifestPath, license_file: licenseFile }) {
+export function crateLicenseTexts(crate) {
+  const { name, manifest_path: manifestPath, license_file: licenseFile } = crate;
   const folder = dirname(manifestPath);
   if (licenseFile) return [readFileSync(resolve(folder, licenseFile), 'utf8')];
-  return readdirSync(folder, { withFileTypes: true })
+  const texts = readdirSync(folder, { withFileTypes: true })
     .filter((entry) => entry.isFile() && LICENSE_FILE_NAME.test(entry.name))
     .map((entry) => entry.name)
     .sort()
-    .map((name) => readFileSync(join(folder, name), 'utf8'));
+    .map((file) => readFileSync(join(folder, file), 'utf8'));
+  const tracked = CRATE_LICENSE_FILES[name];
+  return texts.length === 0 && tracked ? [readFileSync(join(REPO_ROOT, tracked), 'utf8')] : texts;
 }
 
-function main(args) {
-  const crates = distributedCrates(cargoMetadata());
+export function runLicenses(args, crates, outputFile = OUTPUT_FILE) {
   checkLicenses([...VENDORED, ...crates]);
-  if (args.includes('--check')) return;
 
   const components = [
     ...VENDORED.map((component) => ({
@@ -213,12 +239,13 @@ function main(args) {
     })),
     ...crates.map((crate) => ({ ...crate, texts: crateLicenseTexts(crate) })),
   ];
-  writeFileSync(OUTPUT_FILE, renderLicenses(components));
+  const text = renderLicenses(components);
+  if (!args.includes('--check')) writeFileSync(outputFile, text);
 }
 
 if (isEntryPoint(import.meta.url)) {
   try {
-    main(process.argv.slice(2));
+    runLicenses(process.argv.slice(2), distributedCrates(cargoMetadata()));
   } catch (error) {
     console.error(error.message);
     process.exit(1);
