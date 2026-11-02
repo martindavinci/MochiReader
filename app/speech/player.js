@@ -355,8 +355,10 @@ export class SpeechPlayer {
     }
   }
 
+  /** After 'stopped' the engine is done with this sentence: another stop would hit whatever it speaks now. */
   #interrupt(outcome) {
-    this.#silence();
+    if (outcome === 'stopped') this.#cancelRun();
+    else this.#silence();
     this.#setState('idle');
     if (outcome === 'error') this.#guarded(this.#onError, ERROR_ENGINE);
   }

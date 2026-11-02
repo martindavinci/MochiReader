@@ -249,3 +249,71 @@ test('a player started before the voices arrive reads as soon as they do', async
   await flush();
   assert.equal(player.state, 'ended');
 });
+
+/** Behaves like Chromium: one utterance at a time, and every event arrives later, not during the call. */
+class QueueingSynth extends FakeSynth {
+  #queue = [];
+  #current = null;
+
+  get speaking() {
+    return this.#current !== null;
+  }
+
+  speak(utterance) {
+    super.speak(utterance);
+    this.#queue.push(utterance);
+    this.#startNext();
+  }
+
+  cancel() {
+    super.cancel();
+    const dropped = [this.#current, ...this.#queue].filter(Boolean);
+    this.#current = null;
+    this.#queue = [];
+    setImmediate(() => dropped.forEach((utterance) => utterance.onerror({ error: 'interrupted' })));
+  }
+
+  finishCurrent() {
+    const utterance = this.#current;
+    this.#current = null;
+    setImmediate(() => {
+      utterance.onend();
+      this.#startNext();
+    });
+  }
+
+  #startNext() {
+    if (!this.#current) this.#current = this.#queue.shift() ?? null;
+  }
+}
+
+test('a player replaced on a shared engine goes idle and leaves the new player speaking', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const synth = new QueueingSynth([ELSA]);
+  const engine = new WebSpeechEngine({ synth, Utterance: FakeUtterance });
+  const errors = [];
+  const playerFor = (text) => {
+    const player = new SpeechPlayer({ engine, onError: (code) => errors.push(code) });
+    player.load([{ kind: 'para', line: null, sentences: [{ text, start: null, end: null }] }]);
+    return player;
+  };
+  const first = playerFor('tab A');
+  const second = playerFor('tab B');
+
+  first.play();
+  await flush();
+  second.play();
+  await flush();
+  await flush();
+  assert.equal(first.state, 'idle');
+  assert.equal(second.state, 'playing');
+  assert.equal(synth.speaking, true);
+  assert.deepEqual(synth.spoken.map((u) => u.text), ['tab A', 'tab B']);
+  assert.deepEqual(errors, []);
+
+  synth.finishCurrent();
+  await flush();
+  assert.equal(second.state, 'ended');
+  assert.equal(synth.speaking, false);
+  assert.deepEqual(errors, []);
+});

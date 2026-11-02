@@ -390,6 +390,13 @@ test('a sentence stopped from outside goes idle without an error', async () => {
   assert.deepEqual(h.player.current, { block: 0, sentence: 0 });
 });
 
+test('a sentence stopped from outside does not stop the engine again', async () => {
+  const h = harness([para('Uno.')]);
+  h.player.play();
+  await h.advance('stopped');
+  assert.equal(h.engine.stops, 0, 'a second stop would hit whatever the engine is speaking now');
+});
+
 test('no blocks: nothing to read, no speak call', async () => {
   for (const blocks of [[], [para(), para()]]) {
     const h = harness(blocks);
