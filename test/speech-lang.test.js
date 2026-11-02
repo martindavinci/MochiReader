@@ -4,9 +4,12 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { detectLang, parseLangTag } from '../app/speech/lang.js';
+import { TRIGRAM_PROFILES } from '../app/speech/lang-profiles.js';
 
 // The author's vault, used when it is there: real text, too personal to copy into the fixtures.
 const DAILY_DIR = 'C:/Users/marty/Documents/git/_MDV/LeonardoTechTips/00_Daily/Daily';
+const VAULT_NOTES = 'C:/Users/marty/Documents/git/_MDV/LeonardoTechTips/20_Projects/Lunaris Tools';
+const TRIGRAMS_PER_PROFILE = 400;
 
 test('lang detects it and en, and refuses too little text', () => {
   assert.equal(detectLang('Il gatto dorme sul divano e non vuole uscire di casa.'), 'it');
@@ -97,6 +100,129 @@ for (const [language, samples] of Object.entries(FOREIGN_PROSE)) {
 test('ordinary Italian and English prose are still recognized', () => {
   for (const sample of ITALIAN_PROSE) assert.equal(detectLang(sample), 'it', sample);
   for (const sample of ENGLISH_PROSE) assert.equal(detectLang(sample), 'en', sample);
+});
+
+test('short sentences of Romance languages do not pass for Italian', () => {
+  for (const sample of [
+    'Ce nom le fit tressaillir comme si un éclair lui eût passé devant la face.',
+    'Le Flamand resta «tout bête», comme il disait lui-même quelque temps après.',
+    'Querría saber, cabeza, si mi marido me quiere bien, o no.',
+    'E quando fechou sobre mim a portinhola, gravemente.',
+    'Si la casa es grande, me la quedo.',
+    'Si le roi le sait, le peuple se tait.',
+    'Si la casa és gran, me la quedo per a mi.',
+  ]) {
+    assert.equal(detectLang(sample), null, sample);
+  }
+});
+
+test('Latin does not pass for Italian, however long', () => {
+  for (const sample of [
+    'His Caesar ita respondit: eo sibi minus dubitationis dari, quod eas res quas legati Helvetii commemorassent memoria teneret.',
+    'Ubi vero moveri et adpropinquare muris viderunt, nova atque inusitata specie commoti legatos ad Caesarem de pace miserunt.',
+    'id iis eripi quis pati posset? Postulavit deinde eadem quae legatis in mandatis dederat: ne aut Haeduis aut eorum sociis bellum inferret, obsides redderet, si id facere non posset, Germanorum tamen neminem ultra Rhenum transire pateretur.',
+  ]) {
+    assert.equal(detectLang(sample), null, sample);
+  }
+});
+
+test('Germanic prose does not pass for English on the words they share', () => {
+  for (const sample of [
+    'Lang, of juister gezegd _veel_, had ik nagedacht voor ik daartoe besloot.',
+    'Ich will was ich kann und was ich will.',
+    'Ek is in die huis en my ma was by my.',
+    'Hals will ich fliegen, An seinem Busen liegen!',
+  ]) {
+    assert.equal(detectLang(sample), null, sample);
+  }
+});
+
+test('frontmatter and inline code are not words of the text', () => {
+  const note = '---\ntitle: The art of the deal\ntags: [it, the, of]\nlang: it\n---\nIl gatto dorme sul divano e la casa è grande.';
+  assert.equal(detectLang(note), 'it');
+  assert.equal(detectLang(note.replaceAll('\n', '\r\n')), 'it');
+  assert.equal(detectLang('---\ntitolo: il gatto e la casa\n...\nThe house is in a small town on the coast.'), 'en');
+  assert.equal(detectLang('Usa `the of and to that this these those is are was` per la lista.'), 'it');
+  assert.equal(detectLang('Usa ``the `of` and to that this these those is are`` per la lista.'), 'it');
+  assert.equal(detectLang('---\nThe house is in a small town on the coast and it was late.'), 'en', 'a rule that closes nothing is text');
+  assert.equal(detectLang('Scrivi `il gatto\nThe house is in a small town on the coast and it was late.'), 'en', 'a tick that closes nothing is text');
+});
+
+test('short notes that are mostly names keep their language', () => {
+  for (const sample of [
+    'Nvidia presenta nuovi chip per data center: prezzi in aumento del 20%.',
+    'Scarica Python, installa pip, lancia lo script.',
+    'ZeroPulse: piattaforma C2 basata su Cloudflare Tunnel.',
+    'Apple esplora un secondo iPhone foldable in stile clamshell oltre al modello “book”.',
+    'Qash raccoglie $1,5M per neobank LATAM basata su stablecoin.',
+  ]) {
+    assert.equal(detectLang(sample), 'it', sample);
+  }
+  for (const sample of [
+    'OpenAI releases new model, Google responds with Gemini.',
+    'Federal Reserve survey confirms cash remains third most-used payment method in USA.',
+    'Persistent XSS in pretalx allows account takeover of conference organizers.',
+  ]) {
+    assert.equal(detectLang(sample), 'en', sample);
+  }
+});
+
+test('terse Italian lists of a real note keep their language', () => {
+  const note = `Strategia monetizzazione
+- Banner solo schermate secondarie, mai su camera principale
+- Interstitial dopo azione completata, massimo uno ogni tre azioni
+- Nessun annuncio nella prima sessione utente
+- Rewarded: un video vale dieci esportazioni Pro oppure un'ora Pro
+- Acquisto unico Rimuovi Annunci, niente abbonamenti
+- Prezzo consigliato tra due e quattro euro, sconto al lancio`;
+  assert.equal(detectLang(note), 'it');
+});
+
+test('real notes of terse lists and foreign terms keep their language', { skip: !existsSync(VAULT_NOTES) && 'the vault is not on this machine' }, () => {
+  for (const note of ['Monetization.md', 'Apps List.md', 'Task List - Lunaris PDF Tools.md']) {
+    assert.equal(detectLang(readFileSync(join(VAULT_NOTES, note), 'utf8')), 'it', note);
+  }
+});
+
+test('stray letters and words of the language itself are no rival', () => {
+  assert.equal(detectLang('Crescono i consigli di sicurezza personale: niente crypto “a casa”, multisig e ritardi di prelievo.'), 'it');
+  assert.equal(detectLang('Metodo per trasformare osservazioni d’interfaccia in insight UX azionabili.'), 'it');
+  assert.equal(detectLang('MoonPay acquires DFlow, a Solana trading infrastructure, for $100 million in stock.'), 'en');
+  assert.equal(detectLang('Me gusta la música y tengo una guitarra con cuerdas nuevas.'), null, 'a word of one letter is still a word');
+});
+
+test('languages that write like Italian or English are recognized by their letters', () => {
+  for (const sample of [
+    'Una noieta tota bonica saltironejava entre ells. La mare la mirava.',
+    'Comprench la meva falta. Si vostè hagués sigut aquí, Deu meu.',
+    'Hade vi inte det där fjället i väster, när vi gick ned?',
+    'Vi kysser dine Gaver, vi signer din Aand, imens der drypper Taarer paa Skatten i vor Haand.',
+    'Doi lei, doi zmei, doi bălauri și doi năsdrăvani se puseră pază la punte.',
+    'Mama mea este foarte buna si ii place sa manance la masa cu toata familia.',
+    'Iom post iom la novulo pli kutimis kaj la vivmaniero ekplaĉis al li.',
+    'Wszystko mi sprzyjało; postanawiałem skorzystać z okoliczności i dziś jeszcze tę tajemnicę wykryć.',
+    'Proč jsi tedy všeho nechal? ptal se udivený. Měl bys si hledati místo.',
+    'Cwyd, cwyd ehedydd, cwyd, O le i le ar aden lwyd, Yn uwch, yn uwch o hyd.',
+    'Niin, sepä se juuri piti meidän voittomme vähäisenä. Me yrittelimme järjestymistä.',
+    'Escoita, sinto pasos, e asoma seica un bulto, non fala se é difunto.',
+    'Ang bata ay kumain ng kanin at uminom ng tubig sa bahay.',
+    'Die regering het nuwe wet aangekondig oor die beskerming van persoonlike data in die hele land.',
+  ]) {
+    assert.equal(detectLang(sample), null, sample);
+  }
+});
+
+test('every profile holds as many different trigrams', () => {
+  for (const [lang, trigrams] of Object.entries(TRIGRAM_PROFILES)) {
+    const list = trigrams.split(/\s+/);
+    assert.equal(list.length, TRIGRAMS_PER_PROFILE, lang);
+    assert.equal(new Set(list).size, list.length, lang);
+    assert.ok(list.every((trigram) => [...trigram].length === 3 || trigram.length === 3), lang);
+  }
+});
+
+test('whatever is not a string has no language', () => {
+  for (const value of [null, undefined, 42, {}, [], true]) assert.equal(detectLang(value), null, String(value));
 });
 
 test('terse technical notes still count as their language', () => {

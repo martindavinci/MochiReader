@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+import { TRIGRAM_PROFILES } from './lang-profiles.js';
+
 const LANG_SAMPLE_CHARS = 20000;
 const MIN_WORDS = 4;
 const MIN_COMMON_WORDS = 2;
@@ -14,7 +16,36 @@ const MOST_DIFFERENT_COMMON_WORDS = 3;
 const MIN_SHARE_ENDING_IN_VOWEL = 0.75;
 const MIN_SHARE_ENDING_IN_A_I_O = 0.15;
 
+// Weights of a trigram by its rank in a profile: rank alone follows the real frequencies closely enough.
+const RANK_SCALE = 30;
+const TRIGRAM_WORD_EDGE = '_';
+const UNLISTED_TRIGRAM_RANK = 1600;
+// How far ahead of the next profile the closest one must be, to speak with no common words behind it, and how
+// well it must fit: a language with no profile fits them all badly, and none by much. Measured: real lines of
+// the dailies fit from -2.3 to -2.8, prose of languages with no profile from -2.9 to -3.4. The margin asked for
+// is that of a line of so many words, and shrinks with the square root of the length, as the noise does.
+// All of this measured on books kept out of the profiles.
+const MIN_MARGIN_TO_SPEAK_ALONE = 0.2;
+const WORDS_OF_THE_MARGIN = 10;
+const MIN_FIT_TO_SPEAK_ALONE = -3;
+// A foreign profile this far ahead of the language of the common words overturns them. On a short text the
+// letters are noisy, so a language with twice the common words of any other takes a longer lead to overturn.
+const MIN_LEAD_TO_OVERTURN = 0.1;
+const MIN_LEAD_TO_OVERTURN_A_CLEAR_COUNT = 0.2;
+const CLEAR_COUNT_OVER_ANY_RIVAL = 2;
+// A note of terse bullets and foreign terms has few common words, but only of its own language.
+const MIN_WORDS_OF_A_NOTE = 100;
+const MIN_COMMON_SHARE_OF_A_NOTE = 0.03;
+const MIN_DIFFERENT_COMMON_WORDS_OF_A_NOTE = 3;
+const MIN_LEAD_OVER_THE_OTHER_LANGUAGE = 2;
+// Letters of neither language in more words than this say another language wrote the text, and in fewer may be
+// a name. The letters alone, or a short list of common words, take less to doubt.
+const MAX_SHARE_OF_FOREIGN_LETTERS = 0.1;
+const MAX_SHARE_OF_FOREIGN_LETTERS_WITH_FEW_COMMON_WORDS = 0.02;
+
+const FRONTMATTER = /^\uFEFF?---[ \t]*\r?\n(?:[\s\S]*?\r?\n)?(?:---|\.\.\.)[ \t]*(?:\r?\n|$)/;
 const FENCED_CODE = /^ {0,3}(`{3,}|~{3,}).*$[\s\S]*?(?:^ {0,3}\1[`~]*[ \t]*$|(?![\s\S]))/gm;
+const INLINE_CODE = /(?<!`)(`+)(?!`)[^\n]*?(?<!`)\1(?!`)/g;
 const ADDRESS = /\b(?:https?:\/\/|www\.)\S+/gi;
 const ENDS_IN_VOWEL = /[aeiouàèéìòù]$/;
 const ENDS_IN_A_I_O = /[aioàìò]$/;
@@ -25,7 +56,7 @@ const wordSet = (words) => new Set(words.split(/\s+/));
 // Words shared by Italian and English ("a", "in", "come", "no") would only blur the count. "i" is the
 // exception: an everyday word of both, and it must count for Italian to outscore Catalan on its plurals.
 const COMMON_WORDS = {
-  it: wordSet(`il lo la le i gli l un una uno di del dello della dell dei degli delle da dal dallo dalla dall
+  it: wordSet(`il lo la le i gli l un una uno di del dello della dell dei degli delle da dal dallo dalla dall su
     dai dalle nel nello nella nell nei negli nelle sul sullo sulla sull sui sugli sulle al allo alla ai
     agli alle e ed è che chi per con tra fra non più ma anche sono questo questa questi queste quello
     quella quelli quelle ha hanno ho hai abbiamo sto stai sta sei siamo fa era erano si se mi me ti ci vi ne io tu lui lei noi voi
@@ -40,8 +71,8 @@ const COMMON_WORDS = {
 const SINGLE_LANGUAGE_WORDS = wordSet(`the dal dallo dalla dalle dello della degli delle nello nella negli nelle
   sullo sulla sugli sulle`);
 
-// Languages that share many words with those above, and would pass for them. Each is here only to
-// outscore them, so what they have in common stays in both lists and only the rest decides.
+// Languages that share many words with those above, and would pass for them. Each is here only to outscore
+// them, so what they have in common stays in both lists and only the rest decides.
 // "a" and "in" are left out because Italian and English do not count them either.
 const OTHER_LANGUAGES = {
   fr: `le la les l un une des du de d et est sont dans pour sur avec que qui qu ne n pas plus au aux
@@ -58,9 +89,11 @@ const OTHER_LANGUAGES = {
   nl: `de het een en van is dat die op te zijn met voor niet aan er ook als bij maar om naar was`,
   nordic: `och att det som på är av för med den till har inte ett og at er til de af ikke fra`,
   slavic: `je se si sa sú su na do to ne ale že za by po od ta ti ty tu mi vi ma da i u jest nie się w
-    z że jak co tak bude byl jako aby`,
+    z že jak co tak bude byl jako aby`,
   gaelic: `is an agus na ar tá sí í é de do sa ag air tha e am gu bheil ann as o`,
   malay: `di dan yang itu ini dari ke untuk dengan pada ada saya dia`,
+  tagalog: `ang ng sa at ay mga na si ni ko`,
+  swahili: `wa na ya kwa za ni la katika`,
   corsican: `u i è hè di una l sò e chì per cù da ma più si ùn`,
   sicilian: `lu li na la e di si ca dî dâ chi nun u i`,
   neapolitan: `o e d na ca so è ha chello comme ncoppa`,
@@ -72,6 +105,39 @@ const OTHER_LANGUAGES = {
 };
 const OTHER_LANGUAGES_WORDS = Object.values(OTHER_LANGUAGES).map(wordSet);
 
+const rankWeight = (rank) => Math.log(RANK_SCALE / (rank + RANK_SCALE));
+const UNLISTED_TRIGRAM = rankWeight(UNLISTED_TRIGRAM_RANK);
+let profiles = null;
+/** Built on the first text: the app starts without needing them. */
+function loadProfiles() {
+  profiles ??= Object.entries(TRIGRAM_PROFILES).map(([lang, trigrams]) => ({
+    lang,
+    weights: new Map(trigrams.split(/\s+/).map((trigram, rank) => [trigram, rankWeight(rank)])),
+  }));
+  return profiles;
+}
+
+/** The profiles by how well the letters of the words fit them, the closest first, with their mean weight. */
+function closestProfiles(words) {
+  const loaded = loadProfiles();
+  const scores = loaded.map(() => 0);
+  let trigrams = 0;
+  for (const word of words) {
+    const padded = TRIGRAM_WORD_EDGE + word + TRIGRAM_WORD_EDGE;
+    for (let i = 0; i + 3 <= padded.length; i += 1) {
+      const trigram = padded.slice(i, i + 3);
+      trigrams += 1;
+      loaded.forEach(({ weights }, index) => { scores[index] += weights.get(trigram) ?? UNLISTED_TRIGRAM; });
+    }
+  }
+  return loaded.map(({ lang }, index) => ({ lang, fit: scores[index] / trigrams })).sort((a, b) => b.fit - a.fit);
+}
+
+/** Whether a rival found more than words of the language itself and a stray letter (a, d'): those say nothing. */
+function hasWordsOfItsOwn(rival, common) {
+  return rival.some((word) => word.length > 1 && !common.has(word));
+}
+
 /** Whether the words that no list counts look Italian, to settle a tie on words shared with another language. */
 function looksItalian(words) {
   const rest = words.filter((word) => !COMMON_WORDS.it.has(word));
@@ -81,34 +147,68 @@ function looksItalian(words) {
 
 /** Whether the common words found are enough, and varied enough, to speak for the language of the text. */
 function isEnoughEvidence(found, words) {
+  if (found.length / words.length < MIN_COMMON_SHARE) return false;
   if (found.some((word) => SINGLE_LANGUAGE_WORDS.has(word)) && words.every((word) => PLAIN_LETTERS.test(word))) return true;
   const wanted = Math.ceil(words.length / WORDS_PER_DIFFERENT_COMMON_WORD);
   return new Set(found).size >= Math.min(Math.max(wanted, MIN_COMMON_WORDS), MOST_DIFFERENT_COMMON_WORDS);
 }
 
+/** Whether a long text has few common words, but all on one side. */
+function isOneSidedNote(found, other, words) {
+  return words.length >= MIN_WORDS_OF_A_NOTE
+    && found.length / words.length >= MIN_COMMON_SHARE_OF_A_NOTE
+    && new Set(found).size >= MIN_DIFFERENT_COMMON_WORDS_OF_A_NOTE
+    && found.length >= MIN_LEAD_OVER_THE_OTHER_LANGUAGE * other.length;
+}
+
+/** Whether the letters of a text fit its closest profile well, and clearly more than any other. */
+function lettersSpeakAlone({ fit }, margin, words) {
+  const wanted = MIN_MARGIN_TO_SPEAK_ALONE * Math.min(1, Math.sqrt(WORDS_OF_THE_MARGIN / words.length));
+  return margin >= wanted && fit >= MIN_FIT_TO_SPEAK_ALONE;
+}
+
+function withoutWhatIsNotText(text) {
+  return text.replace(FRONTMATTER, ' ').replace(FENCED_CODE, ' ').slice(0, LANG_SAMPLE_CHARS)
+    .replace(INLINE_CODE, ' ').replace(ADDRESS, ' ');
+}
+
 /**
- * Tells Italian and English from each other and from everything else by counting common words.
- * Too low a share of them means a language with no list here, met only by chance.
- * Fenced code is not text of the document, and raw Markdown is welcome.
- * @param {string} text
+ * Tells Italian and English from each other and from everything else, by counting common words and by how well
+ * the letters fit the profile of each language. Too low a share of common words means a language with no
+ * profile, met only by chance, unless the letters of the text fit one language clearly.
+ * Frontmatter and code are not text of the document, and raw Markdown is welcome.
+ * @param {*} text anything that is not a string has no language
  * @returns {'it'|'en'|null} null with too little text, a tie or another language
  */
 export function detectLang(text) {
-  const sample = text.replace(FENCED_CODE, ' ').slice(0, LANG_SAMPLE_CHARS).replace(ADDRESS, ' ');
-  const words = sample.toLowerCase().match(/\p{L}+/gu) ?? [];
+  if (typeof text !== 'string') return null;
+  const words = withoutWhatIsNotText(text).toLowerCase().match(/\p{L}+/gu) ?? [];
   if (words.length < MIN_WORDS) return null;
 
   const find = (common) => words.filter((word) => common.has(word));
   const it = find(COMMON_WORDS.it);
   const en = find(COMMON_WORDS.en);
-  if (it.length === en.length) return null;
+  if (it.length === en.length && it.length > 0) return null;
   const lang = it.length > en.length ? 'it' : 'en';
-  const found = lang === 'it' ? it : en;
-  if (found.length / words.length < MIN_COMMON_SHARE || !isEnoughEvidence(found, words)) return null;
+  const [found, other] = lang === 'it' ? [it, en] : [en, it];
+  const profiles = closestProfiles(words);
+  const [closest, next] = profiles;
+  const closestIsForeign = closest.lang !== 'it' && closest.lang !== 'en';
+  const allRivals = OTHER_LANGUAGES_WORDS.map(find);
+  const isClearCount = found.length >= CLEAR_COUNT_OVER_ANY_RIVAL * Math.max(...allRivals.map((hits) => hits.length));
+  const foreignLead = closest.fit - profiles.find((profile) => profile.lang === lang).fit;
+  if (closestIsForeign && foreignLead >= (isClearCount ? MIN_LEAD_TO_OVERTURN_A_CLEAR_COUNT : MIN_LEAD_TO_OVERTURN)) return null;
+  const foreignLetters = words.filter((word) => !PLAIN_LETTERS.test(word)).length / words.length;
+  if (foreignLetters > MAX_SHARE_OF_FOREIGN_LETTERS) return null;
 
-  const rival = Math.max(...OTHER_LANGUAGES_WORDS.map((common) => find(common).length));
-  if (rival > found.length || (rival === found.length && !(lang === 'it' && looksItalian(words)))) return null;
-  return lang;
+  const rivals = allRivals.filter((rival) => hasWordsOfItsOwn(rival, COMMON_WORDS[lang]));
+  const rival = Math.max(0, ...rivals.map((hits) => hits.length));
+  if (rival > found.length || (rival > 0 && rival === found.length && !(lang === 'it' && looksItalian(words)))) return null;
+  if (isEnoughEvidence(found, words)) return lang;
+
+  if (closestIsForeign || foreignLetters > MAX_SHARE_OF_FOREIGN_LETTERS_WITH_FEW_COMMON_WORDS) return null;
+  if (isOneSidedNote(found, other, words)) return lang;
+  return lettersSpeakAlone(closest, closest.fit - next.fit, words) ? closest.lang : null;
 }
 
 // EPUB metadata says "ita" as often as "it": ISO 639-2 codes, in both forms where there are two, old,
