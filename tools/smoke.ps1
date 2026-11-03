@@ -160,8 +160,13 @@ function Get-Tabs {
     Start-Second "--dump-tabs `"$out`""
     Start-Sleep -Milliseconds $DumpRetryMs
     if (Test-Path $out) {
-      $json = [System.IO.File]::ReadAllText($out, [System.Text.Encoding]::UTF8)
-      return @(ConvertFrom-Json $json | ForEach-Object { $_ })
+      # The report is whole when it is there, but a later request replacing it can refuse a reader for a moment.
+      try {
+        $json = [System.IO.File]::ReadAllText($out, [System.Text.Encoding]::UTF8)
+        return @(ConvertFrom-Json $json | ForEach-Object { $_ })
+      } catch [System.IO.IOException] {
+        Write-Verbose "the report was being replaced: $_"
+      }
     }
     if ((Get-Date) -gt $limit) { throw 'FAIL  the app did not report its tabs' }
   }
@@ -314,27 +319,31 @@ function Test-LargeFile {
   $app = Start-App @("`"$large`"")
   try {
     $window = Wait-AppWindow $app
-    # The page sets the title, so the title following a request shows that the page is free to answer.
+    # The page sets the title, so the title following a request shows that the page is free to answer. What is timed is
+    # only the page answering: from the second process having passed on its file and gone, to the new title. The start of
+    # that process is the machine's, and a loaded machine has stretched it past any limit that means something here.
     $slowest = 0
     $turn = 0
     $clock = [System.Diagnostics.Stopwatch]::StartNew()
     while ($clock.Elapsed.TotalSeconds -lt $LargeFileWatchS) {
       $index = $turn % $names.Count
       $turn++
+      $second = Start-App @("`"$($notes[$index])`"")
+      Assert-That ($second.WaitForExit($AppWaitS * 1000)) 'a second process passes on its file and ends'
+      $second.Dispose()
       $asked = $clock.ElapsedMilliseconds
-      Start-Second "`"$($notes[$index])`""
       while ((Get-WindowTitle $window) -ne $names[$index]) {
         Assert-That ($clock.ElapsedMilliseconds - $asked -lt $LargeFileWatchS * 1000) 'the page answers while a large file opens'
         Start-Sleep -Milliseconds $AnswerPollMs
       }
       $slowest = [math]::Max($slowest, $clock.ElapsedMilliseconds - $asked)
     }
-    Assert-That ($slowest -lt $LargeFileMaxAnswerMs) "the page answers while a large file opens: the slowest took $slowest ms"
+    Assert-That ($slowest -lt $LargeFileMaxAnswerMs) "the page answers a passed-on file while a large one opens: the slowest took $slowest ms"
     $tabs = Wait-Tabs 3 { param($t) @($t | Where-Object { $_.status -eq 'ok' }).Count -eq 3 }
     $text = ($tabs | Where-Object { $_.path -eq $large }).text
     $entries = ([regex]::Matches($text, 'Voce con testo e link ok')).Count
     Assert-That ($entries -eq $LargeFileEntries) "every entry of a large file is on the page, found $entries"
-    Pass "the page answers while a large file opens, the slowest in $slowest ms, and all of it arrives"
+    Pass "the page answers a passed-on file while a large one opens, the slowest in $slowest ms, and all of it arrives"
   } finally {
     Stop-App $app
   }

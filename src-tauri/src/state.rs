@@ -111,7 +111,7 @@ fn read_state(file: &Path) -> Result<AppState, ()> {
         .ok_or(())
 }
 
-fn write_atomically(file: &Path, content: &[u8]) -> io::Result<()> {
+pub(crate) fn write_atomically(file: &Path, content: &[u8]) -> io::Result<()> {
     if let Some(folder) = file.parent() {
         fs::create_dir_all(folder)?;
     }

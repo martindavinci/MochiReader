@@ -232,10 +232,19 @@ fn measure_open_done(session: State<'_, Session>) -> Result<(), String> {
         .map_err(|error| error.to_string())
 }
 
+/// Whoever reads the report must never find half of one. A test asks again and again, so requests can overlap, and they
+/// would share one temporary file: they take turns.
+#[cfg(any(test, feature = "smoke"))]
+fn write_dump(out: &Path, json: &str) -> std::io::Result<()> {
+    static WRITES: Mutex<()> = Mutex::new(());
+    let _turn = WRITES.lock().unwrap();
+    state::write_atomically(out, json.as_bytes())
+}
+
 #[cfg(feature = "smoke")]
 #[tauri::command(async)]
 fn smoke_write_dump(out: String, json: String) -> Result<(), String> {
-    std::fs::write(out, json).map_err(|error| error.to_string())
+    write_dump(Path::new(&out), &json).map_err(|error| error.to_string())
 }
 
 /// What the scripts of a test book try to call. The CSP must keep them from ever getting here.
@@ -400,6 +409,51 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
+
+    const DUMP_BYTES: usize = 256 * 1024;
+    const DUMP_WRITES: usize = 40;
+    const DUMP_WRITERS: usize = 2;
+
+    #[test]
+    fn a_report_of_the_tabs_is_never_read_half_written() {
+        let dir = tempfile::tempdir().unwrap();
+        let out = dir.path().join("tabs.json");
+        let contents: Vec<String> = (0..DUMP_WRITERS)
+            .map(|writer| writer.to_string().repeat(DUMP_BYTES))
+            .collect();
+        write_dump(&out, &contents[0]).unwrap();
+        let writing = Arc::new(AtomicBool::new(true));
+        let writers: Vec<_> = contents
+            .iter()
+            .cloned()
+            .map(|content| {
+                let out = out.clone();
+                std::thread::spawn(move || {
+                    for _ in 0..DUMP_WRITES {
+                        // A reader holding the file can make a write give up: the next one tries again.
+                        let _ = write_dump(&out, &content);
+                    }
+                })
+            })
+            .collect();
+        let watcher = {
+            let writing = writing.clone();
+            std::thread::spawn(move || {
+                for writer in writers {
+                    writer.join().unwrap();
+                }
+                writing.store(false, Ordering::SeqCst);
+            })
+        };
+        while writing.load(Ordering::SeqCst) {
+            // A file being replaced can refuse a reader for a moment, which is not half a report.
+            if let Ok(text) = std::fs::read_to_string(&out) {
+                assert!(contents.contains(&text), "read {} bytes", text.len());
+            }
+        }
+        watcher.join().unwrap();
+    }
 
     #[test]
     fn only_web_and_mail_links_open_outside_the_app() {
