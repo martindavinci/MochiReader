@@ -38,6 +38,7 @@ const committed = (name) => readFileSync(new URL(name, FIXTURES_DIR));
 test('every fixture of the plan is generated', () => {
   assert.deepEqual(Object.keys(FIXTURES).sort(), [
     'corrupt.epub',
+    'damaged-chapters.epub',
     'drm.epub',
     'fixed-spread.epub',
     'fixed.epub',

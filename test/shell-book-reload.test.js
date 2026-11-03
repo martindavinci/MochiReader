@@ -3,6 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { resolveObjectURL } from 'node:buffer';
 import { registerHooks } from 'node:module';
 import { DOMParser, parseHTML } from 'linkedom';
 import en from '../app/lang/en.js';
@@ -36,13 +37,14 @@ const brokenBook = async () => {
 
 let run = 0;
 
-async function startBookShell({ bookmarks = [] } = {}) {
+async function startBookShell({ bookmarks = [], makeBook = async () => goodBook() } = {}) {
   const { window, document, HTMLElement } = parseHTML(INDEX_HTML);
   HTMLElement.prototype.focus = function focus() {};
   const realCreate = document.createElement.bind(document);
   const views = [];
   const state = {
     modified: FIRST_MTIME, saved: [], dump: null, onFocus: () => {}, holdFirstPage: null, bookmarks, moved: [], opened: [],
+    contents: [],
   };
   document.createElement = (tag) => {
     const element = realCreate(tag);
@@ -52,7 +54,7 @@ async function startBookShell({ bookmarks = [] } = {}) {
       inits: [],
       goes: [],
       styles: [],
-      renderer: { setAttribute() {}, setStyles: (css) => element.styles.push(css), getContents: () => [] },
+      renderer: { setAttribute() {}, setStyles: (css) => element.styles.push(css), getContents: () => state.contents },
       open: async (book) => {
         element.book = book;
       },
@@ -126,7 +128,7 @@ async function startBookShell({ bookmarks = [] } = {}) {
     getComputedStyle: () => ({ scrollPaddingTop: 'auto' }),
     matchMedia: () => ({ matches: false, addEventListener() {} }),
     fetch: async () => new Response('a book', { status: 200 }),
-    fakeMakeBook: async () => goodBook(),
+    fakeMakeBook: makeBook,
   });
   run += 1;
   await import(`../app/ui/shell.js?book=${run}`);
@@ -283,6 +285,29 @@ test('a message about the file leaves the place to foliate too', async () => {
 
 test('the book waiting for its page has the room of the real one, and cannot be seen', () => {
   assert.match(APP_CSS, /\.book-stage\.waiting \{[^}]*position: absolute;[^}]*inset: 0;[^}]*visibility: hidden;/);
+});
+
+test('a section that cannot be read gets the message of this interface', async () => {
+  const load = async () => {
+    throw new Error('damaged');
+  };
+  const shell = await startBookShell({ makeBook: async () => ({ ...goodBook(), sections: [{ load }] }) });
+  const url = await shell.views[0].book.sections[0].load();
+  assert.ok((await resolveObjectURL(url).text()).includes(en['epub.sectionError']));
+});
+
+test('a new file that is damaged at the place being read leaves the book on screen', async () => {
+  const shell = await startBookShell();
+  const [view] = shell.views;
+  shell.state.contents = [{ doc: parseHTML('<html><head></head><body><p data-unreadable-section="">x</p></body></html>').document }];
+  changeFile(shell, SECOND_MTIME, async () => goodBook());
+  await noticeShown(shell);
+  assert.equal(shell.pane().querySelector('.file-notice').textContent, en['file.notReloaded']);
+  assert.ok(shell.shownViews()[0] === view);
+  assert.equal(shell.shownViews().length, 1);
+  assert.equal(view.closed, undefined);
+  assert.ok(shell.views[1].closed, 'the new book is let go');
+  assert.equal(shell.pane().querySelector('.book-stage'), null);
 });
 
 const KEY_OF_BOOK = 'epub:id|T|1';

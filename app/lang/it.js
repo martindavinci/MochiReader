@@ -15,6 +15,7 @@ export default {
   'file.deleted': 'Questo file non è più sul disco. Stai leggendo l\'ultima versione aperta.',
   'file.notReloaded': 'Questo file è cambiato e ora non si può leggere. Stai leggendo l\'ultima versione aperta.',
   'epub.error': 'Questo libro non si può aprire: è danneggiato o protetto da DRM.',
+  'epub.sectionError': 'Questa parte del libro non si può leggere: il suo file è danneggiato. Con le frecce si va oltre.',
 
   'tabs.close': 'Chiudi scheda',
 

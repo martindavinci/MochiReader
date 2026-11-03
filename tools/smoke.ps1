@@ -103,6 +103,13 @@ $LinksMapPage = 'The page with the image map.'
 $LinksOutPage = 'The page with the link out of the book.'
 $LinksEndPage = 'The page after the links.'
 $NotABook = 'This is not a ZIP file.'
+$DamagedKey = 'epub:urn:uuid:6f1d6a51-3c0e-4e0a-9b52-0d7a3f2c1e0c|Damaged Chapters Fixture|7'
+$DamagedFirstPage = 'The page before the damage'
+$DamagedAfterSpoiled = 'The page after the spoiled file'
+$DamagedAfterMissing = 'The page after the missing file'
+$DamagedAfterEmpty = 'The page after the empty file'
+# In either language of the interface. Only ASCII, because this script may be read as ANSI.
+$UnreadableSection = 'cannot be read|non si pu'
 # What a file holds while a copy or a sync is writing it: the start of a ZIP, with no directory at its end.
 $CutBookBytes = 1000
 $VK_LEFT = 0x25
@@ -955,6 +962,62 @@ function Test-BrokenEpubs {
   }
 }
 
+# A section that cannot be read must say so and let the reader past it, by every key, in both directions and again later.
+function Test-EpubDamagedChapters {
+  Wait-AppGone
+  $book = Copy-Fixture 'damaged-chapters.epub'
+  $app = Start-App @("`"$book`"")
+  try {
+    $window = Wait-AppWindow $app
+    $tab = (Wait-Tabs 1 { param($t) $t[0].status -ne 'loading' })[0]
+    Assert-That ($tab.status -eq 'ok' -and $tab.text.Contains($DamagedFirstPage)) "a book with a damaged chapter opens, not: $($tab.status), $($tab.text)"
+    [void][SmokeInput]::SetForegroundWindow($window)
+    Start-Sleep -Milliseconds $SecondProcessMs
+    # What is on screen and the place saved for it, or the place could stay behind on the page before.
+    $at = {
+      param($Keys, $Section, $Text)
+      Assert-KeysDo $window $Keys { param($t) $t.position.cfi.StartsWith("epubcfi(/6/$Section!") -and $t.text -match $Text -and $t.firstPageRendered } "keys $($Keys -join '+') reach section $Section, showing $Text"
+    }
+    if (-not (& $at @($VK_RIGHT) 4 $UnreadableSection)) {
+      'SKIP  the app is not in front, so moving past a damaged chapter was not checked'
+      return
+    }
+    Pass 'the arrow reaches a chapter that fails to unpack, and it says so'
+    $walk = @(
+      @(@($VK_RIGHT), 6, $DamagedAfterSpoiled),
+      @(@($VK_LEFT), 4, $UnreadableSection),
+      @(@($VK_LEFT), 2, $DamagedFirstPage),
+      @(@($VK_CONTROL, $VK_RIGHT), 4, $UnreadableSection),
+      @(@($VK_CONTROL, $VK_RIGHT), 6, $DamagedAfterSpoiled),
+      @(@($VK_RIGHT), 8, $UnreadableSection),
+      @(@($VK_RIGHT), 10, $DamagedAfterMissing),
+      @(@($VK_SHIFT, $VK_RIGHT), 12, $UnreadableSection),
+      @(@($VK_SHIFT, $VK_RIGHT), 14, $DamagedAfterEmpty),
+      @(@($VK_CONTROL, $VK_LEFT), 12, $UnreadableSection)
+    )
+    foreach ($step in $walk) {
+      Assert-That (& $at $step[0] $step[1] $step[2]) 'the keys stay with the app'
+    }
+    Pass 'arrows and section keys go through spoiled, missing and empty chapters, both ways'
+    Assert-That (Assert-KeysDo $window @($VK_CONTROL, $VK_D) { $true } 'ctrl+d') 'the keys stay with the app'
+    Wait-State { @((Get-State).bookmarks).Count -eq 1 } 'a damaged chapter can hold a bookmark like any other'
+    Wait-State { (Get-State).positions.$DamagedKey.cfi.StartsWith('epubcfi(/6/12!') } 'the place saved is the damaged chapter on screen'
+  } finally {
+    Stop-App $app
+  }
+
+  $app = Start-App @("`"$book`"")
+  try {
+    Wait-AppWindow $app | Out-Null
+    $tab = (Wait-Tabs 1 { param($t) $t[0].status -ne 'loading' })[0]
+    Assert-That ($tab.status -eq 'ok' -and $tab.position.cfi.StartsWith('epubcfi(/6/12!')) "a book reopens at its damaged chapter, not: $($tab.status), $($tab.position.cfi)"
+    Assert-That ($tab.text -match $UnreadableSection) "a damaged chapter says so when the book reopens there, not: $($tab.text)"
+    Pass 'a book closed on a damaged chapter opens there again, with the message'
+  } finally {
+    Stop-App $app
+  }
+}
+
 function Test-EpubObfuscatedFont {
   Wait-AppGone
   $book = Copy-Fixture 'obfuscated-font.epub'
@@ -1281,6 +1344,7 @@ $AllTests = @(
   'Test-EpubSvgPages',
   'Test-EpubLinks',
   'Test-BrokenEpubs',
+  'Test-EpubDamagedChapters',
   'Test-EpubObfuscatedFont',
   'Test-EpubWithoutIdentifier',
   'Test-EpubPosition',

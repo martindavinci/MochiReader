@@ -876,6 +876,24 @@ test('foliate is told not to load the target of an SVG link as a resource of the
   assert.ok(script.includes(':not(a)'));
 });
 
+test('no section of an open book can fail to load, whatever its file holds', async (t) => {
+  t.after(stubFetch(okFile()));
+  const message = 'Cannot be read';
+  const book = { ...plainBook(), sections: [{ load: async () => 'blob:fine' }, { load: async () => Promise.reject(new Error('damaged')) }] };
+  const { host, foliate } = fakeFoliate({ makeBook: async () => book });
+  await openEpub('u', host, openOptions({ unreadableSection: message }), foliate);
+  assert.equal(await book.sections[0].load(), 'blob:fine');
+  assert.match(await book.sections[1].load(), /^blob:/);
+});
+
+test('the reader knows when what it shows is the message of a damaged section', () => {
+  const renderer = new FakeRenderer();
+  const reader = makeReader(new FakeView(renderer), {});
+  assert.equal(reader.unreadablePage(), false);
+  renderer.doc = parseHTML('<html><head></head><body><p data-unreadable-section="">Gone</p></body></html>').document;
+  assert.equal(reader.unreadablePage(), true);
+});
+
 const XLINK = 'http://www.w3.org/1999/xlink';
 
 /** A section on screen, with the links of a book in it. foliate has its own listener, which comes first. */

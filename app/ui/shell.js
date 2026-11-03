@@ -252,6 +252,7 @@ async function showBook(doc, host, savedPosition) {
     hash: () => invoke('file_hash', { path: doc.path }),
     savedPosition,
     openExternal: (url) => invoke('open_external', { url }),
+    unreadableSection: t('epub.sectionError'),
   });
 }
 
@@ -345,6 +346,10 @@ async function reloadBook(doc, id, entry) {
   let reader;
   try {
     reader = await showBook(doc, stage, async () => entry.reader.position());
+    if (reader.unreadablePage()) {
+      reader.destroy();
+      throw new Error('the new file is damaged at the place being read');
+    }
   } catch (error) {
     console.warn(error);
     stage.remove();

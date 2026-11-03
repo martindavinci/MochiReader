@@ -3,7 +3,7 @@
 import { debounce, SAVE_DEBOUNCE_MS } from '../core/position.js';
 import { HIGHLIGHT_RULE, relativeDocumentSizes, relativeSizes } from './epub-style.js';
 import { epubKey, mainTitle } from './epub-key.js';
-import { sectionPage, sectionType } from './epub-section.js';
+import { isUnreadablePage, keepSectionsLoading, sectionPage, sectionType } from './epub-section.js';
 import { excerptOf } from './excerpt.js';
 
 export { epubKey, mainTitle };
@@ -275,6 +275,8 @@ export function makeReader(view, { key, title, onInput = () => {} }) {
     focus: () => shownDocs()[0]?.doc.defaultView?.focus(),
     // Not in the contract: only the report of the tabs asks, to tell a page on screen from a book that says it opened.
     pageOnScreen: () => shownDocs().some(({ doc }) => doc.body.getClientRects().length > 0),
+    // Not in the contract: a new file of the book is only worth showing if it has this place to show.
+    unreadablePage: () => shownDocs().some(({ doc }) => isUnreadablePage(doc)),
     destroy: () => {
       notifyMove.cancel();
       view.removeEventListener('relocate', notifyMove);
@@ -336,7 +338,7 @@ async function showFirstPage(view, cfi) {
  * @param {HTMLElement} host Takes the book in place of what it holds, once the book has a page to show.
  * @param {{flow: 'paginated'|'scrolled', style: string, hash: () => Promise<string>,
  *   savedPosition: (key: string) => Promise<import('./reader.js').Position|null>, openExternal: (url: string) => void,
- *   parser?: object, serializer?: object}} opts
+ *   unreadableSection: string, parser?: object, serializer?: object}} opts
  * @param {() => Promise<{makeBook: (file: File) => Promise<object>}>} [loadFoliate]
  * @returns {Promise<import('./reader.js').Reader>}
  */
@@ -346,6 +348,7 @@ export async function openEpub(url, host, opts, loadFoliate = importFoliate) {
   try {
     const book = await makeBook(await readFile(url));
     if (isDrmProtected(await book.loadText(ENCRYPTION_FILE), opts.parser)) throw new Error('the book has DRM');
+    keepSectionsLoading(book.sections, opts.unreadableSection);
     prepareSections(book, opts);
     letSizesFollowTheText(book);
     const onInput = watchSections(view, opts.openExternal);

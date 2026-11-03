@@ -16,19 +16,23 @@ const ZIP_END_OF_DIRECTORY = 0x06054b50;
 const ZIP_VERSION = 20;
 const ZIP_FLAG_UTF8_NAME = 0x0800;
 const ZIP_METHOD_STORED = 0;
+const ZIP_METHOD_DEFLATED = 8;
+// A deflate block of the one type that does not exist: readable as a ZIP entry, and it fails when it is unpacked. Written
+// out because compressing and spoiling real data would depend on the version of zlib.
+const SPOILED_DEFLATE = Buffer.from([0x07, 0x00, 0x00, 0x00]);
 const ZIP_DOS_TIME = 0;
 const ZIP_DOS_DATE = (1 << 5) | 1; // 1980-01-01, so the output never depends on the clock
 
 // The fields shared by the local header and the central directory entry.
-function zipEntryFields(crc, size, nameLength) {
+function zipEntryFields(crc, packedSize, size, nameLength, method) {
   const fields = Buffer.alloc(26);
   fields.writeUInt16LE(ZIP_VERSION, 0);
   fields.writeUInt16LE(ZIP_FLAG_UTF8_NAME, 2);
-  fields.writeUInt16LE(ZIP_METHOD_STORED, 4);
+  fields.writeUInt16LE(method, 4);
   fields.writeUInt16LE(ZIP_DOS_TIME, 6);
   fields.writeUInt16LE(ZIP_DOS_DATE, 8);
   fields.writeUInt32LE(crc, 10);
-  fields.writeUInt32LE(size, 14);
+  fields.writeUInt32LE(packedSize, 14);
   fields.writeUInt32LE(size, 18);
   fields.writeUInt16LE(nameLength, 22);
   return fields;
@@ -36,14 +40,17 @@ function zipEntryFields(crc, size, nameLength) {
 
 // Writes a ZIP without compression, entries in the given order. EPUB requires
 // `mimetype` to come first and stored, and allows every other entry to be stored.
+// An entry marked `spoiled` claims to be compressed, and its data cannot be unpacked.
 function zip(entries) {
   const locals = [];
   const centrals = [];
   let offset = 0;
-  for (const [name, content] of entries) {
+  for (const [name, content, { spoiled = false } = {}] of entries) {
     const nameBytes = Buffer.from(name, 'utf8');
-    const data = Buffer.from(content, 'utf8');
-    const fields = zipEntryFields(crc32(data), data.length, nameBytes.length);
+    const text = Buffer.from(content, 'utf8');
+    const data = spoiled ? SPOILED_DEFLATE : text;
+    const method = spoiled ? ZIP_METHOD_DEFLATED : ZIP_METHOD_STORED;
+    const fields = zipEntryFields(crc32(text), data.length, text.length, nameBytes.length, method);
 
     const localSignature = Buffer.alloc(4);
     localSignature.writeUInt32LE(ZIP_LOCAL_HEADER);
@@ -123,7 +130,8 @@ const FIXED_LAYOUT_VIEWPORT = '<meta name="viewport" content="width=600, height=
 
 // `identifier` is left out of the metadata altogether when it is null, `encryption`
 // adds META-INF/encryption.xml with that content, and `fixedLayout` makes it a book of pages. A chapter can name
-// the `mediaType` its file is declared with, add to its `head`, or be a `raw` file instead of a page made here.
+// the `mediaType` its file is declared with, add to its `head`, or be a `raw` file instead of a page made here. Its file
+// can be `spoiled`, so that it fails when it is unpacked, or `missing` from the ZIP while the book still lists it.
 function epub({ identifier, title, chapters, encryption, fixedLayout = false, spread = 'none' }) {
   const uniqueIdentifier = identifier ? ' unique-identifier="book-id"' : '';
   const identifierElement = identifier
@@ -168,10 +176,11 @@ ${spineItems}
     ...(encryption ? [['META-INF/encryption.xml', encryption]] : []),
     ['OEBPS/content.opf', opf],
     ['OEBPS/nav.xhtml', nav],
-    ...chapters.map(({ title: label, body, head = '', raw }, index) => [
+    ...chapters.flatMap(({ title: label, body, head = '', raw, spoiled, missing }, index) => (missing ? [] : [[
       `OEBPS/chapter-${index + 1}.xhtml`,
       raw ?? xhtml(label, body, fixedLayout ? FIXED_LAYOUT_VIEWPORT : head),
-    ]),
+      { spoiled },
+    ]])),
   ]);
 }
 
@@ -286,6 +295,16 @@ const LINKS_CHAPTERS = [
   { title: 'The End', body: '<p>The page after the links.</p>' },
 ];
 
+const DAMAGED_CHAPTERS = [
+  { title: 'Before The Damage', body: '<p>The page before the damage.</p>' },
+  { title: 'Spoiled', body: '<p>Nobody reads this.</p>', spoiled: true },
+  { title: 'After The Spoiled One', body: '<p>The page after the spoiled file.</p>' },
+  { title: 'Missing', missing: true },
+  { title: 'After The Missing One', body: '<p>The page after the missing file.</p>' },
+  { title: 'Empty', raw: '' },
+  { title: 'After The Empty One', body: '<p>The page after the empty file.</p>' },
+];
+
 const plain = epub({
   identifier: 'urn:uuid:6f1d6a51-3c0e-4e0a-9b52-0d7a3f2c1e01',
   title: 'Plain Fixture',
@@ -349,6 +368,11 @@ export const FIXTURES = {
     identifier: 'urn:uuid:6f1d6a51-3c0e-4e0a-9b52-0d7a3f2c1e0b',
     title: 'Links Fixture',
     chapters: LINKS_CHAPTERS,
+  }),
+  'damaged-chapters.epub': epub({
+    identifier: 'urn:uuid:6f1d6a51-3c0e-4e0a-9b52-0d7a3f2c1e0c',
+    title: 'Damaged Chapters Fixture',
+    chapters: DAMAGED_CHAPTERS,
   }),
   // A real ZIP signature whose central directory has been cut away.
   'corrupt.epub': plain.subarray(0, Math.floor(plain.length / 2)),

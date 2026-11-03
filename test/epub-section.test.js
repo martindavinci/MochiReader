@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DOMParser } from 'linkedom';
-import { sectionPage, sectionType } from '../app/readers/epub-section.js';
+import { resolveObjectURL } from 'node:buffer';
+import { DOMParser, parseHTML } from 'linkedom';
+import { isUnreadablePage, keepSectionsLoading, sectionPage, sectionType } from '../app/readers/epub-section.js';
 
 const XHTML = 'application/xhtml+xml';
 const HTML = 'text/html';
@@ -138,4 +139,65 @@ test('XML the parser refuses is an empty page', async () => {
   };
   const out = await sectionPage('<<<', XHTML, tools({ parser }));
   assert.match(out, /<head.*<body/s);
+});
+
+const MESSAGE = 'This part cannot be read';
+const pageAt = (url) => resolveObjectURL(url).text();
+
+const failing = {
+  'rejects, as a file that does not unpack': async () => {
+    throw new TypeError('The compressed data was not valid');
+  },
+  'gives nothing, as a file missing from the book': async () => null,
+  'gives an empty address, as a file that is empty': async () => '',
+};
+
+for (const [what, load] of Object.entries(failing)) {
+  test(`a section whose loading ${what} loads a page that says so`, async () => {
+    const sections = [{ load }];
+    keepSectionsLoading(sections, MESSAGE);
+    const url = await sections[0].load();
+    assert.match(url, /^blob:/);
+    const { document } = parseHTML(await pageAt(url));
+    assert.equal(document.body.textContent.trim(), MESSAGE);
+    assert.equal(isUnreadablePage(document), true);
+  });
+}
+
+test('a section that loads is left as it is', async () => {
+  const sections = [{ load: async () => 'blob:the-section' }];
+  keepSectionsLoading(sections, MESSAGE);
+  assert.equal(await sections[0].load(), 'blob:the-section');
+});
+
+test('a page of the book is not taken for the message', () => {
+  const { document } = parseHTML('<html><head></head><body><p>This part cannot be read</p></body></html>');
+  assert.equal(isUnreadablePage(document), false);
+});
+
+test('leaving a section lets go of its message and of the section, and coming back works', async () => {
+  let unloaded = 0;
+  const sections = [{
+    load: async () => null,
+    unload: () => {
+      unloaded += 1;
+    },
+  }];
+  keepSectionsLoading(sections, MESSAGE);
+  const first = await sections[0].load();
+  sections[0].unload();
+  assert.equal(unloaded, 1);
+  assert.equal(resolveObjectURL(first), undefined);
+  const second = await sections[0].load();
+  assert.match(await pageAt(second), /cannot be read/);
+  sections[0].unload();
+  assert.equal(resolveObjectURL(second), undefined);
+});
+
+test('the message cannot become part of the page', async () => {
+  const sections = [{ load: async () => null }];
+  keepSectionsLoading(sections, 'a < b & c');
+  const { document } = parseHTML(await pageAt(await sections[0].load()));
+  assert.equal(document.body.textContent.trim(), 'a < b & c');
+  assert.equal(document.querySelector('b'), null);
 });

@@ -15,6 +15,7 @@ export default {
   'file.deleted': 'This file is no longer on disk. You are reading the last version opened.',
   'file.notReloaded': 'This file has changed and cannot be read now. You are reading the last version opened.',
   'epub.error': 'This book cannot be opened: it is damaged or protected by DRM.',
+  'epub.sectionError': 'This part of the book cannot be read: its file is damaged. The arrow keys go on past it.',
 
   'tabs.close': 'Close tab',
 

@@ -20,6 +20,7 @@ const LINK_RELATION = 'rel';
 const STYLE_LINK_KINDS = new Set(['stylesheet', 'alternate']);
 const NO_LOOKUPS = [['http-equiv', 'x-dns-prefetch-control'], ['content', 'off']];
 const EMPTY_PAGE = `<html xmlns="${XHTML_NAMESPACE}"><head></head><body></body></html>`;
+const UNREADABLE_MARK = 'data-unreadable-section';
 
 /** Browsers read a type in any case and with parameters. foliate only recognizes the exact words. */
 const essenceOf = (type) => (type ?? '').split(';')[0].trim().toLowerCase();
@@ -101,4 +102,41 @@ export async function sectionPage(file, type, { fixed, parser, serializer }) {
   if (!fixed) givePageItsParts(doc);
   keepHostsUnasked(doc);
   return serializer.serializeToString(doc);
+}
+
+const unreadablePage = (message) => {
+  const text = message.replaceAll('&', '&amp;').replaceAll('<', '&lt;');
+  return `<!doctype html><html><head><title></title></head><body><p ${UNREADABLE_MARK}="">${text}</p></body></html>`;
+};
+
+/** @returns {boolean} Whether `doc` is the page that takes the place of a section that could not be read. */
+export const isUnreadablePage = (doc) => Boolean(doc.querySelector(`[${UNREADABLE_MARK}]`));
+
+/**
+ * foliate has no answer to a section that does not load. The paginator loses its place in the book and every move with
+ * it, and shows nothing about it, so the reader is stuck on the page before. Here every section loads: one that cannot be
+ * read is a page saying so, a place in the book like any other, and the keys go on from it.
+ * @param {{load: () => Promise<string|null>, unload?: () => void}[]} sections
+ * @param {string} message
+ */
+export function keepSectionsLoading(sections, message) {
+  for (const section of sections) {
+    const { load, unload } = section;
+    let standIn = null;
+    section.load = async () => {
+      try {
+        const url = await load.call(section);
+        if (url) return url;
+      } catch (error) {
+        console.warn(error);
+      }
+      standIn ??= URL.createObjectURL(new Blob([unreadablePage(message)], { type: HTML_TYPE }));
+      return standIn;
+    };
+    section.unload = () => {
+      if (standIn) URL.revokeObjectURL(standIn);
+      standIn = null;
+      unload?.call(section);
+    };
+  }
 }
