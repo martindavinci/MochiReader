@@ -31,14 +31,21 @@ test('the window stays hidden until the first draw', () => {
   assert.equal(windowConf.title, 'MochiReader');
 });
 
-test('throttling is turned off with browser flags, because the Tauri option does nothing on Windows', () => {
+test('browser flags keep throttling off, which the Tauri option cannot on Windows, and the runtime off the network', () => {
   assert.equal(windowConf.backgroundThrottling, undefined);
   assert.equal(
     windowConf.additionalBrowserArgs,
     '--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,CalculateNativeWinOcclusion '
       + '--autoplay-policy=no-user-gesture-required --disable-background-timer-throttling '
-      + '--disable-renderer-backgrounding --disable-backgrounding-occluded-windows',
+      + '--disable-renderer-backgrounding --disable-backgrounding-occluded-windows '
+      + '--no-proxy-server --disable-background-networking --disable-component-update',
   );
+});
+
+test('the browser is told not to look up the hosts of links', () => {
+  const html = read('app/index.html');
+  assert.match(html, /<meta http-equiv="x-dns-prefetch-control" content="off">/);
+  assert.ok(html.indexOf('x-dns-prefetch-control') < html.indexOf('<link'), 'before anything the page loads');
 });
 
 test('the page loads only its shell and its style', () => {
