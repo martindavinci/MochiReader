@@ -198,3 +198,104 @@ test('the position of a large document only compares blocks within the part at t
   host.scrollTop = expectedHeight + 2 * realBlockHeight;
   assert.equal(reader.position().line, lines[0]);
 });
+
+// A closed `details` is on the page but not on screen. A browser gives such a block a rectangle with no height, at a
+// place that says nothing about where the reader is, and scrolling to it does nothing.
+const COLLAPSED = [
+  '<h2 data-sourcepos="1:1-1:10">Domanda</h2>',
+  '<p data-sourcepos="3:1-3:10">Domanda lunga</p>',
+  '<details><summary>Risposta</summary><p data-sourcepos="7:1-7:10">Risposta nascosta</p></details>',
+  '<h2 data-sourcepos="11:1-11:10">Altra domanda</h2>',
+  '<p data-sourcepos="13:1-13:10">Altra domanda lunga</p>',
+].join('');
+
+function setupCollapsed({ html = COLLAPSED, scrollTop = 0 } = {}) {
+  const parts = setup({ html, headings: [] });
+  const { host, blocks } = parts;
+  host.scrollTop = scrollTop;
+  let placed = 0;
+  blocks.forEach((block) => {
+    if (block.closest('details:not([open])') && !block.closest('summary')) {
+      block.getBoundingClientRect = () => ({ top: 0, bottom: 0 });
+    } else {
+      const at = placed;
+      placed += 1;
+      block.getBoundingClientRect = () => {
+        const top = at * BLOCK_HEIGHT - host.scrollTop;
+        return { top, bottom: top + BLOCK_HEIGHT };
+      };
+    }
+  });
+  // As lines and not as elements: the diff of two linkedom elements in a failed assertion takes minutes.
+  return { ...parts, scrolledLines: () => parts.scrolled.map((block) => Number.parseInt(block.getAttribute('data-sourcepos'), 10)) };
+}
+
+test('a block in a closed details is never the position or the excerpt', () => {
+  const { reader } = setupCollapsed({ scrollTop: 100 });
+  assert.deepEqual(reader.position(), { kind: 'md', line: 3, sentence: 0 });
+  assert.equal(reader.excerpt(), 'Domanda lunga');
+});
+
+test('the position after a closed details is the block on screen', () => {
+  const { reader } = setupCollapsed({ scrollTop: 200 });
+  assert.deepEqual(reader.position(), { kind: 'md', line: 11, sentence: 0 });
+});
+
+test('going to a line in a closed details goes to the nearest block on screen', async () => {
+  const { reader, scrolledLines } = setupCollapsed();
+  await reader.goTo({ kind: 'md', line: 7, sentence: 0 });
+  assert.deepEqual(scrolledLines(), [3]);
+});
+
+test('a block in an open details can be the position and can be gone to', async () => {
+  const html = COLLAPSED.replace('<details>', '<details open>');
+  const { reader, scrolledLines } = setupCollapsed({ html, scrollTop: 200 });
+  assert.deepEqual(reader.position(), { kind: 'md', line: 7, sentence: 0 });
+  await reader.goTo({ kind: 'md', line: 7, sentence: 0 });
+  assert.deepEqual(scrolledLines(), [7]);
+});
+
+test('a details opened or closed while reading counts as it is now', async () => {
+  const { host, reader, scrolledLines } = setupCollapsed();
+  const details = host.querySelector('details');
+  details.setAttribute('open', '');
+  await reader.goTo({ kind: 'md', line: 7, sentence: 0 });
+  details.removeAttribute('open');
+  await reader.goTo({ kind: 'md', line: 7, sentence: 0 });
+  assert.deepEqual(scrolledLines(), [7, 3]);
+});
+
+test('a block in the summary of a closed details is on screen', async () => {
+  const html = '<p data-sourcepos="1:1-1:5">Prima</p><details><summary><p data-sourcepos="9:1-9:5">Titolo</p></summary>'
+    + '<p data-sourcepos="20:1-20:5">Nascosta</p></details>';
+  const { reader, scrolledLines } = setupCollapsed({ html });
+  await reader.goTo({ kind: 'md', line: 9, sentence: 0 });
+  assert.deepEqual(scrolledLines(), [9]);
+});
+
+test('a details inside a closed details stays hidden even when open', async () => {
+  const html = '<p data-sourcepos="1:1-1:5">Prima</p><details><summary>T</summary><details open>'
+    + '<p data-sourcepos="5:1-5:5">Dentro</p></details></details><p data-sourcepos="7:1-7:5">Dopo</p>';
+  const { reader, scrolledLines } = setupCollapsed({ html });
+  await reader.goTo({ kind: 'md', line: 5, sentence: 0 });
+  assert.deepEqual(scrolledLines(), [7]);
+});
+
+test('a document with only closed details has no position and goes nowhere', async () => {
+  const html = '<details><summary>T</summary><p data-sourcepos="3:1-3:5">Nascosta</p></details>';
+  const { reader, scrolledLines } = setupCollapsed({ html });
+  assert.deepEqual(reader.position(), { kind: 'md', line: 0, sentence: 0 });
+  await reader.goTo({ kind: 'md', line: 3, sentence: 0 });
+  assert.deepEqual(scrolledLines(), []);
+});
+
+test('a large document with closed details leaves them out of its position and of going to a line', async () => {
+  const hidden = '<details><summary>T</summary><p data-sourcepos="5:1-5:9">Nascosta</p></details>';
+  const html = `<p data-sourcepos="1:1-1:9">Prima</p>${hidden}<p data-sourcepos="8:1-8:9">${'x'.repeat(LARGE_DOC_CHARS)}</p>`;
+  const { host, reader, scrolledLines } = setupCollapsed({ html, scrollTop: BLOCK_HEIGHT / 2 });
+  await reader.speechRoots();
+  host.querySelector('.part').getBoundingClientRect = () => ({ top: -host.scrollTop });
+  assert.equal(reader.position().line, 1);
+  await reader.goTo({ kind: 'md', line: 5, sentence: 0 });
+  assert.deepEqual(scrolledLines(), [8]);
+});

@@ -47,6 +47,17 @@ $PageDownPresses = 5
 $SaveSettleMs = 1000
 $FocusSettleMs = 500
 $StateWaitS = 10
+# A note of questions: each is a heading, a long paragraph and its answer in a closed details, on these lines of 10.
+$FaqQuestions = 40
+$FaqLinesPerQuestion = 10
+$FaqHiddenAt = 7
+$FaqParagraphRepeats = 40
+# The hidden answer of question 21, and the paragraph before it, as close to it as the heading after it.
+$FaqHiddenLine = 207
+$FaqNearestLine = 203
+$VK_DOWN = 0x28
+$FaqWalkPresses = 4
+$FaqWalkRounds = 8
 $PlacedX = 140
 $PlacedY = 90
 $PlacedWidth = 760
@@ -406,6 +417,74 @@ function Test-DeletedFile {
   }
 }
 
+function Set-SavedLine([string]$Name, [int]$Line) {
+  $state = Get-State
+  $state.positions.PSObject.Properties | Where-Object { $_.Name -like "*\$Name" } | ForEach-Object { $_.Value.line = $Line }
+  [System.IO.File]::WriteAllText((Get-StateFile), ($state | ConvertTo-Json -Depth 10), (New-Object System.Text.UTF8Encoding $false))
+}
+
+function New-FaqText([string]$Word) {
+  $paragraph = ("$Word lunga da leggere con calma. " * $FaqParagraphRepeats).Trim()
+  (1..$FaqQuestions | ForEach-Object {
+    "## Domanda $_`n`n$paragraph`n`n<details><summary>Risposta $_</summary>`n`nLa risposta nascosta $_.`n`n</details>`n"
+  }) -join "`n"
+}
+
+function Test-CollapsedSections {
+  Wait-AppGone
+  $name = 'domande e risposte.md'
+  $note = Join-Path $Work $name
+  Write-Note $note (New-FaqText 'Spiegazione')
+
+  $app = Start-App @("`"$note`"")
+  try {
+    Wait-AppWindow $app | Out-Null
+    Wait-Tabs 1 { param($t) $t[0].status -eq 'ok' } | Out-Null
+  } finally {
+    Stop-App $app
+  }
+
+  # A position saved by a version that could stop on a hidden block, or in a section open back then.
+  Set-SavedLine $name $FaqHiddenLine
+  $app = Start-App @("`"$note`"")
+  try {
+    $window = Wait-AppWindow $app
+    Wait-Tabs 1 { param($t) $t[0].status -eq 'ok' -and $t[0].position.line -eq $FaqNearestLine } | Out-Null
+    Pass "a position in a closed section opens at the nearest block on screen, line $FaqNearestLine"
+
+    Write-Note $note (New-FaqText 'Cambiata')
+    Start-Second "`"$note`""
+    $tabs = Wait-Tabs 1 { param($t) $t[0].text.Contains('Cambiata lunga') }
+    Assert-That ($tabs[0].position.line -eq $FaqNearestLine) "a file with closed sections read again stays at line $FaqNearestLine, not $($tabs[0].position.line)"
+    Pass 'a file with closed sections changed on disk is read again and keeps the position'
+
+    foreach ($round in 1..$FaqWalkRounds) {
+      [void][SmokeInput]::SetForegroundWindow($window)
+      Start-Sleep -Milliseconds $SecondProcessMs
+      $before = (Get-Tabs)[0].position.line
+      $sent = $true
+      foreach ($press in 1..$FaqWalkPresses) { $sent = $sent -and (Send-Keys $window ([byte[]]@($VK_DOWN))) }
+      if (-not $sent) {
+        'SKIP  the app is not in front, so a real walk through the closed sections was not checked'
+        return
+      }
+      Start-Sleep -Milliseconds $SaveSettleMs
+      $line = (Get-Tabs)[0].position.line
+      Assert-That ($line -ge $before) "the keys go forward: line $before, then $line"
+      Assert-That ($line % $FaqLinesPerQuestion -ne $FaqHiddenAt) "the position is on screen, not on the hidden line $line"
+      Wait-State { (Get-SavedPosition $name).line -eq $line } "a scroll is saved after it ends, line $line"
+      Stop-App $app
+      $app = Start-App @("`"$note`"")
+      $window = Wait-AppWindow $app
+      $tabs = Wait-Tabs 1 { param($t) $t[0].status -eq 'ok' }
+      Wait-Tabs 1 { param($t) $t[0].position.line -eq $line } | Out-Null
+    }
+    Pass "$FaqWalkRounds times scroll, close, open again past closed sections: the same point"
+  } finally {
+    Stop-App $app
+  }
+}
+
 function Test-Position {
   Wait-AppGone
   $name = 'lunga posizione.md'
@@ -425,9 +504,7 @@ function Test-Position {
   Pass 'closing the app saves the position of its tabs'
 
   # Written here so that this part does not depend on Windows letting real keys through.
-  $state = Get-State
-  $state.positions.PSObject.Properties | Where-Object { $_.Name -like "*\$name" } | ForEach-Object { $_.Value.line = $SavedLine }
-  [System.IO.File]::WriteAllText((Get-StateFile), ($state | ConvertTo-Json -Depth 10), (New-Object System.Text.UTF8Encoding $false))
+  Set-SavedLine $name $SavedLine
 
   $app = Start-App @("`"$note`"")
   try {
@@ -552,6 +629,7 @@ try {
   Test-BrowserKeysKeepTheSession
   Test-DeletedFile
   Test-Position
+  Test-CollapsedSections
   Test-WindowPlacement
   Test-CorruptState
   'smoke: all checks passed'

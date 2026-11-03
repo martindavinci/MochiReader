@@ -12,7 +12,10 @@ const COLUMN_CHARS = 70;
 const LINE_HEIGHT_EM = 1.6;
 const HEIGHT_DECIMALS = 1;
 
-const BLOCK_SELECTOR = '[data-sourcepos]';
+// A closed `details` keeps its text on the page but not on screen: no place to read it from, and no way to scroll to it.
+// Read from the page and not from the layout, so that this stays cheap and works in a tab that is not in front.
+const HIDDEN_BY_DETAILS = 'details:not([open]) > :not(summary)';
+const BLOCK_SELECTOR = `[data-sourcepos]:not(${HIDDEN_BY_DETAILS}, ${HIDDEN_BY_DETAILS} *)`;
 const FIRST_SENTENCE = 0;
 const NO_LINE = 0;
 const EXCERPT_CHARS = 160;
