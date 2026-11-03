@@ -595,6 +595,7 @@ const openOptions = (over = {}) => ({
   savedPosition: async () => null,
   openExternal: () => {},
   parser,
+  serializer: { serializeToString: (doc) => doc.toString() },
   ...over,
 });
 
@@ -761,10 +762,17 @@ test('external links are stopped at once and handed to the app', async (t) => {
 });
 
 /** Sends a file through the transform of foliate as its loader does, and gives back what would reach the frame. */
-const transformed = async (book, type, data) => {
-  const event = new CustomEvent('data', { detail: { data, type } });
+const transformed = async (book, type, data, name = 'not-a-section') => {
+  const event = new CustomEvent('data', { detail: { data, type, name } });
   book.transformTarget.dispatchEvent(event);
   return event.detail.data;
+};
+
+/** The same, for both what reaches the frame and what it is served as. */
+const transformedFile = async (book, type, data, name) => {
+  const event = new CustomEvent('data', { detail: { data, type, name } });
+  book.transformTarget.dispatchEvent(event);
+  return { data: await event.detail.data, type: await event.detail.type };
 };
 
 const bookWithTransform = (over = {}) => ({ ...plainBook(), transformTarget: new EventTarget(), ...over });
@@ -808,6 +816,143 @@ test('a book of fixed pages keeps the sizes its pages are drawn with', async (t)
   const { host, foliate } = fakeFoliate({ makeBook: async () => book });
   await openEpub('u', host, openOptions(), foliate);
   assert.equal(await transformed(book, 'text/css', 'p { font-size: 12pt }'), 'p { font-size: 12pt }');
+});
+
+test('what reaches out never gets to the frame of a section', async (t) => {
+  t.after(stubFetch(okFile()));
+  const book = bookWithTransform({ sections: [{ id: 'a.xhtml' }, { id: 'b.xhtml' }] });
+  const { host, foliate } = fakeFoliate({ makeBook: async () => book });
+  await openEpub('u', host, openOptions(), foliate);
+  const source = '<html xmlns="http://www.w3.org/1999/xhtml"><head><link rel="preconnect" href="http://e.org"/></head><body><iframe src="http://e.org/"></iframe><p style="font-size: 16px">Text</p></body></html>';
+  const out = await transformed(book, 'application/xhtml+xml', source, 'b.xhtml');
+  assert.doesNotMatch(out, /<link|iframe/);
+  assert.match(out, /font-size: 1rem/);
+  assert.match(out, /Text/);
+});
+
+test('a fixed layout loses what reaches out too, and keeps its sizes', async (t) => {
+  t.after(stubFetch(okFile()));
+  const book = bookWithTransform({ rendition: { layout: 'pre-paginated' }, sections: [{ id: 'a.xhtml' }] });
+  const { host, foliate } = fakeFoliate({ makeBook: async () => book });
+  await openEpub('u', host, openOptions(), foliate);
+  const source = '<html xmlns="http://www.w3.org/1999/xhtml"><head><link rel="preconnect" href="http://e.org"/></head><body><p style="font-size: 16px">Text</p></body></html>';
+  const out = await transformed(book, 'application/xhtml+xml', source, 'a.xhtml');
+  assert.doesNotMatch(out, /<link/);
+  assert.match(out, /font-size: 16px/);
+});
+
+test('a page drawn in SVG in the reading order is served as a page', async (t) => {
+  t.after(stubFetch(okFile()));
+  const book = bookWithTransform({ sections: [{ id: 's.svg' }] });
+  const { host, foliate } = fakeFoliate({ makeBook: async () => book });
+  await openEpub('u', host, openOptions(), foliate);
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg"><text>Drawn</text></svg>';
+  const { data, type } = await transformedFile(book, 'image/svg+xml', svg, 's.svg');
+  assert.equal(type, 'application/xhtml+xml');
+  assert.match(data, /<body><svg.*Drawn/s);
+});
+
+test('an SVG used as a picture in a page stays a picture', async (t) => {
+  t.after(stubFetch(okFile()));
+  const book = bookWithTransform({ sections: [{ id: 'a.xhtml' }] });
+  const { host, foliate } = fakeFoliate({ makeBook: async () => book });
+  await openEpub('u', host, openOptions(), foliate);
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg"><text>Drawn</text></svg>';
+  assert.deepEqual(await transformedFile(book, 'image/svg+xml', svg, 'picture.svg'), { data: svg, type: 'image/svg+xml' });
+});
+
+test('a file of the reading order that cannot be read stays a failure for its frame', async (t) => {
+  t.after(stubFetch(okFile()));
+  const book = bookWithTransform({ sections: [{ id: 'a.xhtml' }] });
+  const { host, foliate } = fakeFoliate({ makeBook: async () => book });
+  await openEpub('u', host, openOptions(), foliate);
+  await assert.rejects(transformed(book, 'application/xhtml+xml', Promise.reject(new Error('gone')), 'a.xhtml'), /gone/);
+});
+
+test('foliate is told not to load the target of an SVG link as a resource of the page', () => {
+  assert.ok(read('app/vendor/foliate/epub.js').includes("'[*|href]:not([href]):not(a)'"));
+  const script = read('tools/vendor-foliate.sh');
+  assert.ok(script.includes('[*|href]:not([href])'));
+  assert.ok(script.includes(':not(a)'));
+});
+
+const XLINK = 'http://www.w3.org/1999/xlink';
+
+/** A section on screen, with the links of a book in it. foliate has its own listener, which comes first. */
+async function linksInASection(t, html) {
+  t.after(stubFetch(okFile()));
+  const opened = [];
+  const { host, view, foliate } = fakeFoliate({
+    makeBook: async () => ({
+      ...plainBook(),
+      sections: [{}, { resolveHref: (href) => (href.includes(':') ? href : `dir/${href}`) }],
+      isExternal: (href) => /^(?!blob)\w+:/i.test(href),
+    }),
+  });
+  await openEpub('u', host, openOptions({ openExternal: (url) => opened.push(url) }), foliate);
+  const { document, window } = parseHTML(`<html><head></head><body>${html}</body></html>`);
+  // linkedom knows nothing of namespaces.
+  for (const element of document.querySelectorAll('a')) {
+    element.getAttributeNS = (namespace, name) => (
+      namespace === XLINK && name === 'href' ? element.getAttribute('xlink:href') : null
+    );
+  }
+  document.addEventListener('click', (event) => {
+    if (event.target.closest('a[href]')) event.preventDefault();
+  });
+  view.dispatchEvent(new CustomEvent('load', { detail: { doc: document, index: 1 } }));
+  const click = (selector) => {
+    const event = new window.Event('click', { bubbles: true, cancelable: true });
+    document.querySelector(selector).dispatchEvent(event);
+    return event;
+  };
+  return { view, opened, click };
+}
+
+test('an SVG link inside the book goes to its place and leaves the frame where it is', async (t) => {
+  const { view, opened, click } = await linksInASection(t, '<svg><a xlink:href="two.xhtml#mid"><rect id="r"></rect></a></svg>');
+  const event = click('#r');
+  assert.ok(event.defaultPrevented);
+  assert.deepEqual(view.goes, ['dir/two.xhtml#mid']);
+  assert.deepEqual(opened, []);
+});
+
+test('an area of an image map inside the book does the same', async (t) => {
+  const { view, opened, click } = await linksInASection(t, '<map name="m"><area id="r" href="two.xhtml"/></map>');
+  const event = click('#r');
+  assert.ok(event.defaultPrevented);
+  assert.deepEqual(view.goes, ['dir/two.xhtml']);
+  assert.deepEqual(opened, []);
+});
+
+test('an SVG link or an area out of the book goes to the app, as the links foliate sees do', async (t) => {
+  const { view, opened, click } = await linksInASection(t, `<svg><a xlink:href="https://e.org/"><rect id="r"></rect></a></svg>
+    <map name="m"><area id="m" href="https://e.org/m"/></map>`);
+  assert.ok(click('#r').defaultPrevented);
+  assert.ok(click('#m').defaultPrevented);
+  assert.deepEqual(opened, ['https://e.org/', 'https://e.org/m']);
+  assert.deepEqual(view.goes, []);
+});
+
+test('a link foliate has followed is not followed twice', async (t) => {
+  const { view, opened, click } = await linksInASection(t, '<a href="two.xhtml"><span id="r">x</span></a>');
+  click('#r');
+  assert.deepEqual(view.goes, []);
+  assert.deepEqual(opened, []);
+});
+
+test('an SVG link with nowhere to go still cannot take the frame away', async (t) => {
+  const { view, opened, click } = await linksInASection(t, '<svg><a id="r"></a></svg>');
+  assert.ok(click('#r').defaultPrevented);
+  assert.deepEqual(view.goes, []);
+  assert.deepEqual(opened, []);
+});
+
+test('a click on anything else stays as it was', async (t) => {
+  const { view, opened, click } = await linksInASection(t, '<p id="r">Text</p>');
+  assert.equal(click('#r').defaultPrevented, false);
+  assert.deepEqual(view.goes, []);
+  assert.deepEqual(opened, []);
 });
 
 test('the renderer takes the view asked for and one column', async (t) => {

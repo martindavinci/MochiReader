@@ -25,6 +25,11 @@ readonly KEPT_FILES=(
 # enough: a book could still name a script of the app, which would run in its frame next to the Tauri IPC.
 readonly SANDBOXED_FILES=(paginator.js fixed-layout.js)
 readonly FOLIATE_SANDBOX='allow-same-origin allow-scripts'
+# foliate loads whatever an xlink:href names, which for a link in SVG is the next chapter: its address becomes a file of
+# its own, a raw copy of that chapter, and where the link leads is lost.
+readonly LOADER_FILE=epub.js
+readonly LOADED_HREFS='[*|href]:not([href])'
+readonly LOADED_HREFS_NOT_LINKS='[*|href]:not([href]):not(a)'
 # foliate-js ships zip.js and fflate minified and without their license texts.
 readonly ZIP_JS_LICENSE_URL="https://raw.githubusercontent.com/gildas-lormeau/zip.js/841affffeaa2bd840f3cb26686142c7eb8ee7cbf/LICENSE"
 readonly FFLATE_LICENSE_URL="https://raw.githubusercontent.com/101arrowz/fflate/dcb3714a6c25db3a2748641019c5277413d09714/LICENSE"
@@ -61,6 +66,12 @@ for file in "${SANDBOXED_FILES[@]}"; do
   sed -i -e '/`allow-scripts` is needed for events because of WebKit bug/,+1d' \
     -e "s/'${FOLIATE_SANDBOX}'/'allow-same-origin'/" "${source_dir}/${file}"
 done
+
+if ! grep -qF "'${LOADED_HREFS}'" "${source_dir}/${LOADER_FILE}"; then
+  echo "foliate-js ${FOLIATE_COMMIT} has no list of hrefs to load in ${LOADER_FILE}" >&2
+  exit 1
+fi
+sed -i -e "s/'\[\*|href\]:not(\[href\])'/'${LOADED_HREFS_NOT_LINKS}'/" "${source_dir}/${LOADER_FILE}"
 
 rm -rf "${target}"
 for file in "${KEPT_FILES[@]}"; do

@@ -3,6 +3,7 @@
 import { debounce, SAVE_DEBOUNCE_MS } from '../core/position.js';
 import { HIGHLIGHT_RULE, relativeDocumentSizes, relativeSizes } from './epub-style.js';
 import { epubKey, mainTitle } from './epub-key.js';
+import { sectionPage, sectionType } from './epub-section.js';
 import { excerptOf } from './excerpt.js';
 
 export { epubKey, mainTitle };
@@ -36,6 +37,8 @@ const TEXT_NODE = 3;
 const SECTION_START = 0;
 const SECTION_END = 1;
 const FILE_NAME = /^.*\/|\.[^.]*$/g;
+const LINKS = 'a, area';
+const XLINK_NAMESPACE = 'http://www.w3.org/1999/xlink';
 
 const pause = (ms) => new Promise((resolve) => {
   setTimeout(resolve, ms);
@@ -169,11 +172,31 @@ function closeView(view) {
   view.remove();
 }
 
+/**
+ * foliate only follows `a[href]`, and it does so first. Any other link, in SVG or in an image map, would be followed
+ * by the browser, in the frame of the section: the page would be gone, and the keys with it.
+ */
+function followOtherLinks(view, doc, index, openExternal) {
+  doc.addEventListener('click', (event) => {
+    if (event.defaultPrevented) return;
+    const link = event.target.closest?.(LINKS);
+    if (!link) return;
+    event.preventDefault();
+    const href = link.getAttribute('href') ?? link.getAttributeNS(XLINK_NAMESPACE, 'href');
+    if (!href) return;
+    const { book } = view;
+    const target = book.sections[index]?.resolveHref?.(href) ?? href;
+    if (book.isExternal?.(target)) openExternal(href);
+    else view.goTo(target);
+  });
+}
+
 /** @returns {(callback: (event: Event) => void) => void} What the reader offers as `onInput`. */
-function watchSections(view) {
+function watchSections(view, openExternal) {
   const callbacks = [];
   const pass = (event) => callbacks.forEach((callback) => callback(event));
-  view.addEventListener('load', ({ detail: { doc } }) => {
+  view.addEventListener('load', ({ detail: { doc, index } }) => {
+    followOtherLinks(view, doc, index, openExternal);
     // Neither leaves the frame of the section, and a new section is a new frame.
     doc.addEventListener('keydown', pass);
     doc.addEventListener('click', pass);
@@ -260,6 +283,25 @@ export function makeReader(view, { key, title, onInput = () => {} }) {
   };
 }
 
+/**
+ * Only a section gets a frame, since the frames a book names are taken out of its sections. The one file it costs: an
+ * SVG that is both a page in the reading order and a picture inside another page does not show as that picture.
+ */
+function prepareSections(book, { parser, serializer }) {
+  const fixed = book.rendition?.layout === FIXED_LAYOUT;
+  const names = new Set(book.sections.map(({ id }) => id));
+  book.transformTarget?.addEventListener('data', ({ detail }) => {
+    if (!names.has(detail.name)) return;
+    const { data, type } = detail;
+    detail.type = sectionType(type, fixed);
+    detail.data = Promise.resolve(data).then((file) => sectionPage(file, type, {
+      fixed,
+      parser: parser ?? new DOMParser(),
+      serializer: serializer ?? new XMLSerializer(),
+    }));
+  });
+}
+
 /** Sizes are rewritten on the way into the frame. The pages of a fixed layout are drawn with the sizes they have. */
 function letSizesFollowTheText(book) {
   if (book.rendition?.layout === FIXED_LAYOUT) return;
@@ -294,7 +336,7 @@ async function showFirstPage(view, cfi) {
  * @param {HTMLElement} host Takes the book in place of what it holds, once the book has a page to show.
  * @param {{flow: 'paginated'|'scrolled', style: string, hash: () => Promise<string>,
  *   savedPosition: (key: string) => Promise<import('./reader.js').Position|null>, openExternal: (url: string) => void,
- *   parser?: object}} opts
+ *   parser?: object, serializer?: object}} opts
  * @param {() => Promise<{makeBook: (file: File) => Promise<object>}>} [loadFoliate]
  * @returns {Promise<import('./reader.js').Reader>}
  */
@@ -304,8 +346,9 @@ export async function openEpub(url, host, opts, loadFoliate = importFoliate) {
   try {
     const book = await makeBook(await readFile(url));
     if (isDrmProtected(await book.loadText(ENCRYPTION_FILE), opts.parser)) throw new Error('the book has DRM');
+    prepareSections(book, opts);
     letSizesFollowTheText(book);
-    const onInput = watchSections(view);
+    const onInput = watchSections(view, opts.openExternal);
     view.addEventListener('external-link', (event) => {
       event.preventDefault();
       opts.openExternal(event.detail.href_);

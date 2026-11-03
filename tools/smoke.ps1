@@ -93,6 +93,15 @@ $CanaryWaitS = 5
 $ScriptedSentence = 'This book tries to reach the application from its content.'
 $CanaryFile = 'canary'
 $SelfScriptSentence = 'This book names a script of the application.'
+$NetworkSentence = 'This book tries to reach the network from its content.'
+# The ports the book in network.epub reaches for, and the one in network-html.epub.
+$NetworkPorts = 48311..48319
+$SvgPageAfterDrawing = 'The page after the drawing.'
+$SvgPageAfterNothing = 'The page after the one with no body.'
+$LinksSvgPage = 'The page with the link in a drawing.'
+$LinksMapPage = 'The page with the image map.'
+$LinksOutPage = 'The page with the link out of the book.'
+$LinksEndPage = 'The page after the links.'
 $NotABook = 'This is not a ZIP file.'
 # What a file holds while a copy or a sync is writing it: the start of a ZIP, with no directory at its end.
 $CutBookBytes = 1000
@@ -800,6 +809,111 @@ function Test-EpubSelfScript {
   }
 }
 
+function Test-EpubNoNetwork {
+  foreach ($fixture in 'network.epub', 'network-html.epub') { Test-BookStaysOffline $fixture }
+}
+
+# Chromium connects for some things in a page before the CSP has its say, and no request ever arrives. So this listens.
+function Test-BookStaysOffline([string]$Fixture) {
+  Wait-AppGone
+  $book = Copy-Fixture $Fixture
+  $listeners = foreach ($port in $NetworkPorts) {
+    $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, $port)
+    $listener.Start()
+    $listener
+  }
+  try {
+    # Without listeners that hear a connection, no connection heard proves nothing.
+    $control = New-Object System.Net.Sockets.TcpClient('127.0.0.1', $NetworkPorts[0])
+    Start-Sleep -Milliseconds $SecondProcessMs
+    Assert-That ($listeners[0].Pending()) 'the check of the network hears nothing, so it proves nothing'
+    $listeners[0].AcceptTcpClient().Dispose()
+    $control.Dispose()
+
+    $app = Start-App @("`"$book`"")
+    try {
+      Wait-AppWindow $app | Out-Null
+      $tab = (Wait-Tabs 1 { param($t) $t[0].status -ne 'loading' })[0]
+      Assert-That ($tab.status -eq 'ok' -and $tab.firstPageRendered) "$Fixture opens, not: $($tab.status), $($tab.notice)"
+      Assert-That ($tab.text.Contains($NetworkSentence)) "the text of $Fixture is there, not: $($tab.text)"
+      Start-Sleep -Seconds $CanaryWaitS
+      $reached = @($listeners | Where-Object { $_.Pending() } | ForEach-Object { $_.LocalEndpoint.Port })
+      Assert-That ($reached.Count -eq 0) "$Fixture made the app connect to ports $($reached -join ', ')"
+      Pass "$Fixture opens and connects to nothing"
+    } finally {
+      Stop-App $app
+    }
+  } finally {
+    $listeners | ForEach-Object { $_.Stop() }
+  }
+}
+
+# A page the renderer cannot stand on would take the book with it: no message, and no way past that page.
+function Test-EpubSvgPages {
+  Wait-AppGone
+  $book = Copy-Fixture 'svg-pages.epub'
+  $app = Start-App @("`"$book`"")
+  try {
+    $window = Wait-AppWindow $app
+    $tab = (Wait-Tabs 1 { param($t) $t[0].status -ne 'loading' })[0]
+    Assert-That ($tab.status -eq 'ok' -and $tab.firstPageRendered) "a book that starts with a drawn page opens, not: $($tab.status), $($tab.notice)"
+    Assert-That ($tab.key.Length -gt 0) 'a book that starts with a drawn page is known by its key'
+    Assert-That ($tab.text.Contains('Drawn page')) "the drawn page is on screen, not: $($tab.text)"
+    Wait-State { @((Get-State).recents | Where-Object { $_.path -eq $book }).Count -eq 1 } 'a book that starts with a drawn page goes to the recents'
+    Pass 'a book that starts with a drawn page opens'
+    [void][SmokeInput]::SetForegroundWindow($window)
+    Start-Sleep -Milliseconds $SecondProcessMs
+    $next = @($VK_CONTROL, $VK_RIGHT)
+    if (-not (Assert-KeysDo $window $next { param($t) $t.text.Contains($SvgPageAfterDrawing) } 'the keys move on from a drawn page')) {
+      'SKIP  the app is not in front, so moving past a page with no body was not checked'
+      return
+    }
+    Assert-That (Assert-KeysDo $window $next { param($t) -not $t.text.Contains($SvgPageAfterDrawing) } 'the keys reach the page with no body') 'the keys stay with the app'
+    Assert-That (Assert-KeysDo $window $next { param($t) $t.text.Contains($SvgPageAfterNothing) } 'the keys move on from a page with no body') 'the keys stay with the app'
+    Pass 'neither a drawn page nor a page with no body stops the reader'
+  } finally {
+    Stop-App $app
+  }
+}
+
+# foliate only sees a[href]. Any other link left to the browser would take the page away and the keys with it.
+function Test-EpubLinks {
+  Wait-AppGone
+  $book = Copy-Fixture 'links.epub'
+  $app = Start-App @("`"$book`"")
+  try {
+    $window = Wait-AppWindow $app
+    $tab = (Wait-Tabs 1 { param($t) $t[0].status -ne 'loading' })[0]
+    Assert-That ($tab.text.Contains($LinksSvgPage)) "the book of links opens, not: $($tab.status), $($tab.text)"
+    [void][SmokeInput]::SetForegroundWindow($window)
+    Start-Sleep -Milliseconds $SecondProcessMs
+    # The place too: the raw file of the chapter in the frame would have the right text and no reader around it.
+    $steps = @(
+      @{ What = 'an SVG link'; Text = $LinksMapPage; Cfi = 'epubcfi(/6/4!' },
+      @{ What = 'an area of an image map'; Text = $LinksOutPage; Cfi = 'epubcfi(/6/6!' }
+    )
+    foreach ($step in $steps) {
+      if (-not (Send-Click $window)) { 'SKIP  the app is not in front, so the links in a book were not checked'; return }
+      $limit = (Get-Date).AddSeconds($StateWaitS)
+      while ($true) {
+        $tab = @(Get-Tabs)[0]
+        if ($tab.text.Contains($step.Text) -and $tab.position.cfi.StartsWith($step.Cfi)) { break }
+        if ((Get-Date) -gt $limit) { throw "FAIL  $($step.What) goes to its place in the book, not: $($tab.position.cfi), $($tab.text)" }
+        Start-Sleep -Milliseconds $AppPollMs
+      }
+    }
+    if (-not (Send-Click $window)) { 'SKIP  the app is not in front, so a link out of a book was not checked'; return }
+    $tab = @(Get-Tabs)[0]
+    Assert-That ($tab.firstPageRendered -and $tab.text.Contains($LinksOutPage)) "an SVG link out of the book leaves the page where it is, not: $($tab.text)"
+    Assert-That (Assert-KeysDo $window @($VK_CONTROL, $VK_T) { param($t) $t.panel -eq 'toc' } 'ctrl+t opens the contents after a link') 'the keys stay with the app'
+    Assert-That (Assert-KeysDo $window @($VK_ESCAPE) { param($t) -not $t.panel } 'esc closes the contents after a link') 'the keys stay with the app'
+    Assert-That (Assert-KeysDo $window @($VK_CONTROL, $VK_RIGHT) { param($t) $t.text.Contains($LinksEndPage) } 'the keys move on after a link') 'the keys stay with the app'
+    Pass 'an SVG link and an image map keep the reader in the book, and the keys in the reader'
+  } finally {
+    Stop-App $app
+  }
+}
+
 function Test-BrokenEpubs {
   Wait-AppGone
   $empty = Join-Path $Work 'vuoto.epub'
@@ -1103,6 +1217,9 @@ $AllTests = @(
   'Test-EpubOpens',
   'Test-EpubScripts',
   'Test-EpubSelfScript',
+  'Test-EpubNoNetwork',
+  'Test-EpubSvgPages',
+  'Test-EpubLinks',
   'Test-BrokenEpubs',
   'Test-EpubObfuscatedFont',
   'Test-EpubWithoutIdentifier',

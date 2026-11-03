@@ -123,7 +123,7 @@ const FIXED_LAYOUT_VIEWPORT = '<meta name="viewport" content="width=600, height=
 
 // `identifier` is left out of the metadata altogether when it is null, `encryption`
 // adds META-INF/encryption.xml with that content, and `fixedLayout` makes it a book of pages. A chapter can name
-// the `mediaType` its file is declared with.
+// the `mediaType` its file is declared with, add to its `head`, or be a `raw` file instead of a page made here.
 function epub({ identifier, title, chapters, encryption, fixedLayout = false, spread = 'none' }) {
   const uniqueIdentifier = identifier ? ' unique-identifier="book-id"' : '';
   const identifierElement = identifier
@@ -168,9 +168,9 @@ ${spineItems}
     ...(encryption ? [['META-INF/encryption.xml', encryption]] : []),
     ['OEBPS/content.opf', opf],
     ['OEBPS/nav.xhtml', nav],
-    ...chapters.map(({ title: label, body }, index) => [
+    ...chapters.map(({ title: label, body, head = '', raw }, index) => [
       `OEBPS/chapter-${index + 1}.xhtml`,
-      xhtml(label, body, fixedLayout ? FIXED_LAYOUT_VIEWPORT : ''),
+      raw ?? xhtml(label, body, fixedLayout ? FIXED_LAYOUT_VIEWPORT : head),
     ]),
   ]);
 }
@@ -218,6 +218,74 @@ const SELF_SCRIPT_CHAPTERS = [
   },
 ];
 
+// Each on a port of its own, which tools/smoke.ps1 listens on. The CSP stops none of these: Chromium connects for them,
+// and for the prerender it even sends the request. Prefixes and odd spacing are what a check of the text alone misses.
+const LOOPBACK = 'http://127.0.0.1';
+const NETWORK_CHAPTERS = [
+  {
+    title: 'A Chapter That Reaches Out',
+    head: `<link rel="preconnect" href="${LOOPBACK}:48311"/>
+<link rel="prerender" href="${LOOPBACK}:48312/page"/>
+<link rel=" stylesheet  PRECONNECT " href="${LOOPBACK}:48313"/>
+<h:link xmlns:h="http://www.w3.org/1999/xhtml" rel="preconnect" href="${LOOPBACK}:48314"/>
+<base href="${LOOPBACK}:48315/"/>`,
+    body: `<p>This book tries to reach the network from its content.</p>
+<iframe src="${LOOPBACK}:48316/frame.html"></iframe>
+<iframe srcdoc="&lt;link rel='preconnect' href='${LOOPBACK}:48317'&gt;"></iframe>
+<h:iframe xmlns:h="http://www.w3.org/1999/xhtml" src="${LOOPBACK}:48318/frame.html"></h:iframe>
+<iframe src="relative.html"></iframe>`,
+  },
+];
+
+// Only the HTML parser of the frame makes a shadow root of a template, and nothing looks inside a template.
+const NETWORK_HTML_CHAPTERS = [
+  {
+    title: 'A Chapter That Reaches Out From A Shadow',
+    mediaType: HTML_TYPE,
+    raw: `<!doctype html>
+<html><head><title>Shadow</title></head>
+<body>
+<p>This book tries to reach the network from its content.</p>
+<div><template shadowrootmode="open"><iframe src="${LOOPBACK}:48319/frame.html"></iframe></template></div>
+</body></html>
+`,
+  },
+];
+
+const DRAWN_PAGE = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+<rect width="100" height="100" fill="#88a"/><text x="10" y="50">Drawn page</text>
+</svg>
+`;
+const PAGE_WITH_NO_BODY = `<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Nothing</title></head></html>
+`;
+
+const SVG_PAGES_CHAPTERS = [
+  { title: 'A Drawn Page', mediaType: 'image/svg+xml', raw: DRAWN_PAGE },
+  { title: 'After The Drawing', body: '<p>The page after the drawing.</p>' },
+  { title: 'Nothing', raw: PAGE_WITH_NO_BODY },
+  { title: 'After Nothing', body: '<p>The page after the one with no body.</p>' },
+];
+
+const SVG_LINK_NAMESPACES = 'xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"';
+const ONE_PIXEL_PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+// Large enough to be under the middle of the window, where tools/smoke.ps1 clicks. The last one leads to a kind of
+// address the app refuses, so that the check opens no browser.
+const svgLink = (href, text) => `<svg ${SVG_LINK_NAMESPACES} width="100%" height="600"><a xlink:href="${href}"><rect width="100%" height="100%" fill="#88a"/></a></svg>
+<p>${text}</p>`;
+
+const LINKS_CHAPTERS = [
+  { title: 'SVG Link', body: svgLink('chapter-2.xhtml', 'The page with the link in a drawing.') },
+  {
+    title: 'Image Map',
+    body: `<img usemap="#map" src="data:image/png;base64,${ONE_PIXEL_PNG}" width="800" height="600" alt=""/>
+<map name="map"><area shape="rect" coords="0,0,800,600" href="chapter-3.xhtml" alt="next"/></map>
+<p>The page with the image map.</p>`,
+  },
+  { title: 'SVG Link Out', body: svgLink('ftp://example.invalid/', 'The page with the link out of the book.') },
+  { title: 'The End', body: '<p>The page after the links.</p>' },
+];
+
 const plain = epub({
   identifier: 'urn:uuid:6f1d6a51-3c0e-4e0a-9b52-0d7a3f2c1e01',
   title: 'Plain Fixture',
@@ -261,6 +329,26 @@ export const FIXTURES = {
     chapters: PROSE_CHAPTERS,
     fixedLayout: true,
     spread: null,
+  }),
+  'network.epub': epub({
+    identifier: 'urn:uuid:6f1d6a51-3c0e-4e0a-9b52-0d7a3f2c1e08',
+    title: 'Network Fixture',
+    chapters: NETWORK_CHAPTERS,
+  }),
+  'network-html.epub': epub({
+    identifier: 'urn:uuid:6f1d6a51-3c0e-4e0a-9b52-0d7a3f2c1e09',
+    title: 'Network HTML Fixture',
+    chapters: NETWORK_HTML_CHAPTERS,
+  }),
+  'svg-pages.epub': epub({
+    identifier: 'urn:uuid:6f1d6a51-3c0e-4e0a-9b52-0d7a3f2c1e0a',
+    title: 'SVG Pages Fixture',
+    chapters: SVG_PAGES_CHAPTERS,
+  }),
+  'links.epub': epub({
+    identifier: 'urn:uuid:6f1d6a51-3c0e-4e0a-9b52-0d7a3f2c1e0b',
+    title: 'Links Fixture',
+    chapters: LINKS_CHAPTERS,
   }),
   // A real ZIP signature whose central directory has been cut away.
   'corrupt.epub': plain.subarray(0, Math.floor(plain.length / 2)),
