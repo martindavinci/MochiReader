@@ -2,6 +2,8 @@
 //! The Windows calls the app needs and Tauri does not offer.
 use crate::state::WindowPlacement;
 use std::ffi::c_void;
+use std::fmt::Write as _;
+use std::io::{self, Read};
 use std::mem::size_of;
 use webview2_com::Microsoft::Web::WebView2::Win32::{
     ICoreWebView2Controller, ICoreWebView2Settings3,
@@ -9,6 +11,10 @@ use webview2_com::Microsoft::Web::WebView2::Win32::{
 use windows::core::{w, Interface, BOOL, HSTRING};
 use windows::Win32::Foundation::{CloseHandle, HANDLE, HWND, RECT};
 use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_TRANSITIONS_FORCEDISABLED};
+use windows::Win32::Security::Cryptography::{
+    BCryptCreateHash, BCryptDestroyHash, BCryptFinishHash, BCryptHashData, BCRYPT_HASH_HANDLE,
+    BCRYPT_SHA256_ALG_HANDLE,
+};
 use windows::Win32::System::Threading::{CreateMutexW, ReleaseMutex, WaitForSingleObject};
 use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -20,6 +26,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
 const SHELL_EXECUTE_LAST_ERROR: isize = 32;
 const BOOT_GATE_NAME: &str = "io.github.martindavinci.mochireader-boot";
 const BOOT_GATE_TIMEOUT_MS: u32 = 10_000;
+const SHA256_BYTES: usize = 32;
+const HASH_READ_BYTES: usize = 64 * 1024;
 
 /// Turns off the fade Windows plays when the window opens, which keeps the text faint for about 270 ms.
 pub fn disable_open_animation(hwnd: HWND) -> windows::core::Result<()> {
@@ -85,6 +93,43 @@ pub fn disable_browser_features(controller: &ICoreWebView2Controller) -> windows
     }
 }
 
+/// Ends the hash however the reading goes.
+struct HashHandle(BCRYPT_HASH_HANDLE);
+
+impl Drop for HashHandle {
+    fn drop(&mut self) {
+        let _ = unsafe { BCryptDestroyHash(self.0) };
+    }
+}
+
+/// The SHA-256 of everything `reader` holds, in lower case hexadecimal. Windows has it, so the app does not ship it.
+pub fn sha256(mut reader: impl Read) -> io::Result<String> {
+    let mut handle = BCRYPT_HASH_HANDLE::default();
+    unsafe { BCryptCreateHash(BCRYPT_SHA256_ALG_HANDLE, &raw mut handle, None, None, 0) }
+        .ok()
+        .map_err(io::Error::other)?;
+    let handle = HashHandle(handle);
+    let mut buffer = vec![0; HASH_READ_BYTES];
+    loop {
+        let read = reader.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        unsafe { BCryptHashData(handle.0, &buffer[..read], 0) }
+            .ok()
+            .map_err(io::Error::other)?;
+    }
+    let mut digest = [0; SHA256_BYTES];
+    unsafe { BCryptFinishHash(handle.0, &mut digest, 0) }
+        .ok()
+        .map_err(io::Error::other)?;
+    let mut text = String::with_capacity(SHA256_BYTES * 2);
+    for byte in digest {
+        let _ = write!(text, "{byte:02x}");
+    }
+    Ok(text)
+}
+
 /// Opens a URL in the program the system has for it.
 pub fn shell_open(url: &str) -> Result<(), String> {
     let target = HSTRING::from(url);
@@ -124,5 +169,32 @@ impl Drop for BootGate {
             let _ = ReleaseMutex(self.0);
             let _ = CloseHandle(self.0);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const LONG_INPUT_BYTES: usize = 1_000_000;
+
+    #[test]
+    fn sha256_matches_the_published_vectors() {
+        assert_eq!(
+            sha256(&b""[..]).unwrap(),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+        assert_eq!(
+            sha256(&b"abc"[..]).unwrap(),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+    }
+
+    #[test]
+    fn sha256_reads_past_its_buffer() {
+        assert_eq!(
+            sha256(&vec![b'a'; LONG_INPUT_BYTES][..]).unwrap(),
+            "cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0"
+        );
     }
 }

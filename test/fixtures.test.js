@@ -39,7 +39,9 @@ test('every fixture of the plan is generated', () => {
   assert.deepEqual(Object.keys(FIXTURES).sort(), [
     'corrupt.epub',
     'drm.epub',
+    'fixed.epub',
     'no-id.epub',
+    'obfuscated-font.epub',
     'plain.epub',
     'scripted.epub',
   ]);
@@ -75,6 +77,21 @@ test('drm.epub is otherwise a whole book, so only the DRM check can refuse it', 
     names.filter((name) => name !== ENCRYPTION_FILE),
     plainNames,
   );
+});
+
+test('obfuscated-font.epub only encrypts with font obfuscation', () => {
+  const xml = storedEntries(committed('obfuscated-font.epub')).get(ENCRYPTION_FILE);
+  const algorithms = [...xml.matchAll(/<EncryptionMethod Algorithm="([^"]+)"/g)].map(([, uri]) => uri);
+  assert.ok(algorithms.length > 0);
+  assert.ok(algorithms.every((uri) => FONT_OBFUSCATION_ALGORITHMS.includes(uri)), algorithms.join());
+});
+
+test('fixed.epub is a book of pages, and the others are not', () => {
+  const opfOf = (name) => storedEntries(committed(name)).get('OEBPS/content.opf');
+  assert.match(opfOf('fixed.epub'), /<meta property="rendition:layout">pre-paginated<\/meta>/);
+  assert.match(storedEntries(committed('fixed.epub')).get('OEBPS/chapter-1.xhtml'), /<meta name="viewport"/);
+  assert.doesNotMatch(opfOf('plain.epub'), /rendition:layout/);
+  assert.doesNotMatch(storedEntries(committed('plain.epub')).get('OEBPS/chapter-1.xhtml'), /viewport/);
 });
 
 test('the other readable fixtures have no encryption file', () => {

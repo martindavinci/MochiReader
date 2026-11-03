@@ -9,6 +9,9 @@ import it from '../app/lang/it.js';
 
 const PATH_A = 'C:/x/a.md';
 const PATH_B = 'C:/x/b.md';
+const PATH_BOOK = 'C:/x/b.epub';
+// Turns of the page that a failed import of foliate may take.
+const BOOK_TURNS = 50;
 const INDEX_HTML = readFileSync(new URL('../app/index.html', import.meta.url), 'utf8');
 const APP_CSS = readFileSync(new URL('../app/css/app.css', import.meta.url), 'utf8');
 
@@ -161,6 +164,7 @@ async function startShell(openDocument, {
     CSS: { escape: (text) => text },
     requestAnimationFrame: (callback) => setTimeout(callback),
     getComputedStyle: () => ({ scrollPaddingTop: 'auto' }),
+    matchMedia: () => ({ matches: false, addEventListener() {} }),
     ResizeObserver: class {
       observe() {}
 
@@ -238,6 +242,33 @@ for (const code of ['not_found', 'timeout', 'unreadable']) {
     assert.ok(shell.panes()[0].textContent.includes('Ora esiste'));
   });
 }
+
+test('a book that cannot be shown gets a message in its tab, and opening it again tries again', async () => {
+  const opened = [];
+  const shell = await startShell(async (path) => {
+    opened.push(path);
+    return { path, name: 'b.epub', kind: 'epub', fileUrl: 'http://mochi.localhost/file/x', modifiedMs: CHANGED_AT };
+  }, { pending: [PATH_BOOK], options: { language: 'en' } });
+  // foliate cannot load outside the page, which here stands for every other way a book fails.
+  const notice = async () => {
+    for (let turn = 0; turn < BOOK_TURNS; turn += 1) {
+      const found = shell.panes()[0].querySelector('.notice');
+      if (found && found.textContent === en['epub.error']) return found;
+      await shell.settled();
+    }
+    return null;
+  };
+  assert.ok(await notice(), 'a message');
+  await shell.emit('shell-command', { action: 'dump-tabs', out: 'x' });
+  const [row] = shell.state.dump;
+  assert.equal(row.status, 'error');
+  assert.equal(row.firstPageRendered, false);
+  assert.deepEqual(shell.state.touched, []);
+
+  await shell.openPaths([PATH_BOOK]);
+  assert.ok(await notice(), 'a message again');
+  assert.equal(opened.length, 2);
+});
 
 test('a retry that fails again shows the new message and can be retried', async () => {
   let open = failure('not_found');

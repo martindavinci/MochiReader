@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { debounce, lineFromSourcepos, nearestBlock, SAVE_DEBOUNCE_MS } from '../core/position.js';
+import { excerptOf } from './excerpt.js';
 import { htmlParts } from './html-parts.js';
 
 /** HTML from this size on goes in part by part, and the layout of parts off screen stays out of every scroll. */
@@ -19,9 +20,6 @@ const BLOCK_SELECTOR = `[data-sourcepos]:not(${HIDDEN_BY_DETAILS}, ${HIDDEN_BY_D
 const HEADING_SELECTOR = 'h1, h2, h3, h4, h5, h6';
 const FIRST_SENTENCE = 0;
 const NO_LINE = 0;
-const EXCERPT_CHARS = 160;
-// The first half of a character the cut went through. The excerpt goes to the app as JSON, which refuses it.
-const CUT_CHARACTER = /[\uD800-\uDBFF]$/;
 // goTo puts a block at the top, but the scroll offset is rounded to a whole device pixel, so the block can land up
 // to half a pixel lower. Without this margin it would not count as the top block, and each save would move back one.
 const FOLD_MARGIN_PX = 1;
@@ -197,7 +195,7 @@ export function openMarkdown(doc, host) {
     onInput: (callback) => article.addEventListener('click', callback),
     setStyle: () => {},
     nextSpeechSection: async () => false,
-    excerpt: () => (currentBlock()?.textContent ?? '').trim().slice(0, EXCERPT_CHARS).replace(CUT_CHARACTER, ''),
+    excerpt: () => excerptOf(currentBlock()?.textContent ?? ''),
     moveBlock: (delta) => step(landingBlocks, delta),
     moveSection: (delta) => step(headingBlocks, delta),
     destroy: () => {

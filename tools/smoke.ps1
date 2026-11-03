@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Drives the real app, built with the smoke feature, and checks the tabs it reports through --dump-tabs.
-#   smoke.ps1 [-NoBuild] [-BurstRounds <n>]
+#   smoke.ps1 [-NoBuild] [-BurstRounds <n>] [-Only <Test-Name>, ...]
 # Exits 1 on the first failed check. Close MochiReader before running it.
 [CmdletBinding()]
-param([switch]$NoBuild, [int]$BurstRounds = 3)
+param([switch]$NoBuild, [int]$BurstRounds = 3, [string[]]$Only)
 $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot\app-process.ps1"
 
@@ -81,6 +81,27 @@ $SW_MAXIMIZE = 3
 $SW_RESTORE = 9
 $SWP_NOZORDER = 4
 
+$FixtureDir = Join-Path $AppRoot 'test\fixtures'
+$PlainKey = 'epub:urn:uuid:6f1d6a51-3c0e-4e0a-9b52-0d7a3f2c1e01|Plain Fixture|2'
+$PlainFirstChapter = 'first paragraph of the first chapter'
+$PlainSecondChapter = 'first paragraph of the second chapter'
+$PlainSecondChapterCfi = 'epubcfi(/6/4!/4/2/1:0)'
+# The spine of the fixture has two items: this one leads nowhere.
+$NowhereCfi = 'epubcfi(/6/40!/4/2/1:0)'
+# The time the plan gives a script in a book to reach the app, once the book is open.
+$CanaryWaitS = 5
+$ScriptedSentence = 'This book tries to reach the application from its content.'
+$CanaryFile = 'canary'
+$NotABook = 'This is not a ZIP file.'
+$VK_LEFT = 0x25
+$VK_RIGHT = 0x27
+$VK_ESCAPE = 0x1B
+$VK_D = 0x44
+$VK_T = 0x54
+$VK_OEM_PLUS = 0xBB
+$MOUSEEVENTF_LEFTDOWN = 2
+$MOUSEEVENTF_LEFTUP = 4
+
 Add-Type @'
 using System;
 using System.Runtime.InteropServices;
@@ -93,6 +114,8 @@ public static class SmokeInput {
   [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int w, int t, uint flags);
   [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
   [DllImport("user32.dll")] public static extern bool IsZoomed(IntPtr h);
+  [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+  [DllImport("user32.dll")] public static extern void mouse_event(uint f, uint x, uint y, uint d, UIntPtr e);
 }
 '@
 Add-Type -AssemblyName System.Windows.Forms
@@ -706,6 +729,275 @@ function Test-WindowPlacement {
   }
 }
 
+function Copy-Fixture([string]$Name, [string]$Folder = $Work) {
+  Copy-Item (Join-Path $FixtureDir $Name) $Folder -PassThru | ForEach-Object FullName
+}
+
+function Test-EpubOpens {
+  Wait-AppGone
+  $plain = Copy-Fixture 'plain.epub'
+  $app = Start-App @("`"$plain`"")
+  try {
+    Wait-AppWindow $app | Out-Null
+    $tab = (Wait-Tabs 1 { param($t) $t[0].status -ne 'loading' })[0]
+    Assert-That ($tab.kind -eq 'epub') "a book is a book, not $($tab.kind)"
+    Assert-That ($tab.status -eq 'ok') "a book opens, not: $($tab.status), $($tab.notice)"
+    Assert-That ($tab.firstPageRendered) 'a book shows its first page'
+    Assert-That ($tab.text.Contains($PlainFirstChapter)) "the text of the first chapter is there, not: $($tab.text)"
+    Assert-That (-not $tab.text.Contains($PlainSecondChapter)) 'only the section on screen is there'
+    Assert-That ($tab.key -eq $PlainKey) "a book is known by its identifier, title and sections, not $($tab.key)"
+    Assert-That ($tab.title -eq 'Plain Fixture') "a book has the title it declares, not $($tab.title)"
+    Wait-State { @((Get-State).recents | Where-Object { $_.path -eq $plain -and $_.title -eq 'Plain Fixture' }).Count -eq 1 } 'a book goes to the recents with its title'
+    Pass 'a book opens at its first page and goes to the recents'
+  } finally {
+    Stop-App $app
+  }
+}
+
+function Test-EpubScripts {
+  Wait-AppGone
+  $canary = Join-Path $StateDir $CanaryFile
+  Remove-Item $canary -ErrorAction SilentlyContinue
+  $plain = Copy-Fixture 'plain.epub'
+  $scripted = Copy-Fixture 'scripted.epub'
+  $app = Start-App @("`"$plain`"")
+  try {
+    Wait-AppWindow $app | Out-Null
+    # Without a book that opens, no script running proves nothing.
+    Wait-Tabs 1 { param($t) $t[0].status -eq 'ok' -and $t[0].firstPageRendered } | Out-Null
+    Start-Second "`"$scripted`""
+    Wait-Tabs 2 { param($t) @($t | Where-Object { $_.status -eq 'loading' }).Count -eq 0 } | Out-Null
+    Start-Sleep -Seconds $CanaryWaitS
+    Assert-That (-not (Test-Path $canary)) 'a script in a book reached the app: the canary exists'
+    $tab = @(Get-Tabs) | Where-Object { $_.path -eq $scripted }
+    Assert-That ($tab.status -eq 'ok') "the book with scripts opens, not: $($tab.status), $($tab.notice)"
+    Assert-That ($tab.firstPageRendered) 'the book with scripts shows a page'
+    Assert-That ($tab.text.Contains($ScriptedSentence)) "the text of the book with scripts is there, not: $($tab.text)"
+    Pass 'a book with scripts opens, shows its text, and its scripts do not reach the app'
+  } finally {
+    Stop-App $app
+  }
+}
+
+function Test-BrokenEpubs {
+  Wait-AppGone
+  $empty = Join-Path $Work 'vuoto.epub'
+  [System.IO.File]::WriteAllBytes($empty, [byte[]]@())
+  $text = Join-Path $Work 'non un libro.epub'
+  Write-Note $text $NotABook
+  $books = @((Copy-Fixture 'corrupt.epub'), (Copy-Fixture 'drm.epub'), $empty, $text)
+  $plain = Copy-Fixture 'plain.epub'
+  $app = Start-App @("`"$plain`"")
+  try {
+    $window = Wait-AppWindow $app
+    Wait-Tabs 1 { param($t) $t[0].status -eq 'ok' } | Out-Null
+    foreach ($book in $books) { Start-Second "`"$book`"" }
+    $tabs = Wait-Tabs ($books.Count + 1) { param($t) @($t | Where-Object { $_.status -eq 'loading' }).Count -eq 0 }
+    foreach ($book in $books) {
+      $tab = $tabs | Where-Object { $_.path -eq $book }
+      Assert-That ($tab.status -eq 'error') "$book is refused, not: $($tab.status)"
+      Assert-That ($tab.notice.Length -gt 0) "$book gets a message in its tab"
+      Assert-That (-not $tab.firstPageRendered) "$book shows no page"
+      Assert-That ($tab.text.Length -eq 0) "$book shows no text, not: $($tab.text)"
+    }
+    Assert-That (-not $app.HasExited) 'the app is still running'
+    Assert-That (-not [AppWindows]::IsHungAppWindow($window)) 'the window keeps answering'
+    Assert-That (($tabs | Where-Object { $_.path -eq $plain }).status -eq 'ok') 'the book that opened stays open'
+    Pass 'a book damaged, with DRM, empty or not a book at all gets a message, and the app goes on'
+  } finally {
+    Stop-App $app
+  }
+}
+
+function Test-EpubObfuscatedFont {
+  Wait-AppGone
+  $book = Copy-Fixture 'obfuscated-font.epub'
+  $app = Start-App @("`"$book`"")
+  try {
+    Wait-AppWindow $app | Out-Null
+    $tab = (Wait-Tabs 1 { param($t) $t[0].status -ne 'loading' })[0]
+    Assert-That ($tab.status -eq 'ok' -and $tab.firstPageRendered) "a book that only hides its fonts opens, not: $($tab.status), $($tab.notice)"
+    Assert-That ($tab.text.Contains($PlainFirstChapter)) "a book that only hides its fonts shows its text, not: $($tab.text)"
+    Pass 'a book that only hides its fonts is not taken for DRM'
+  } finally {
+    Stop-App $app
+  }
+}
+
+function Test-EpubWithoutIdentifier {
+  Wait-AppGone
+  $book = Copy-Fixture 'no-id.epub'
+  $app = Start-App @("`"$book`"")
+  try {
+    Wait-AppWindow $app | Out-Null
+    $tab = (Wait-Tabs 1 { param($t) $t[0].status -ne 'loading' })[0]
+    Assert-That ($tab.status -eq 'ok' -and $tab.firstPageRendered) "a book without an identifier opens, not: $($tab.status)"
+    $hash = (Get-FileHash $book -Algorithm SHA256).Hash.ToLowerInvariant()
+    Assert-That ($tab.key -eq "sha256:$hash") "a book without an identifier is known by its hash, not $($tab.key)"
+    Pass 'a book without an identifier is known by the hash of its file'
+  } finally {
+    Stop-App $app
+  }
+}
+
+function Set-SavedCfi([string]$Key, [string]$Cfi) {
+  $state = Get-State
+  $position = [pscustomobject]@{ kind = 'epub'; cfi = $Cfi; sentence = 0 }
+  $state.positions | Add-Member -NotePropertyName $Key -NotePropertyValue $position -Force
+  [System.IO.File]::WriteAllText((Get-StateFile), ($state | ConvertTo-Json -Depth 10), (New-Object System.Text.UTF8Encoding $false))
+}
+
+function Test-EpubPosition {
+  Wait-AppGone
+  $book = Copy-Fixture 'plain.epub'
+  Open-ToSavePosition $book
+  $saved = (Get-State).positions.$PlainKey
+  Assert-That ($saved.kind -eq 'epub' -and $saved.cfi.StartsWith('epubcfi(')) "closing the app saves the place in a book, not $($saved | ConvertTo-Json -Compress)"
+  Pass 'closing the app saves the place in a book'
+
+  # Written here so that this part does not depend on Windows letting real keys through.
+  Set-SavedCfi $PlainKey $PlainSecondChapterCfi
+  $app = Start-App @("`"$book`"")
+  try {
+    Wait-AppWindow $app | Out-Null
+    $tab = (Wait-Tabs 1 { param($t) $t[0].status -ne 'loading' })[0]
+    Assert-That ($tab.text.Contains($PlainSecondChapter)) "a book opens at its saved place, not at: $($tab.text)"
+    Pass 'a book opens at its saved place'
+  } finally {
+    Stop-App $app
+  }
+
+  $moved = Join-Path $Work 'spostato'
+  New-Item -ItemType Directory $moved | Out-Null
+  $elsewhere = Join-Path $moved 'un altro nome.epub'
+  Move-Item $book $elsewhere
+  $app = Start-App @("`"$elsewhere`"")
+  try {
+    Wait-AppWindow $app | Out-Null
+    $tab = (Wait-Tabs 1 { param($t) $t[0].status -ne 'loading' })[0]
+    Assert-That ($tab.key -eq $PlainKey) "a moved book keeps its key, not $($tab.key)"
+    Assert-That ($tab.text.Contains($PlainSecondChapter)) "a moved book opens at its saved place, not at: $($tab.text)"
+    Pass 'a book moved and renamed opens at its saved place'
+  } finally {
+    Stop-App $app
+  }
+
+  Set-SavedCfi $PlainKey $NowhereCfi
+  $app = Start-App @("`"$elsewhere`"")
+  try {
+    Wait-AppWindow $app | Out-Null
+    $tab = (Wait-Tabs 1 { param($t) $t[0].status -ne 'loading' })[0]
+    Assert-That ($tab.status -eq 'ok' -and $tab.firstPageRendered) "a saved place that leads nowhere still opens the book, not: $($tab.status), $($tab.notice)"
+    Assert-That ($tab.text.Contains($PlainFirstChapter)) "a saved place that leads nowhere goes to the first page, not: $($tab.text)"
+    Pass 'a saved place that leads nowhere opens the book at its first page'
+  } finally {
+    Stop-App $app
+  }
+}
+
+function Send-Click([IntPtr]$Window) {
+  if ([SmokeInput]::GetForegroundWindow() -ne $Window) { return $false }
+  $box = New-Object SmokeInput+Rect
+  [void][SmokeInput]::GetWindowRect($Window, [ref]$box)
+  $back = [System.Windows.Forms.Cursor]::Position
+  [void][SmokeInput]::SetCursorPos([int](($box.Left + $box.Right) / 2), [int](($box.Top + $box.Bottom) / 2))
+  [SmokeInput]::mouse_event($MOUSEEVENTF_LEFTDOWN, 0, 0, 0, [UIntPtr]::Zero)
+  [SmokeInput]::mouse_event($MOUSEEVENTF_LEFTUP, 0, 0, 0, [UIntPtr]::Zero)
+  Start-Sleep -Milliseconds $SecondProcessMs
+  [System.Windows.Forms.Cursor]::Position = $back
+  $true
+}
+
+# Presses keys and waits for the tabs to say what they should. False: Windows kept the keys away, nothing was checked.
+function Assert-KeysDo([IntPtr]$Window, [byte[]]$Keys, [scriptblock]$Done, [string]$What) {
+  if (-not (Send-Keys $Window ([byte[]]$Keys.Clone()))) { return $false }
+  $limit = (Get-Date).AddSeconds($StateWaitS)
+  while (-not (& $Done (@(Get-Tabs)[0]))) {
+    if ((Get-Date) -gt $limit) { throw "FAIL  $What" }
+    Start-Sleep -Milliseconds $AppPollMs
+  }
+  $true
+}
+
+function Test-EpubKeys {
+  Wait-AppGone
+  $book = Copy-Fixture 'plain.epub'
+  Open-ToSavePosition $book
+  Set-SavedCfi $PlainKey 'epubcfi(/6/2!/4/2/1:0)'
+  $app = Start-App @("`"$book`"")
+  try {
+    $window = Wait-AppWindow $app
+    Wait-Tabs 1 { param($t) $t[0].status -eq 'ok' } | Out-Null
+    [void][SmokeInput]::SetForegroundWindow($window)
+    Start-Sleep -Milliseconds $SecondProcessMs
+    $inSecond = { param($t) $t.text.Contains($PlainSecondChapter) }
+    $inFirst = { param($t) $t.text.Contains($PlainFirstChapter) }
+    if (-not (Assert-KeysDo $window @($VK_RIGHT) $inSecond 'the right arrow turns the page of a book just opened')) {
+      'SKIP  the app is not in front, so the keys in a book were not checked'
+      return
+    }
+    Pass 'the right arrow turns the page of a book just opened'
+
+    # Twice over, because a key pressed in a book only reaches the app through the frame of its section.
+    foreach ($round in 1, 2) {
+      if (-not (Send-Click $window)) { 'SKIP  the app is not in front, so a click in a book was not checked'; return }
+      $tab = @(Get-Tabs)[0]
+      Assert-That ($tab.focused -eq 'foliate-view') "round ${round}: a click puts the focus in the book, not on $($tab.focused)"
+      $bookmarks = @((Get-State).bookmarks).Count
+      Assert-That (Assert-KeysDo $window @($VK_CONTROL, $VK_D) { $true } 'ctrl+d') 'the keys stay with the app'
+      Wait-State { @((Get-State).bookmarks).Count -eq $bookmarks + 1 } "round ${round}: ctrl+d in a book adds a bookmark"
+      Assert-That (Assert-KeysDo $window @($VK_CONTROL, $VK_D) { $true } 'ctrl+d') 'the keys stay with the app'
+      Wait-State { @((Get-State).bookmarks).Count -eq $bookmarks } "round ${round}: ctrl+d again takes the same bookmark away"
+      Assert-That (Assert-KeysDo $window @($VK_CONTROL, $VK_T) { param($t) $t.panel -eq 'toc' } "round ${round}: ctrl+t in a book opens the contents") 'the keys stay with the app'
+      Assert-That (Assert-KeysDo $window @($VK_ESCAPE) { param($t) -not $t.panel } "round ${round}: esc closes the contents") 'the keys stay with the app'
+      Assert-That ((@(Get-Tabs)[0]).focused -eq 'foliate-view') "round ${round}: after a panel the keys go back to the book"
+      $size = (Get-State).options.textSize
+      Assert-That (Assert-KeysDo $window @($VK_CONTROL, $VK_OEM_PLUS) { $true } 'ctrl+plus') 'the keys stay with the app'
+      Wait-State { (Get-State).options.textSize -ne $size } "round ${round}: ctrl+plus in a book changes the text size"
+      $there = if ($round -eq 1) { $inFirst } else { $inSecond }
+      $key = if ($round -eq 1) { $VK_LEFT } else { $VK_RIGHT }
+      Assert-That (Assert-KeysDo $window @($key) $there "round ${round}: an arrow after a click turns the page") 'the keys stay with the app'
+    }
+    Pass 'after a click and after a new section the keys of the app work in a book'
+    $line = (Get-Tabs)[0].position.cfi
+  } finally {
+    Stop-App $app
+  }
+
+  $app = Start-App @("`"$book`"")
+  try {
+    Wait-AppWindow $app | Out-Null
+    $tab = (Wait-Tabs 1 { param($t) $t[0].status -ne 'loading' })[0]
+    Assert-That ($tab.position.cfi -eq $line) "open, turn a page, close, open again: $line, not $($tab.position.cfi)"
+    Assert-That ($tab.text.Contains($PlainSecondChapter)) 'open, turn a page, close, open again: the same section'
+    Pass 'open, turn a page, close, open again: the same point'
+  } finally {
+    Stop-App $app
+  }
+}
+
+function Test-FixedLayoutEpub {
+  Wait-AppGone
+  $book = Copy-Fixture 'fixed.epub'
+  $app = Start-App @("`"$book`"")
+  try {
+    $window = Wait-AppWindow $app
+    $tab = (Wait-Tabs 1 { param($t) $t[0].status -ne 'loading' })[0]
+    Assert-That ($tab.status -eq 'ok' -and $tab.firstPageRendered) "a book of fixed pages opens, not: $($tab.status), $($tab.notice)"
+    Assert-That ($tab.text.Contains($PlainFirstChapter)) "the first fixed page has its text, not: $($tab.text)"
+    Pass 'a book of fixed pages opens'
+    [void][SmokeInput]::SetForegroundWindow($window)
+    Start-Sleep -Milliseconds $SecondProcessMs
+    if (-not (Assert-KeysDo $window @($VK_RIGHT) { param($t) $t.text.Contains($PlainSecondChapter) } 'the right arrow goes to the next fixed page')) {
+      'SKIP  the app is not in front, so the keys in a book of fixed pages were not checked'
+      return
+    }
+    Pass 'the right arrow goes to the next fixed page'
+  } finally {
+    Stop-App $app
+  }
+}
+
 function Test-CorruptState {
   Wait-AppGone
   $broken = '{ this is not the state'
@@ -733,20 +1025,36 @@ New-Item -ItemType Directory $Work | Out-Null
 $StateDir = Join-Path $Work 'state'
 New-Item -ItemType Directory $StateDir | Out-Null
 $env:MOCHIREADER_STATE_DIR = $StateDir
+$AllTests = @(
+  'Test-EmptyStart',
+  'Test-Burst',
+  'Test-RunningApp',
+  'Test-UnreachableFile',
+  'Test-FailedTabRetries',
+  'Test-LargeFile',
+  'Test-BrowserKeysKeepTheSession',
+  'Test-DeletedFile',
+  'Test-Position',
+  'Test-CollapsedSections',
+  'Test-PositionWithImages',
+  'Test-WindowPlacement',
+  'Test-EpubOpens',
+  'Test-EpubScripts',
+  'Test-BrokenEpubs',
+  'Test-EpubObfuscatedFont',
+  'Test-EpubWithoutIdentifier',
+  'Test-EpubPosition',
+  'Test-EpubKeys',
+  'Test-FixedLayoutEpub',
+  'Test-CorruptState'
+)
+foreach ($name in $Only) {
+  if ($AllTests -notcontains $name) { throw "no test named $name" }
+}
 try {
-  Test-EmptyStart
-  Test-Burst
-  Test-RunningApp
-  Test-UnreachableFile
-  Test-FailedTabRetries
-  Test-LargeFile
-  Test-BrowserKeysKeepTheSession
-  Test-DeletedFile
-  Test-Position
-  Test-CollapsedSections
-  Test-PositionWithImages
-  Test-WindowPlacement
-  Test-CorruptState
+  foreach ($test in $AllTests) {
+    if (-not $Only -or $Only -contains $test) { & $test }
+  }
   'smoke: all checks passed'
 } finally {
   Get-AppMainProcesses | Stop-Process -Force -ErrorAction SilentlyContinue

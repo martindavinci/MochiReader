@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Opens the files of the tabs. All the disk work stays off the interface thread and has a time limit.
+use crate::native::sha256;
 use crate::protocol::{file_url, Roots};
 use crate::render::{decode_text, render_markdown, RenderCtx, Rendered};
-use crate::vault::{find_vault, is_document, is_markdown};
+use crate::vault::{find_vault, is_document, is_epub, is_markdown};
 use serde::Serialize;
 use std::fs;
 use std::io;
@@ -11,6 +12,7 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tauri::http::StatusCode;
 
 pub const OPEN_TIMEOUT: Duration = Duration::from_secs(10);
 // A document nested deeply enough to overflow a default thread stack must not take the app down.
@@ -192,22 +194,30 @@ pub fn open_with(
     wait(&spawn_load(path, read), timeout)
 }
 
+/// Runs `job` on its own thread, which a hung drive may keep for a long time, and answers in time anyway.
+fn answer_within<T: Send + 'static>(
+    job: impl FnOnce() -> Result<T, OpenError> + Send + 'static,
+    timeout: Duration,
+) -> Result<T, OpenError> {
+    let (sender, receiver) = mpsc::channel();
+    thread::spawn(move || {
+        let _ = sender.send(job());
+    });
+    match receiver.recv_timeout(timeout) {
+        Ok(answer) => answer,
+        Err(RecvTimeoutError::Timeout) => Err(OpenErrorCode::Timeout.into()),
+        Err(RecvTimeoutError::Disconnected) => Err(OpenErrorCode::Unreadable.into()),
+    }
+}
+
 /// When `path` was last changed, in Unix milliseconds, or the reason no one can say.
 pub fn modified_with(
     path: &str,
     stat: impl FnOnce(&Path) -> io::Result<SystemTime> + Send + 'static,
     timeout: Duration,
 ) -> Result<f64, OpenError> {
-    let (sender, receiver) = mpsc::channel();
     let path = path.to_string();
-    thread::spawn(move || {
-        let _ = sender.send(stat(Path::new(&path)));
-    });
-    match receiver.recv_timeout(timeout) {
-        Ok(answer) => Ok(unix_ms(answer?)),
-        Err(RecvTimeoutError::Timeout) => Err(OpenErrorCode::Timeout.into()),
-        Err(RecvTimeoutError::Disconnected) => Err(OpenErrorCode::Unreadable.into()),
-    }
+    answer_within(move || Ok(unix_ms(stat(Path::new(&path))?)), timeout)
 }
 
 /// The documents of the app: the roots they open, and the file being read before the page asks for it.
@@ -242,6 +252,25 @@ impl Docs {
         }?;
         self.roots.add(&loaded.roots);
         Ok(loaded.doc)
+    }
+
+    /// What a book without an identifier is known by. Only for a book the app has opened.
+    pub fn file_hash(&self, path: &str) -> Result<String, OpenError> {
+        let roots = self.roots.clone();
+        let path = PathBuf::from(path);
+        answer_within(
+            move || {
+                if !is_epub(&path) {
+                    return Err(OpenErrorCode::Unsupported.into());
+                }
+                let real = roots.allows(&path).map_err(|status| match status {
+                    StatusCode::NOT_FOUND => OpenErrorCode::NotFound,
+                    _ => OpenErrorCode::Unreadable,
+                })?;
+                Ok(sha256(fs::File::open(real)?)?)
+            },
+            OPEN_TIMEOUT,
+        )
     }
 }
 
@@ -305,6 +334,68 @@ mod tests {
 
     fn open(path: &Path) -> Result<OpenedDoc, OpenError> {
         open_with(&path.to_string_lossy(), read_file, OPEN_TIMEOUT).map(|loaded| loaded.doc)
+    }
+
+    const ABC_SHA256: &str = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+
+    #[test]
+    fn file_hash_is_the_sha256_of_a_book_already_opened() {
+        let dir = tempfile::tempdir().unwrap();
+        let book = dir.path().join("Un libro è, vale.epub");
+        fs::write(&book, b"abc").unwrap();
+        let path = book.to_string_lossy().into_owned();
+        let docs = Docs::default();
+        docs.open(&path).unwrap();
+        assert_eq!(docs.file_hash(&path), Ok(ABC_SHA256.to_string()));
+    }
+
+    #[test]
+    fn file_hash_refuses_what_no_document_opened() {
+        let dir = tempfile::tempdir().unwrap();
+        let book = dir.path().join("a.epub");
+        fs::write(&book, b"abc").unwrap();
+        let answer = Docs::default().file_hash(&book.to_string_lossy());
+        assert_eq!(answer, Err(OpenErrorCode::Unreadable.into()));
+    }
+
+    #[test]
+    fn file_hash_is_only_for_books() {
+        let dir = tempfile::tempdir().unwrap();
+        let note = dir.path().join("a.md");
+        fs::write(&note, b"abc").unwrap();
+        let path = note.to_string_lossy().into_owned();
+        let docs = Docs::default();
+        docs.open(&path).unwrap();
+        assert_eq!(
+            docs.file_hash(&path),
+            Err(OpenErrorCode::Unsupported.into())
+        );
+    }
+
+    #[test]
+    fn file_hash_of_a_book_gone_since_it_opened_says_so() {
+        let dir = tempfile::tempdir().unwrap();
+        let book = dir.path().join("a.epub");
+        fs::write(&book, b"abc").unwrap();
+        let path = book.to_string_lossy().into_owned();
+        let docs = Docs::default();
+        docs.open(&path).unwrap();
+        fs::remove_file(&book).unwrap();
+        assert_eq!(docs.file_hash(&path), Err(OpenErrorCode::NotFound.into()));
+    }
+
+    #[test]
+    fn a_hash_on_a_hung_drive_times_out() {
+        let started = Instant::now();
+        let answer = answer_within(
+            || {
+                thread::sleep(BLOCKED_FOR);
+                Ok(0)
+            },
+            SHORT_TIMEOUT,
+        );
+        assert_eq!(answer, Err(OpenErrorCode::Timeout.into()));
+        assert!(started.elapsed() < BLOCKED_FOR);
     }
 
     #[test]

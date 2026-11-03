@@ -69,9 +69,9 @@ function zip(entries) {
   return Buffer.concat([...locals, directory, end]);
 }
 
-const xhtml = (title, body) => `<?xml version="1.0" encoding="UTF-8"?>
+const xhtml = (title, body, head = '') => `<?xml version="1.0" encoding="UTF-8"?>
 <html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
-<head><title>${title}</title></head>
+<head><title>${title}</title>${head}</head>
 <body>
 ${body}
 </body>
@@ -99,9 +99,27 @@ const DRM_ENCRYPTION = `<?xml version="1.0" encoding="UTF-8"?>
 </encryption>
 `;
 
-// `identifier` is left out of the metadata altogether when it is null, and
-// `encryption` adds META-INF/encryption.xml with that content.
-function epub({ identifier, title, chapters, encryption }) {
+// Font obfuscation, the one kind of encryption that hides no text: this book must open.
+const FONT_ENCRYPTION = `<?xml version="1.0" encoding="UTF-8"?>
+<encryption xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <EncryptedData xmlns="http://www.w3.org/2001/04/xmlenc#">
+    <EncryptionMethod Algorithm="http://www.idpf.org/2008/embedding"/>
+    <CipherData>
+      <CipherReference URI="OEBPS/font.otf"/>
+    </CipherData>
+  </EncryptedData>
+</encryption>
+`;
+
+// Pages of a set size, one to a screen: a renderer of its own in foliate-js, with no style sheet to set.
+const FIXED_LAYOUT_METADATA = `    <meta property="rendition:layout">pre-paginated</meta>
+    <meta property="rendition:spread">none</meta>
+`;
+const FIXED_LAYOUT_VIEWPORT = '<meta name="viewport" content="width=600, height=800"/>';
+
+// `identifier` is left out of the metadata altogether when it is null, `encryption`
+// adds META-INF/encryption.xml with that content, and `fixedLayout` makes it a book of pages.
+function epub({ identifier, title, chapters, encryption, fixedLayout = false }) {
   const uniqueIdentifier = identifier ? ' unique-identifier="book-id"' : '';
   const identifierElement = identifier
     ? `    <dc:identifier id="book-id">${identifier}</dc:identifier>\n`
@@ -122,7 +140,7 @@ function epub({ identifier, title, chapters, encryption }) {
 ${identifierElement}    <dc:title>${title}</dc:title>
     <dc:language>en</dc:language>
     <meta property="dcterms:modified">2026-11-02T00:00:00Z</meta>
-  </metadata>
+${fixedLayout ? FIXED_LAYOUT_METADATA : ''}  </metadata>
   <manifest>
     <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
 ${manifestItems}
@@ -147,7 +165,7 @@ ${spineItems}
     ['OEBPS/nav.xhtml', nav],
     ...chapters.map(({ title: label, body }, index) => [
       `OEBPS/chapter-${index + 1}.xhtml`,
-      xhtml(label, body),
+      xhtml(label, body, fixedLayout ? FIXED_LAYOUT_VIEWPORT : ''),
     ]),
   ]);
 }
@@ -201,6 +219,18 @@ export const FIXTURES = {
     title: 'DRM Fixture',
     chapters: PROSE_CHAPTERS,
     encryption: DRM_ENCRYPTION,
+  }),
+  'obfuscated-font.epub': epub({
+    identifier: 'urn:uuid:6f1d6a51-3c0e-4e0a-9b52-0d7a3f2c1e05',
+    title: 'Obfuscated Font Fixture',
+    chapters: PROSE_CHAPTERS,
+    encryption: FONT_ENCRYPTION,
+  }),
+  'fixed.epub': epub({
+    identifier: 'urn:uuid:6f1d6a51-3c0e-4e0a-9b52-0d7a3f2c1e04',
+    title: 'Fixed Layout Fixture',
+    chapters: PROSE_CHAPTERS,
+    fixedLayout: true,
   }),
   // A real ZIP signature whose central directory has been cut away.
   'corrupt.epub': plain.subarray(0, Math.floor(plain.length / 2)),

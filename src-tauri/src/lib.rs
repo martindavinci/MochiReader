@@ -34,6 +34,9 @@ const CLOSE_SAVE_DEADLINE: Duration = Duration::from_millis(1500);
 // Only in the smoke build: the state of a test run stays out of the reader's own.
 #[cfg(feature = "smoke")]
 const SMOKE_STATE_DIR: &str = "MOCHIREADER_STATE_DIR";
+// The file that proves a book reached the app. Its presence fails the smoke test.
+#[cfg(feature = "smoke")]
+const SMOKE_CANARY_FILE: &str = "canary";
 const EXTERNAL_SCHEMES: [&str; 3] = ["http", "https", "mailto"];
 const SCHEME_END: char = ':';
 // If the page never reports its first frame, the window still has to appear.
@@ -97,6 +100,11 @@ fn on_close_requested(window: &tauri::Window) {
 #[tauri::command]
 async fn open_document(path: String, app: AppHandle) -> Result<OpenedDoc, OpenError> {
     docs::off_the_workers(move || app.state::<Docs>().open(&path)).await
+}
+
+#[tauri::command]
+async fn file_hash(path: String, app: AppHandle) -> Result<String, OpenError> {
+    docs::off_the_workers(move || app.state::<Docs>().file_hash(&path)).await
 }
 
 /// When the file of a tab last changed. A file that is gone or a drive that does not answer comes back as an error.
@@ -230,6 +238,15 @@ fn smoke_write_dump(out: String, json: String) -> Result<(), String> {
     std::fs::write(out, json).map_err(|error| error.to_string())
 }
 
+/// What the scripts of a test book try to call. The CSP must keep them from ever getting here.
+#[cfg(feature = "smoke")]
+#[tauri::command(async)]
+fn smoke_canary() -> Result<(), String> {
+    let folder = std::env::var_os(SMOKE_STATE_DIR).ok_or("no folder for the canary")?;
+    std::fs::write(Path::new(&folder).join(SMOKE_CANARY_FILE), b"")
+        .map_err(|error| error.to_string())
+}
+
 /// A second process passed on its command line: this one does what it was asked to.
 fn on_second_instance(app: &AppHandle, argv: Vec<String>, cwd: String) {
     let launch = Launch::parse(argv.into_iter().skip(1), Path::new(&cwd));
@@ -338,6 +355,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             open_document,
+            file_hash,
             take_pending_paths,
             open_external,
             first_paint,
@@ -355,6 +373,8 @@ pub fn run() {
             close_ready,
             #[cfg(feature = "smoke")]
             smoke_write_dump,
+            #[cfg(feature = "smoke")]
+            smoke_canary,
         ])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {

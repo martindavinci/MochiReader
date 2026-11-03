@@ -91,6 +91,21 @@ body {
 /* It holds the focus only so that the keys scroll the text. */
 .pane:focus { outline: none; }
 
+/* A book lays out and scrolls its own text, in whatever a message above it leaves of the pane. */
+.pane:has(> foliate-view) {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+foliate-view {
+  display: block;
+  flex: 1;
+  min-height: 0;
+}
+
+.pane:has(> foliate-view) > .file-notice { flex: none; }
+
 #home, .notice {
   max-width: 70ch;
   margin: 0 auto;

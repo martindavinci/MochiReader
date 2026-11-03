@@ -4,6 +4,7 @@ import { resolveKey } from '../core/keys.js';
 import { linkAction } from '../core/links.js';
 import { fileName, isSupported, OPENABLE_EXTENSIONS } from '../core/paths.js';
 import { Tabs } from '../core/tabs.js';
+import { bookStyle } from '../readers/epub-style.js';
 import { openMarkdown } from '../readers/markdown.js';
 import { applyOptions, interfaceLang, nextTextSize, readOptions, renderOptions } from './options.js';
 import { createPanels, createRowGuard, keepFocus, renderBookmarks, renderToc } from './panels.js';
@@ -25,6 +26,9 @@ const STATUS_OK = 'ok';
 const STATUS_ERROR = 'error';
 const STATUS_MISSING = 'missing';
 const CODE_NOT_FOUND = 'not_found';
+const KIND_EPUB = 'epub';
+const KEY_DOWN = 'keydown';
+const DARK_SYSTEM_THEME = '(prefers-color-scheme: dark)';
 // The file may be back by now, so opening it again tries again.
 const RETRIED_STATUSES = [STATUS_ERROR, STATUS_MISSING];
 // Focusable from code and by click, but not one more stop for the Tab key.
@@ -35,7 +39,7 @@ const PANEL_TOC = 'toc';
 const PANEL_OPTIONS = 'options';
 const FORWARD = 1;
 const BACK = -1;
-// The page scrolls the text on its own, as long as the key reaches it.
+// The page scrolls the text of a Markdown file on its own, as long as the key reaches it. A book turns its own pages.
 const PAGE_ACTIONS = new Set(['scroll.page']);
 // What a focused button or list answers to itself, and so must not also act on the text behind it.
 const CONTROLS = 'button, select, input, #panel';
@@ -43,6 +47,7 @@ const CONTROL_KEYS = new Set([' ', '+', '-', 'ArrowLeft', 'ArrowRight', 'ArrowUp
 // A key held down repeats. For these that is still what the reader wants; closing every tab is not.
 const REPEATING_ACTIONS = new Set([
   'tab.next', 'text.bigger', 'text.smaller', 'block.prev', 'block.next', 'section.prev', 'section.next',
+  'page.prev', 'page.next', 'scroll.page',
 ]);
 
 const tabs = new Tabs();
@@ -64,6 +69,7 @@ let shownTabId = null;
 let shownTitle = APP_NAME;
 let toastTimer = null;
 let drawnRecents = null;
+let followingSystemTheme = false;
 
 const twoFrames = () => new Promise((resolve) => {
   requestAnimationFrame(() => requestAnimationFrame(resolve));
@@ -75,9 +81,11 @@ const delay = (ms) => new Promise((resolve) => {
 
 const activeEntry = () => entries.get(tabs.active()?.id) ?? null;
 
-/** The body does not scroll, so the keys only move the text while its pane has the focus. */
+/** The body does not scroll, so the keys only move the text while its pane has the focus, or the frame of its book. */
 function focusText() {
-  activeEntry()?.pane.focus({ preventScroll: true });
+  const entry = activeEntry();
+  if (entry?.reader?.focus) entry.reader.focus();
+  else entry?.pane.focus({ preventScroll: true });
 }
 
 function refresh() {
@@ -200,17 +208,73 @@ function follow(action, pane) {
   else if (action?.type === 'anchor') pane.querySelector(`#${CSS.escape(action.id)}`)?.scrollIntoView();
 }
 
-function mount(doc, entry) {
-  entry.kind = doc.kind;
-  entry.key = doc.key ?? null;
-  entry.title = doc.name;
-  entry.modified = doc.modifiedMs ?? null;
-  entry.restored = false;
-  // The book reader arrives with the EPUB work: until then a book only gets this message.
-  if (doc.kind !== 'markdown') {
-    showNotice(entry, STATUS_ERROR, t('epub.error'));
+const openBooks = () => [...entries.values()].filter(({ kind, reader }) => kind === KIND_EPUB && reader);
+
+const currentBookStyle = () => bookStyle(options, matchMedia(DARK_SYSTEM_THEME).matches);
+
+function styleBooks() {
+  const books = openBooks();
+  if (books.length === 0) return;
+  const css = currentBookStyle();
+  books.forEach(({ reader }) => reader.setStyle(css));
+}
+
+/** A book takes its colours from what is decided here, so it has to hear when Windows changes its mind. */
+function followSystemTheme() {
+  if (followingSystemTheme) return;
+  followingSystemTheme = true;
+  matchMedia(DARK_SYSTEM_THEME).addEventListener('change', styleBooks);
+}
+
+/** A key pressed in a book stays in its frame, so it comes here from the reader. */
+function onBookInput(event) {
+  if (event.type === KEY_DOWN) onKeyDown(event);
+}
+
+async function openBook(doc, id, entry, savedPosition) {
+  // The pane stays empty for as long as the book is not ready to take its place, and only then is the message safe.
+  const slow = setTimeout(() => {
+    if (entry.pane.childElementCount === 0) showNotice(entry, STATUS_LOADING, t('open.loading'));
+  }, SLOW_OPEN_MS);
+  try {
+    const { openEpub } = await import('../readers/epub.js');
+    return await openEpub(doc.fileUrl, entry.pane, {
+      flow: options.epubView,
+      style: currentBookStyle(),
+      hash: () => invoke('file_hash', { path: doc.path }),
+      savedPosition,
+      openExternal: (url) => invoke('open_external', { url }),
+    });
+  } catch (error) {
+    console.warn(error);
+    if (entries.get(id) === entry) showNotice(entry, STATUS_ERROR, t('epub.error'));
+    return null;
+  } finally {
+    clearTimeout(slow);
+  }
+}
+
+/** @param {(key: string) => Promise<object|null>} savedPosition Where the book opens: it opens right there. */
+async function mountBook(doc, id, entry, savedPosition) {
+  const reader = await openBook(doc, id, entry, savedPosition);
+  if (!reader) return;
+  if (entries.get(id) !== entry) {
+    reader.destroy();
     return;
   }
+  entry.reader = reader;
+  entry.key = reader.key;
+  entry.title = reader.title || doc.name;
+  entry.notice = '';
+  reader.onInput(onBookInput);
+  reader.onMove((position) => savePosition(entry, position));
+  entry.status = STATUS_OK;
+  entry.restored = true;
+  followSystemTheme();
+  if (activeEntry() === entry && !panels.current()) focusText();
+}
+
+function mountMarkdown(doc, entry) {
   entry.reader = openMarkdown(doc, entry.pane);
   entry.reader.onInput((event) => {
     const link = event.target.closest('a[href]');
@@ -222,6 +286,16 @@ function mount(doc, entry) {
   entry.status = STATUS_OK;
 }
 
+async function mount(doc, id, entry, savedPosition) {
+  entry.kind = doc.kind;
+  entry.key = doc.key ?? null;
+  entry.title = doc.name;
+  entry.modified = doc.modifiedMs ?? null;
+  entry.restored = false;
+  if (doc.kind === KIND_EPUB) await mountBook(doc, id, entry, savedPosition);
+  else mountMarkdown(doc, entry);
+}
+
 /** Takes the reader of the tab to `position`, if any. From then on its position is worth saving. */
 async function settle(id, entry, position) {
   const { reader } = entry;
@@ -229,8 +303,11 @@ async function settle(id, entry, position) {
   if (entries.get(id) === entry && entry.reader === reader) entry.restored = true;
 }
 
+const savedPositionOf = (key) => invoke('state_get_position', { key });
+
 async function restorePosition(id, entry) {
-  const saved = await invoke('state_get_position', { key: entry.key });
+  if (entry.restored) return;
+  const saved = await savedPositionOf(entry.key);
   if (entries.get(id) === entry) await settle(id, entry, saved);
 }
 
@@ -239,9 +316,10 @@ async function reload(id, entry) {
   if (entries.get(id) !== entry) return;
   const position = entry.reader.position();
   entry.reader.destroy();
-  mount(doc, entry);
+  entry.reader = null;
   setFileNotice(entry, '');
-  await settle(id, entry, position);
+  await mount(doc, id, entry, async () => position);
+  if (entry.reader && !entry.restored) await settle(id, entry, position);
 }
 
 /** Text already open stays readable whatever the disk says. A drive that does not answer says nothing about the file. */
@@ -319,9 +397,9 @@ async function load(id, entry, path) {
   entry.pane.replaceChildren();
   entry.notice = '';
   if (entries.get(id) !== entry) return;
-  mount(doc, entry);
-  if (entry.status === STATUS_OK) {
-    invoke('state_touch_recent', { path: doc.path, kind: doc.kind, title: doc.name });
+  await mount(doc, id, entry, savedPositionOf);
+  if (entries.get(id) === entry && entry.status === STATUS_OK) {
+    invoke('state_touch_recent', { path: doc.path, kind: doc.kind, title: entry.title });
     await restorePosition(id, entry);
   }
 }
@@ -403,6 +481,7 @@ function useOptions(next) {
   options = next;
   applyOptions(options, document.documentElement);
   setLang(interfaceLang(options, navigator.language));
+  styleBooks();
 }
 
 /** The text changes length with its size: each tab stays where it was reading. */
@@ -418,6 +497,7 @@ function changeOption(name, value) {
   if (name === 'textSize') setTextSize(value);
   else useOptions({ ...options, [name]: value });
   invoke('state_set_option', { name, value });
+  if (name === 'epubView') openBooks().forEach(({ reader }) => reader.setFlow(value));
   if (name === 'language') {
     refresh();
     if (!tabs.active()) showRecents();
@@ -504,6 +584,9 @@ const SHORTCUTS = {
   'block.prev': () => activeEntry()?.reader?.moveBlock?.(BACK),
   'section.next': () => activeEntry()?.reader?.moveSection?.(FORWARD),
   'section.prev': () => activeEntry()?.reader?.moveSection?.(BACK),
+  'page.next': () => activeEntry()?.reader?.goRight?.(),
+  'page.prev': () => activeEntry()?.reader?.goLeft?.(),
+  'scroll.page': () => activeEntry()?.reader?.next?.(),
 };
 
 /**
@@ -512,8 +595,9 @@ const SHORTCUTS = {
  */
 function onKeyDown(event) {
   const chord = { key: event.key, ctrl: event.ctrlKey, shift: event.shiftKey, alt: event.altKey };
-  const action = resolveKey(chord, { speaking: false, kind: activeEntry()?.kind ?? '' });
-  if (!action || PAGE_ACTIONS.has(action)) return;
+  const kind = activeEntry()?.kind ?? '';
+  const action = resolveKey(chord, { speaking: false, kind });
+  if (!action || (PAGE_ACTIONS.has(action) && kind !== KIND_EPUB)) return;
   if (!event.ctrlKey && CONTROL_KEYS.has(event.key) && event.target.closest?.(CONTROLS)) return;
   event.preventDefault();
   event.stopPropagation();
@@ -531,15 +615,19 @@ async function measureOpen(path) {
 
 async function dumpTabs(out) {
   const rows = await Promise.all(tabs.all().map(async ({ id, path }) => {
-    const { status, kind, reader, notice } = entries.get(id);
+    const { status, kind, key, title, reader, notice } = entries.get(id);
     const position = reader ? reader.position() : null;
     const roots = reader ? await reader.speechRoots() : [];
     return {
       path,
       kind,
+      key,
+      title,
       status,
       notice,
-      firstPageRendered: status === STATUS_OK,
+      firstPageRendered: status === STATUS_OK && (reader?.pageOnScreen?.() ?? true),
+      panel: panels.current(),
+      focused: document.activeElement?.localName ?? null,
       position,
       screenLine: reader?.screenLine?.() ?? null,
       text: roots.map(({ root }) => root.textContent).join('\n'),
