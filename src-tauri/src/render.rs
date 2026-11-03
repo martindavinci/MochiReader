@@ -19,6 +19,8 @@ const MAX_REPAIR_PASSES: usize = 8;
 const BOM: char = '\u{feff}';
 const BOM_BYTES: &[u8] = b"\xEF\xBB\xBF";
 const FRONT_MATTER_DELIMITER: &str = "---";
+const CRLF: &str = "\r\n";
+const LF: &str = "\n";
 const LANG_KEY: &str = "lang:";
 const YAML_COMMENT: &str = " #";
 // Characters no plain YAML key can start with, and that Markdown blocks often do.
@@ -121,12 +123,16 @@ fn parse_contained<'a, 's>(
     options: &mut Options,
     guard: &mut RawHtmlGuard<'_, '_>,
 ) -> (&'a AstNode<'a>, Cow<'s, str>) {
-    let mut root = parse_document(arena, source, options);
+    let mut source = Cow::Borrowed(source);
+    let mut root = parse_document(arena, &source, options);
+    if root.first_child().is_some_and(front_matter_overruns) {
+        source = Cow::Owned(source.replace(CRLF, LF));
+        root = parse_document(arena, &source, options);
+    }
     if root.first_child().is_some_and(is_false_front_matter) {
         options.extension.front_matter_delimiter = None;
-        root = parse_document(arena, source, options);
+        root = parse_document(arena, &source, options);
     }
-    let mut source = Cow::Borrowed(source);
     for _ in 0..MAX_REPAIR_PASSES {
         let Some(repaired) = repaired_source(root, &source, guard) else {
             break;
@@ -214,6 +220,24 @@ fn front_matter_lang(front_matter: &str) -> Option<String> {
     let value = value.split(YAML_COMMENT).next().unwrap_or(value);
     let value = value.trim().trim_matches(['"', '\'']);
     (!value.is_empty()).then(|| value.to_string())
+}
+
+/// comrak looks through the whole file for a closing line that ends in CRLF, and only then for one
+/// that ends in LF. With mixed line ends it can go past the real closing line to a rule far down the
+/// document, and all the text before that rule is lost. A source with one kind of line end leaves
+/// it no such choice, and has the same line numbers.
+fn front_matter_overruns(node: &AstNode<'_>) -> bool {
+    match &node.data().value {
+        NodeValue::FrontMatter(front_matter) => {
+            front_matter
+                .lines()
+                .skip(1)
+                .filter(|line| *line == FRONT_MATTER_DELIMITER)
+                .count()
+                > 1
+        }
+        _ => false,
+    }
 }
 
 fn is_false_front_matter(node: &AstNode<'_>) -> bool {
@@ -1063,6 +1087,47 @@ mod tests {
             assert!(o.html.contains("Terzo."), "{source:?}: {}", o.html);
             assert!(o.html.contains(kept), "{source:?}: {}", o.html);
         }
+    }
+
+    #[test]
+    fn a_later_crlf_rule_does_not_take_the_text_before_it_as_front_matter() {
+        for (source, rule_line) in [
+            (
+                "---\ndate: 2026-01-01\nlang: it\n---\n\n# Prima parte\n\nTesto che resta.\n\n\
+                 ---\r\n\n# Seconda parte\n",
+                10,
+            ),
+            (
+                "---\r\ndate: 2026-01-01\r\nlang: it\r\n---\n\n# Prima parte\n\nTesto che resta.\n\n\
+                 ---\r\n\n# Seconda parte\n",
+                10,
+            ),
+        ] {
+            let o = r(source);
+            assert!(!o.html.contains("date:"), "{source:?}: {}", o.html);
+            assert!(o.html.contains("Testo che resta."), "{source:?}: {}", o.html);
+            assert!(
+                o.html.contains(&format!("<hr data-sourcepos=\"{rule_line}:")),
+                "{source:?}: {}",
+                o.html
+            );
+            assert_eq!(o.lang.as_deref(), Some("it"), "{source:?}");
+            let got: Vec<_> = o
+                .headings
+                .iter()
+                .map(|h| (h.text.as_str(), h.line))
+                .collect();
+            assert_eq!(got, [("Prima parte", 6), ("Seconda parte", 12)], "{source:?}");
+        }
+    }
+
+    #[test]
+    fn a_rule_in_mixed_line_ends_is_not_front_matter_either() {
+        let o = r("---\n\n# Titolo\n\nPrimo.\n\n---\n\nSecondo.\n\n---\r\n\nTerzo.\n");
+        for kept in ["Primo.", "Secondo.", "Terzo."] {
+            assert!(o.html.contains(kept), "{kept}: {}", o.html);
+        }
+        assert_eq!(o.html.matches("<hr").count(), 3, "{}", o.html);
     }
 
     #[test]
