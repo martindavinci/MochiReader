@@ -34,6 +34,10 @@ globalThis.ResizeObserver = class {
 };
 const layoutChanged = () => [...observers].forEach((observer) => observer.callback([]));
 
+// What covers the top of the pane, as the page says it through `scroll-padding-top`.
+let scrollPaddingTop = 'auto';
+globalThis.getComputedStyle = () => ({ scrollPaddingTop });
+
 function setup({ html = HTML, lang = 'it', headings = HEADINGS, scrollTop = 0 } = {}) {
   const { document } = parseHTML('<!doctype html><html><body><main id="pane"></main></body></html>');
   const host = document.getElementById('pane');
@@ -80,6 +84,18 @@ test('the contents are the headings, each going to its line', () => {
 test('the position is the block at the top of the screen', () => {
   assert.deepEqual(setup({ scrollTop: 0 }).reader.position(), { kind: 'md', line: 1, sentence: 0 });
   assert.deepEqual(setup({ scrollTop: 250 }).reader.position(), { kind: 'md', line: 5, sentence: 0 });
+});
+
+test('with a message over the top of the pane, the block at the top of the screen is the one below it', () => {
+  scrollPaddingTop = '60px';
+  try {
+    const { reader } = setup({ scrollTop: 250 });
+    assert.deepEqual(reader.position(), { kind: 'md', line: 9, sentence: 0 });
+    assert.equal(reader.screenLine(), 9);
+    assert.equal(reader.excerpt(), 'Terzo brano');
+  } finally {
+    scrollPaddingTop = 'auto';
+  }
 });
 
 // goTo puts a block at the top, but the scroll offset is rounded to whole pixels, so it can land a fraction lower.

@@ -8,6 +8,7 @@
   --line: light-dark(#dedbd2, #3b3a36);
   --surface: light-dark(#f0eee8, #2a2a27);
   --link: light-dark(#1f5fa8, #8ab8ec);
+  --file-notice-height: 2.25rem;
 }
 
 :root[data-theme="light"] { color-scheme: light; }
@@ -97,18 +98,28 @@ body {
   color: var(--muted);
 }
 
-/* It stays in sight however far down the text is, and the text below stays readable. */
+/* It stays in sight however far down the text is, and the text below stays readable. One line, whatever the width of
+   the window, because what scrolls to a place in the pane has to know how much of its top this covers. */
 .file-notice {
   position: sticky;
   top: 0;
   z-index: 1;
+  height: var(--file-notice-height);
   margin: 0;
-  padding: 0.4rem 1.5rem;
+  padding: 0 1.5rem;
+  overflow: hidden;
   border-bottom: 1px solid var(--line);
   background: var(--surface);
   color: var(--muted);
   font-size: 14px;
+  line-height: calc(var(--file-notice-height) - 1px);
   text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pane:has(> .file-notice) {
+  scroll-padding-top: var(--file-notice-height);
 }
 
 /* First screen: how to open a file, then the recent ones. */

@@ -2,6 +2,9 @@
 
 const REMOVE_MARK = '×';
 const FIRST_CONTROL = 'button, select';
+const ROW = 'li';
+// Windows takes two clicks this close together for a double click, unless told otherwise.
+const DOUBLE_CLICK_MS = 500;
 
 const elementIn = (host) => (tag, className, text) => {
   const made = host.ownerDocument.createElement(tag);
@@ -38,6 +41,50 @@ export function createPanels(host) {
 }
 
 /**
+ * For a list drawn again over itself, which keeps its scroll. Call it before drawing, and what it returns after.
+ * @param {HTMLElement} host
+ * @param {Element|null} [row] The row the focus belongs to, even one about to leave. By default the one that has it.
+ * @returns {() => void} Puts the focus on the row now in that place, or on the host with no rows left. A row that
+ *   leaves is at the place the pointer is, so nothing has to scroll for this.
+ */
+export function keepFocus(host, row = host.ownerDocument.activeElement?.closest?.(ROW)) {
+  const at = [...host.querySelectorAll(ROW)].indexOf(row);
+  return () => {
+    if (at < 0) return;
+    const rows = host.querySelectorAll(ROW);
+    const target = rows[Math.min(at, rows.length - 1)]?.querySelector(FIRST_CONTROL) ?? host;
+    target.focus({ preventScroll: true });
+  };
+}
+
+/**
+ * Taking a row away puts the next one under the pointer, and nothing brings a removed row back. So the second click
+ * of a double click, on what the first one left there, must not reach anything.
+ * @param {number} [ms] How long clicks stay away once the list has been drawn again.
+ * @returns {{open: <A extends any[]>(action: (...args: A) => *) => (...args: A) => *,
+ *   remove: <A extends any[]>(action: (...args: A) => Promise<*>) => (...args: A) => Promise<void>}} What the controls
+ *   of a list should do: each does nothing while a removal is under way and for `ms` after it.
+ */
+export function createRowGuard(ms = DOUBLE_CLICK_MS) {
+  let settling = false;
+  return {
+    open: (action) => (...args) => (settling ? undefined : action(...args)),
+    remove: (action) => async (...args) => {
+      if (settling) return;
+      settling = true;
+      try {
+        await action(...args);
+        await new Promise((resolve) => {
+          setTimeout(resolve, ms);
+        });
+      } finally {
+        settling = false;
+      }
+    },
+  };
+}
+
+/**
  * @template {{key: string, path: string, title: string}} B
  * @param {B[]} bookmarks
  * @returns {{key: string, path: string, title: string, bookmarks: B[]}[]} One group per document, in order of first
@@ -57,7 +104,7 @@ export function groupBookmarks(bookmarks) {
  * @param {HTMLElement} host
  * @param {object[]} bookmarks As the state keeps them.
  * @param {{labels: {title: string, empty: string, remove: string}, dateOf: (ms: number) => string,
- *   onOpen: (bookmark: object) => void, onRemove: (bookmark: object) => void}} options
+ *   onOpen: (bookmark: object) => void, onRemove: (bookmark: object, row: HTMLElement) => void}} options
  */
 export function renderBookmarks(host, bookmarks, { labels, dateOf, onOpen, onRemove }) {
   const element = elementIn(host);
@@ -72,8 +119,8 @@ export function renderBookmarks(host, bookmarks, { labels, dateOf, onOpen, onRem
     const remove = element('button', 'bookmark-remove', REMOVE_MARK);
     remove.setAttribute('aria-label', labels.remove);
     remove.setAttribute('title', labels.remove);
-    remove.addEventListener('click', () => onRemove(bookmark));
     const row = element('li', 'bookmark');
+    remove.addEventListener('click', () => onRemove(bookmark, row));
     row.append(open, remove);
     return row;
   };

@@ -6,7 +6,7 @@ import { fileName, isSupported, OPENABLE_EXTENSIONS } from '../core/paths.js';
 import { Tabs } from '../core/tabs.js';
 import { openMarkdown } from '../readers/markdown.js';
 import { applyOptions, interfaceLang, nextTextSize, readOptions, renderOptions } from './options.js';
-import { createPanels, renderBookmarks, renderToc } from './panels.js';
+import { createPanels, createRowGuard, keepFocus, renderBookmarks, renderToc } from './panels.js';
 import { renderRecents } from './recents.js';
 import { renderTabBar } from './tabbar.js';
 
@@ -58,6 +58,7 @@ const home = document.getElementById('home');
 const toast = document.getElementById('toast');
 const panelHost = document.getElementById('panel');
 const panels = createPanels(panelHost);
+const rowGuard = createRowGuard();
 let options = readOptions({});
 let shownTabId = null;
 let shownTitle = APP_NAME;
@@ -129,13 +130,15 @@ const recentsLabels = () => ({
   remove: t('recents.remove'),
 });
 
-function drawRecents(recents) {
+function drawRecents(recents, row) {
   drawnRecents = JSON.stringify(recents);
+  const refocus = keepFocus(home, row);
   renderRecents(home, recents, {
     labels: { hint: t('app.noFile'), ...recentsLabels() },
-    onOpen: openPath,
-    onRemove: removeRecent,
+    onOpen: rowGuard.open(openPath),
+    onRemove: rowGuard.remove(removeRecent),
   });
+  refocus();
 }
 
 /** Asks the drives, which can take a while: the list is already on screen, and changes only if the answer differs. */
@@ -144,15 +147,15 @@ async function checkRecents() {
   if (JSON.stringify(recents) !== drawnRecents) drawRecents(recents);
 }
 
-async function showRecents() {
+async function showRecents(row) {
   const { recents } = await invoke('state_get');
-  drawRecents(recents);
+  drawRecents(recents, row);
   checkRecents();
 }
 
-async function removeRecent(path) {
+async function removeRecent(path, row) {
   await invoke('state_remove_recent', { path });
-  await showRecents();
+  await showRecents(row);
 }
 
 function showToast(message) {
@@ -166,15 +169,20 @@ function showToast(message) {
 
 /** A message above text that stays readable. An empty one takes it away. */
 function setFileNotice(entry, message) {
+  if ((entry.fileNotice?.textContent ?? '') === message) return;
   entry.notice = message;
   entry.fileNotice?.remove();
   entry.fileNotice = null;
   if (!message) return;
+  const place = entry.reader?.position();
   entry.fileNotice = document.createElement('p');
   entry.fileNotice.className = 'file-notice';
   entry.fileNotice.setAttribute('role', 'status');
+  entry.fileNotice.setAttribute('title', message);
   entry.fileNotice.textContent = message;
   entry.pane.prepend(entry.fileNotice);
+  // It sticks over the top of the pane, which is where the reader was: the place goes below it.
+  if (place) entry.reader.goTo(place);
 }
 
 function showNotice(entry, status, message) {
@@ -325,24 +333,25 @@ function closePanel() {
   focusText();
 }
 
-async function drawRecentsPanel() {
-  const draw = (recents) => {
+async function drawRecentsPanel(row) {
+  const draw = (recents, leaving) => {
+    const refocus = keepFocus(panelHost, leaving);
     renderRecents(panelHost, recents, {
       labels: recentsLabels(),
-      onOpen: (path) => {
+      onOpen: rowGuard.open((path) => {
         closePanel();
         openPath(path);
-      },
-      onRemove: async (path) => {
+      }),
+      onRemove: rowGuard.remove(async (path, removed) => {
         await removeRecent(path);
-        await showPanel(PANEL_RECENTS);
-      },
+        await drawRecentsPanel(removed);
+      }),
     });
-    panels.focus();
+    refocus();
   };
   const { recents } = await invoke('state_get');
   if (panels.current() !== PANEL_RECENTS) return;
-  draw(recents);
+  draw(recents, row);
   // Asks the drives, which can take a while: the list is already on screen.
   invoke('state_check_recents').then((checked) => {
     if (panels.current() === PANEL_RECENTS && JSON.stringify(checked) !== JSON.stringify(recents)) draw(checked);
@@ -362,18 +371,20 @@ async function openBookmark({ path, position, title }) {
   await entry?.reader?.goTo(position);
 }
 
-async function drawBookmarksPanel() {
+async function drawBookmarksPanel(row) {
   const { bookmarks } = await invoke('state_get');
   if (panels.current() !== PANEL_BOOKMARKS) return;
+  const refocus = keepFocus(panelHost, row);
   renderBookmarks(panelHost, bookmarks, {
     labels: { title: t('bookmarks.title'), empty: t('bookmarks.empty'), remove: t('recents.remove') },
     dateOf: (ms) => new Date(ms).toLocaleDateString(getLang()),
-    onOpen: openBookmark,
-    onRemove: async (bookmark) => {
+    onOpen: rowGuard.open(openBookmark),
+    onRemove: rowGuard.remove(async (bookmark, removed) => {
       await invoke('state_toggle_bookmark', { bookmark });
-      await showPanel(PANEL_BOOKMARKS);
-    },
+      await drawBookmarksPanel(removed);
+    }),
   });
+  refocus();
 }
 
 function drawTocPanel() {
@@ -458,7 +469,7 @@ async function toggleBookmark() {
   };
   const added = await invoke('state_toggle_bookmark', { bookmark });
   showToast(t(added ? 'bookmarks.added' : 'bookmarks.removed'));
-  if (panels.current() === PANEL_BOOKMARKS) await showPanel(PANEL_BOOKMARKS);
+  if (panels.current() === PANEL_BOOKMARKS) await drawBookmarksPanel();
 }
 
 async function pickFiles() {

@@ -8,7 +8,7 @@ const REMOVE_MARK = '×';
  * @param {HTMLElement} host
  * @param {{path: string, title: string, exists: boolean}[]} recents The newest first.
  * @param {{labels: {hint?: string, title: string, empty: string, missing: string, remove: string},
- *   onOpen: (path: string) => void, onRemove: (path: string) => void}} options
+ *   onOpen: (path: string) => void, onRemove: (path: string, row: HTMLElement) => void}} options
  */
 export function renderRecents(host, recents, { labels, onOpen, onRemove }) {
   const document = host.ownerDocument;
@@ -32,7 +32,7 @@ export function renderRecents(host, recents, { labels, onOpen, onRemove }) {
       const remove = element('button', 'recent-remove', REMOVE_MARK);
       remove.setAttribute('aria-label', labels.remove);
       remove.setAttribute('title', labels.remove);
-      remove.addEventListener('click', () => onRemove(path));
+      remove.addEventListener('click', () => onRemove(path, row));
       open.append(element('span', 'recent-missing', labels.missing));
       row.append(remove);
     }

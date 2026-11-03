@@ -96,8 +96,11 @@ export function openMarkdown(doc, host) {
     return found;
   };
 
+  // A message can stick over the top of the pane. What it covers is not on screen, and goTo lands below it.
+  const coveredAtTop = () => parseFloat(getComputedStyle(host).scrollPaddingTop) || 0;
+
   const topBlock = () => {
-    const fold = host.getBoundingClientRect().top + FOLD_MARGIN_PX;
+    const fold = host.getBoundingClientRect().top + coveredAtTop() + FOLD_MARGIN_PX;
     if (!article.classList.contains('large')) return lastAbove(blocks(), fold);
     // Off screen, a part keeps its expected height while its blocks are laid out at their real ones, so only the
     // part at the fold has tops to compare. Raw HTML can fill a part with no block: the last one before it counts.

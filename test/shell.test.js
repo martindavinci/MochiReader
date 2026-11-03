@@ -14,6 +14,8 @@ const APP_CSS = readFileSync(new URL('../app/css/app.css', import.meta.url), 'ut
 
 const CHANGED_AT = 1000;
 const SAVE_WAIT_MS = 600;
+// Past the second click of a double click.
+const DOUBLE_CLICK_OVER_MS = 600;
 
 const keyOf = (path) => `md:${path.toLowerCase()}`;
 
@@ -45,8 +47,16 @@ async function startShell(openDocument, {
 } = {}) {
   const { window, document, HTMLElement } = parseHTML(INDEX_HTML);
   const focused = [];
-  HTMLElement.prototype.focus = function focus() {
+  HTMLElement.prototype.focus = function focus(options) {
     focused.push(this);
+    this.focusedWith = options;
+  };
+  // An emptied list is laid out while the answer comes, and a list with nothing in it has no scroll to keep.
+  const panelHost = document.getElementById('panel');
+  const fillPanel = panelHost.replaceChildren.bind(panelHost);
+  panelHost.replaceChildren = (...nodes) => {
+    if (nodes.length === 0) panelHost.scrollTop = 0;
+    fillPanel(...nodes);
   };
   const scrolled = [];
   HTMLElement.prototype.scrollIntoView = function scrollIntoView() {
@@ -150,6 +160,7 @@ async function startShell(openDocument, {
     document,
     CSS: { escape: (text) => text },
     requestAnimationFrame: (callback) => setTimeout(callback),
+    getComputedStyle: () => ({ scrollPaddingTop: 'auto' }),
     ResizeObserver: class {
       observe() {}
 
@@ -488,6 +499,36 @@ test('a file deleted on disk keeps its text and gets a message, until it comes b
   await shell.focusWindow();
   assert.equal(pane.querySelector('.file-notice'), null);
   assert.deepEqual(shell.calls, [PATH_A]);
+});
+
+test('a message that appears does not cover the point of the reader', async () => {
+  const shell = await startShell(async (path) => longDoc(path), { positions: { [keyOf(PATH_A)]: atLine(5) } });
+  await shell.openPaths([PATH_A]);
+  const before = shell.scrolled.length;
+  shell.state.fileModified = failure('not_found');
+  await shell.focusWindow();
+  assert.equal(shell.scrolled.length, before + 1);
+  assert.equal(shell.scrolled.at(-1).getAttribute('data-sourcepos'), '5:1-5:9');
+
+  await shell.focusWindow();
+  assert.equal(shell.scrolled.length, before + 1, 'the message was already there: nothing moves');
+});
+
+test('the message keeps one line, of a height the scroll of the pane allows for', () => {
+  const notice = /(^|\n)\.file-notice \{[^}]*\}/.exec(APP_CSS)[0];
+  assert.match(notice, /height: var\(--file-notice-height\)/);
+  assert.match(notice, /white-space: nowrap/);
+  assert.match(notice, /text-overflow: ellipsis/);
+  assert.match(APP_CSS, /\.pane:has\(> \.file-notice\) \{\s*scroll-padding-top: var\(--file-notice-height\);/);
+});
+
+test('a message cut by a narrow window can still be read whole', async () => {
+  const shell = await startShell(async (path) => markdownDoc(path, 'Il testo'));
+  await shell.openPaths([PATH_A]);
+  shell.state.fileModified = failure('not_found');
+  await shell.focusWindow();
+  const notice = shell.panes()[0].querySelector('.file-notice');
+  assert.equal(notice.getAttribute('title'), notice.textContent);
 });
 
 test('a drive that does not answer the check changes nothing', async () => {
@@ -848,6 +889,137 @@ test('adding a bookmark with the panel open shows it there', async () => {
   assert.equal(shell.panel().querySelector('.bookmark'), null);
   await shell.press('d', CTRL);
   assert.ok(shell.panel().querySelector('.bookmark'));
+});
+
+test('a bookmark opened just as its file turns out to be gone is not left under the message', async () => {
+  const shell = await startShell(async (path) => longDoc(path), { pending: [PATH_A], bookmarks: [bookmarkOf(PATH_A, 5)] });
+  await shell.settled();
+  await shell.press('b', CTRL);
+  // The answer of the drive takes a turn of the page at least, and the jump to the bookmark does not.
+  let gone;
+  shell.state.fileModified = () => new Promise((resolve, reject) => {
+    gone = () => reject({ code: 'not_found' });
+  });
+  const before = shell.scrolled.length;
+  await shell.click(shell.panel().querySelector('.bookmark-open'));
+  assert.equal(shell.scrolled.length, before + 1);
+  gone();
+  await shell.settled();
+  assert.ok(shell.panes()[0].querySelector('.file-notice'));
+  assert.equal(shell.scrolled.at(-1).getAttribute('data-sourcepos'), '5:1-5:9');
+  assert.equal(shell.scrolled.length, before + 2, 'once to the point, once more when the message came');
+});
+
+const bookmarkLines = (shell) => shell.state.bookmarks.map(({ position }) => position.line);
+const doubleClickOver = () => new Promise((resolve) => {
+  setTimeout(resolve, DOUBLE_CLICK_OVER_MS);
+});
+
+test('taking a bookmark away leaves the list where it was, with the focus on the row now in its place', async () => {
+  const bookmarks = [1, 5, 9].map((line) => bookmarkOf(PATH_A, line));
+  const shell = await startShell(async (path) => longDoc(path), { bookmarks });
+  await shell.press('b', CTRL);
+  const panel = shell.panel();
+  panel.scrollTop = 742;
+  await shell.click(panel.querySelectorAll('.bookmark-remove')[1]);
+  assert.deepEqual(bookmarkLines(shell), [1, 9]);
+  assert.equal(panel.scrollTop, 742);
+  assert.ok(shell.focused.at(-1) === panel.querySelectorAll('.bookmark-open')[1]);
+  assert.deepEqual(shell.focused.at(-1).focusedWith, { preventScroll: true });
+});
+
+test('the second click of a double click takes away nothing else, and a later one does', async () => {
+  const bookmarks = [1, 5, 9].map((line) => bookmarkOf(PATH_A, line));
+  const shell = await startShell(async (path) => longDoc(path), { bookmarks });
+  await shell.press('b', CTRL);
+  const panel = shell.panel();
+  await shell.click(panel.querySelectorAll('.bookmark-remove')[1]);
+  await shell.click(panel.querySelectorAll('.bookmark-remove')[1]);
+  assert.deepEqual(bookmarkLines(shell), [1, 9]);
+
+  await doubleClickOver();
+  await shell.click(panel.querySelectorAll('.bookmark-remove')[1]);
+  assert.deepEqual(bookmarkLines(shell), [1]);
+});
+
+test('the second click of a double click opens no bookmark either', async () => {
+  const bookmarks = [1, 5].map((line) => bookmarkOf(PATH_A, line));
+  const shell = await startShell(async (path) => longDoc(path), { bookmarks });
+  await shell.press('b', CTRL);
+  const panel = shell.panel();
+  await shell.click(panel.querySelector('.bookmark-remove'));
+  await shell.click(panel.querySelector('.bookmark-open'));
+  assert.equal(panel.hidden, false);
+  assert.deepEqual(shell.calls, []);
+});
+
+test('ctrl+d with the panel open leaves the list where it was', async () => {
+  const shell = await startShell(async (path) => markdownDoc(path, 'Testo'), { pending: [PATH_A], bookmarks: [bookmarkOf(PATH_B, 3)] });
+  await shell.settled();
+  await shell.press('b', CTRL);
+  const panel = shell.panel();
+  panel.scrollTop = 300;
+  await shell.press('d', CTRL);
+  assert.equal(panel.querySelectorAll('.bookmark').length, 2);
+  assert.equal(panel.scrollTop, 300);
+});
+
+test('taking a recent away in the panel leaves the list where it was, with the focus on the row now in its place', async () => {
+  const gone = [RECENT_A, RECENT_B].map((recent) => ({ ...recent, exists: false }));
+  const shell = await startShell(async (path) => markdownDoc(path, 'Testo'), { pending: [PATH_A], recents: gone });
+  await shell.settled();
+  await shell.press('r', CTRL);
+  const panel = shell.panel();
+  panel.scrollTop = 484;
+  await shell.click(panel.querySelector('.recent-remove'));
+  assert.deepEqual(shell.state.recents.map(({ path }) => path), [PATH_B]);
+  assert.equal(panel.scrollTop, 484);
+  assert.ok(shell.focused.at(-1) === panel.querySelector('.recent-open'));
+  assert.deepEqual(shell.focused.at(-1).focusedWith, { preventScroll: true });
+});
+
+test('the second click of a double click on a recent opens nothing that moved under it', async () => {
+  const shell = await startShell(async (path) => markdownDoc(path, 'Testo'), {
+    pending: [PATH_A],
+    recents: [{ ...RECENT_A, exists: false }, RECENT_B],
+  });
+  await shell.settled();
+  await shell.press('r', CTRL);
+  const panel = shell.panel();
+  await shell.click(panel.querySelector('.recent-remove'));
+  await shell.click(panel.querySelector('.recent-open'));
+  assert.equal(panel.hidden, false);
+  assert.deepEqual(shell.calls, [PATH_A]);
+});
+
+test('on the first screen too a recent taken away hands on the focus and stops the second click', async () => {
+  const shell = await startShell(failure('not_found'), { recents: [{ ...RECENT_A, exists: false }, RECENT_B] });
+  await shell.settled();
+  const home = shell.document.getElementById('home');
+  await shell.click(home.querySelector('.recent-remove'));
+  assert.deepEqual(shell.state.recents.map(({ path }) => path), [PATH_B]);
+  assert.ok(shell.focused.at(-1) === home.querySelector('.recent-open'));
+  await shell.click(home.querySelector('.recent-open'));
+  assert.deepEqual(shell.calls, []);
+});
+
+test('a late check of the drives moves neither the recents panel nor its focus', async () => {
+  const shell = await startShell(async (path) => markdownDoc(path, 'Testo'), { pending: [PATH_A], recents: [RECENT_A, RECENT_B] });
+  await shell.settled();
+  let answer;
+  shell.state.checked = new Promise((resolve) => {
+    answer = resolve;
+  });
+  await shell.press('r', CTRL);
+  const panel = shell.panel();
+  assert.ok(shell.focused.at(-1) === panel.querySelector('.recent-open'));
+  panel.scrollTop = 300;
+  shell.document.activeElement = panel.querySelectorAll('.recent-open')[1];
+  answer([RECENT_A, { ...RECENT_B, exists: false }]);
+  await shell.settled();
+  assert.ok(panel.querySelector('.recent.missing'));
+  assert.equal(panel.scrollTop, 300);
+  assert.ok(shell.focused.at(-1) === panel.querySelectorAll('.recent-open')[1]);
 });
 
 test('ctrl+r lists the recents over the text, and a click opens one', async () => {
