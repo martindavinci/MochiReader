@@ -43,6 +43,7 @@ test('every fixture of the plan is generated', () => {
     'fixed-spread.epub',
     'fixed.epub',
     'links.epub',
+    'long-chapters.epub',
     'network-html.epub',
     'network.epub',
     'no-id.epub',

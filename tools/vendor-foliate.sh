@@ -30,6 +30,11 @@ readonly FOLIATE_SANDBOX='allow-same-origin allow-scripts'
 readonly LOADER_FILE=epub.js
 readonly LOADED_HREFS='[*|href]:not([href])'
 readonly LOADED_HREFS_NOT_LINKS='[*|href]:not([href]):not(a)'
+# foliate takes the first scroll after a move to a place for the echo of that move. A move that had nothing to scroll has
+# no echo, so the scroll of the reader goes unrecorded, and the place saved stays at the top of the section. An echo ends
+# where the move put the page: anything else is the reader.
+readonly SCROLL_ECHO_FILE=paginator.js
+readonly SCROLL_ECHO_MARK='if (this.#justAnchored) this.#justAnchored = false'
 # foliate-js ships zip.js and fflate minified and without their license texts.
 readonly ZIP_JS_LICENSE_URL="https://raw.githubusercontent.com/gildas-lormeau/zip.js/841affffeaa2bd840f3cb26686142c7eb8ee7cbf/LICENSE"
 readonly FFLATE_LICENSE_URL="https://raw.githubusercontent.com/101arrowz/fflate/dcb3714a6c25db3a2748641019c5277413d09714/LICENSE"
@@ -72,6 +77,17 @@ if ! grep -qF "'${LOADED_HREFS}'" "${source_dir}/${LOADER_FILE}"; then
   exit 1
 fi
 sed -i -e "s/'\[\*|href\]:not(\[href\])'/'${LOADED_HREFS_NOT_LINKS}'/" "${source_dir}/${LOADER_FILE}"
+
+if ! grep -qF "${SCROLL_ECHO_MARK}" "${source_dir}/${SCROLL_ECHO_FILE}"; then
+  echo "foliate-js ${FOLIATE_COMMIT} has no scroll echo to tell apart in ${SCROLL_ECHO_FILE}" >&2
+  exit 1
+fi
+sed -i \
+  -e 's/^\( *\)#justAnchored = false$/&\n\1#anchoredAt = 0/' \
+  -e "s/^\( *\)if (this.#justAnchored) this.#justAnchored = false$/\1const echo = this.#justAnchored \&\& this.start === this.#anchoredAt\n\1this.#justAnchored = false\n\1if (!echo) this.#afterScroll('scroll')/" \
+  -e "/^ *else this.#afterScroll('scroll')$/d" \
+  -e 's/^\( *\)else this.#justAnchored = true$/\1else {\n\1    this.#justAnchored = true\n\1    this.#anchoredAt = this.start\n\1}/' \
+  "${source_dir}/${SCROLL_ECHO_FILE}"
 
 rm -rf "${target}"
 for file in "${KEPT_FILES[@]}"; do

@@ -110,6 +110,7 @@ $DamagedAfterMissing = 'The page after the missing file'
 $DamagedAfterEmpty = 'The page after the empty file'
 # In either language of the interface. Only ASCII, because this script may be read as ANSI.
 $UnreadableSection = 'cannot be read|non si pu'
+$LongKey = 'epub:urn:uuid:6f1d6a51-3c0e-4e0a-9b52-0d7a3f2c1e0d|Long Chapters Fixture|3'
 # What a file holds while a copy or a sync is writing it: the start of a ZIP, with no directory at its end.
 $CutBookBytes = 1000
 $VK_LEFT = 0x25
@@ -1018,6 +1019,59 @@ function Test-EpubDamagedChapters {
   }
 }
 
+# The scrolling view: a scroll after going to a place has to count like any other, or closing loses it.
+function Test-EpubScrollPosition {
+  Wait-AppGone
+  $book = Copy-Fixture 'long-chapters.epub'
+  Open-ToSavePosition $book
+  $state = Get-State
+  $state.options | Add-Member -NotePropertyName 'epubView' -NotePropertyValue 'scrolled' -Force
+  [System.IO.File]::WriteAllText((Get-StateFile), ($state | ConvertTo-Json -Depth 10), (New-Object System.Text.UTF8Encoding $false))
+  $app = Start-App @("`"$book`"")
+  try {
+    $window = Wait-AppWindow $app
+    Wait-Tabs 1 { param($t) $t[0].status -eq 'ok' } | Out-Null
+    [void][SmokeInput]::SetForegroundWindow($window)
+    Start-Sleep -Milliseconds $SecondProcessMs
+    if (-not (Assert-KeysDo $window @($VK_CONTROL, $VK_RIGHT) { param($t) $t.position.cfi.StartsWith('epubcfi(/6/4!') -and $t.text.Contains('Chapter Two') } 'ctrl+right goes to the next section')) {
+      'SKIP  the app is not in front, so a scroll in a book was not checked'
+      return
+    }
+    Start-Sleep -Milliseconds $SaveSettleMs
+    $top = (Get-Tabs)[0].position.cfi
+    # One press: the first gesture is the one that went missing, and a later one spaced from it would have hidden that.
+    Assert-That (Send-Keys $window ([byte[]]@($VK_NEXT))) 'the keys stay with the app'
+    Start-Sleep -Milliseconds ($SaveSettleMs * 2)
+    $scrolled = (Get-Tabs)[0].position.cfi
+    Assert-That ($scrolled -ne $top -and $scrolled.StartsWith('epubcfi(/6/4!')) "the first scroll after going to a section counts: $top, then $scrolled"
+    Wait-State { (Get-State).positions.$LongKey.cfi -eq $scrolled } "a scroll in a book is saved after it ends, $scrolled"
+    Pass 'the first scroll after going to a section is saved'
+    Assert-That (Assert-KeysDo $window @($VK_CONTROL, $VK_OEM_PLUS) { $true } 'ctrl+plus') 'the keys stay with the app'
+    Start-Sleep -Milliseconds $SaveSettleMs
+    $grown = (Get-Tabs)[0].position.cfi
+    Assert-That ($grown -ne $top) "a change of size after a scroll stays there, it does not go back to the top of the section: $grown"
+    Pass 'a change of size after that scroll keeps the place'
+    Assert-That (Send-Keys $window ([byte[]]@($VK_NEXT))) 'the keys stay with the app'
+    Start-Sleep -Milliseconds ($SaveSettleMs * 2)
+    $line = (Get-Tabs)[0].position.cfi
+    Assert-That ($line -ne $grown) "the next scroll counts too: $grown, then $line"
+  } finally {
+    Stop-App $app
+  }
+  $saved = (Get-State).positions.$LongKey.cfi
+  Assert-That ($saved -eq $line) "closing keeps the last place, $line, not $saved"
+
+  $app = Start-App @("`"$book`"")
+  try {
+    Wait-AppWindow $app | Out-Null
+    $tab = (Wait-Tabs 1 { param($t) $t[0].status -ne 'loading' })[0]
+    Assert-That ($tab.position.cfi -ne $top -and $tab.position.cfi.StartsWith('epubcfi(/6/4!')) "a book reopens at the scroll, not at the top of the section: $($tab.position.cfi)"
+    Pass 'scroll, close, open again: the same place, not the top of the section'
+  } finally {
+    Stop-App $app
+  }
+}
+
 function Test-EpubObfuscatedFont {
   Wait-AppGone
   $book = Copy-Fixture 'obfuscated-font.epub'
@@ -1345,6 +1399,7 @@ $AllTests = @(
   'Test-EpubLinks',
   'Test-BrokenEpubs',
   'Test-EpubDamagedChapters',
+  'Test-EpubScrollPosition',
   'Test-EpubObfuscatedFont',
   'Test-EpubWithoutIdentifier',
   'Test-EpubPosition',

@@ -876,6 +876,15 @@ test('foliate is told not to load the target of an SVG link as a resource of the
   assert.ok(script.includes(':not(a)'));
 });
 
+test('foliate tells a scroll of the reader from the echo of its own move by where the page is', () => {
+  const source = read('app/vendor/foliate/paginator.js');
+  assert.ok(source.includes('this.#justAnchored && this.start === this.#anchoredAt'));
+  assert.ok(!source.includes('if (this.#justAnchored) this.#justAnchored = false'));
+  const script = read('tools/vendor-foliate.sh');
+  assert.ok(script.includes('this.#anchoredAt'));
+  assert.ok(script.includes('SCROLL_ECHO_FILE=paginator.js'));
+});
+
 test('no section of an open book can fail to load, whatever its file holds', async (t) => {
   t.after(stubFetch(okFile()));
   const message = 'Cannot be read';

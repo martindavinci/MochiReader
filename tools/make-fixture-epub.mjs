@@ -305,6 +305,16 @@ const DAMAGED_CHAPTERS = [
   { title: 'After The Empty One', body: '<p>The page after the empty file.</p>' },
 ];
 
+// Long enough to scroll several screens in the scrolling view.
+const LONG_CHAPTER_PARAGRAPHS = 200;
+const longChapter = (title) => ({
+  title,
+  body: Array.from(
+    { length: LONG_CHAPTER_PARAGRAPHS },
+    (_, index) => `<p>Paragraph ${index + 1} of ${title}, long enough to take a line and a little more of the column.</p>`,
+  ).join('\n'),
+});
+
 const plain = epub({
   identifier: 'urn:uuid:6f1d6a51-3c0e-4e0a-9b52-0d7a3f2c1e01',
   title: 'Plain Fixture',
@@ -373,6 +383,11 @@ export const FIXTURES = {
     identifier: 'urn:uuid:6f1d6a51-3c0e-4e0a-9b52-0d7a3f2c1e0c',
     title: 'Damaged Chapters Fixture',
     chapters: DAMAGED_CHAPTERS,
+  }),
+  'long-chapters.epub': epub({
+    identifier: 'urn:uuid:6f1d6a51-3c0e-4e0a-9b52-0d7a3f2c1e0d',
+    title: 'Long Chapters Fixture',
+    chapters: [longChapter('Chapter One'), longChapter('Chapter Two'), longChapter('Chapter Three')],
   }),
   // A real ZIP signature whose central directory has been cut away.
   'corrupt.epub': plain.subarray(0, Math.floor(plain.length / 2)),
