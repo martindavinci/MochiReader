@@ -982,7 +982,7 @@ mod tests {
     #[test]
     fn only_the_document_links_the_app_resolved_stay() {
         let dir = tree(&["altra.md"]);
-        let forged = base64url(br"\192.0.2.1\share\a.md");
+        let forged = base64url(br"\\192.0.2.1\share\a.md");
         let resolved = doc_link(dir.path().join("altra.md"));
         for source in [
             format!("[a](altra.md) [b](mochi-doc:{forged})\n"),
