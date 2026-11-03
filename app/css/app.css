@@ -252,6 +252,10 @@ foliate-view {
 
 .option { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin: 0.5rem 0; }
 .option select { flex: none; max-width: 50%; font: inherit; }
+.about { margin-top: 1rem; padding-top: 0.75rem; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; }
+.about p { margin: 0 0 0.5rem; }
+.about button { font: inherit; }
+.licenses-text { margin: 0; color: var(--fg); font-family: ui-monospace, Consolas, monospace; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
 
 #toast {
   position: fixed;

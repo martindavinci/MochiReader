@@ -103,6 +103,7 @@ async function startShell(openDocument, {
       return { recents: state.recents, bookmarks: state.bookmarks };
     },
     state_get_options: () => state.options,
+    licenses_text: () => 'the license text',
     state_set_option: ({ name, value }) => {
       state.optionWrites.push([name, value]);
       state.options[name] = value;
@@ -785,6 +786,27 @@ test('escape closes a panel and gives the focus back to the text', async () => {
   assert.equal(shell.panel().hidden, true);
   assert.equal(shell.panel().children.length, 0);
   assert.ok(shell.focused.at(-1) === shell.panes()[0]);
+});
+
+test('the options lead to the licenses, read from the app, and escape closes them', async () => {
+  const shell = await startShell(async (path) => headedDoc(path), { pending: [PATH_A] });
+  await shell.settled();
+  await shell.press(',', CTRL);
+  shell.panel().querySelector('.about button').dispatchEvent(new shell.window.Event('click'));
+  await shell.settled();
+  assert.equal(shell.panel().querySelector('pre').textContent, 'the license text');
+  assert.equal(shell.panel().querySelector('select'), null);
+  assert.ok(shell.focused.at(-1) === shell.panel(), 'the keys scroll the text of the panel');
+  await shell.press('Escape');
+  assert.equal(shell.panel().hidden, true);
+});
+
+test('a test can open a panel without the keys, which reach only a window in front', async () => {
+  const shell = await startShell(async (path) => headedDoc(path), { pending: [PATH_A] });
+  await shell.settled();
+  await shell.emit('shell-command', { action: 'show-panel', panel: 'licenses' });
+  await shell.settled();
+  assert.equal(shell.panel().querySelector('pre').textContent, 'the license text');
 });
 
 test('the same shortcut closes its panel and another one replaces it', async () => {

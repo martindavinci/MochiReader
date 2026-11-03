@@ -48,6 +48,10 @@ export default {
   'options.epubScrolled': 'Continuous scrolling',
   'options.language': 'Language',
 
+  'about.notice': 'MochiReader is free software under the GNU General Public License, version 3 or later: you may copy, change and share it under that license. It comes with no warranty.',
+  'about.licenses': 'Licenses and source code',
+  'licenses.title': 'Licenses and source code',
+
   'speech.readFromHere': 'Read from here',
   'speech.follow': 'Follow',
   'speech.reading': 'Reading {name}',

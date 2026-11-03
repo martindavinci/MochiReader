@@ -17,6 +17,10 @@ test('the app has its name, identifier and bundle', () => {
   assert.equal(conf.app.withGlobalTauri, true);
 });
 
+test('the installer puts the licenses on disk, where they can be read without the app', () => {
+  assert.deepEqual(conf.bundle.resources, { '../app/licenses.txt': 'licenses.txt' });
+});
+
 test('the CSP blocks everything the app does not use', () => {
   assert.equal(
     conf.app.security.csp,

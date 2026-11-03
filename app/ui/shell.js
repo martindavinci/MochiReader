@@ -7,7 +7,7 @@ import { Tabs } from '../core/tabs.js';
 import { bookStyle } from '../readers/epub-style.js';
 import { openMarkdown } from '../readers/markdown.js';
 import { applyOptions, interfaceLang, nextTextSize, readOptions, renderOptions } from './options.js';
-import { createClickShield, createPanels, createRowGuard, keepFocus, renderBookmarks, renderToc } from './panels.js';
+import { createClickShield, createPanels, createRowGuard, keepFocus, renderBookmarks, renderLicenses, renderToc } from './panels.js';
 import { renderRecents } from './recents.js';
 import { renderTabBar } from './tabbar.js';
 
@@ -37,6 +37,7 @@ const PANEL_RECENTS = 'recents';
 const PANEL_BOOKMARKS = 'bookmarks';
 const PANEL_TOC = 'toc';
 const PANEL_OPTIONS = 'options';
+const PANEL_LICENSES = 'licenses';
 const FORWARD = 1;
 const BACK = -1;
 // The page scrolls the text of a Markdown file on its own, as long as the key reaches it. A book turns its own pages.
@@ -574,7 +575,13 @@ function changeOption(name, value) {
 }
 
 function drawOptionsPanel() {
-  renderOptions(panelHost, options, { onChange: changeOption });
+  renderOptions(panelHost, options, { onChange: changeOption, onLicenses: () => showPanel(PANEL_LICENSES) });
+}
+
+async function drawLicensesPanel() {
+  const text = await invoke('licenses_text');
+  if (panels.current() !== PANEL_LICENSES) return;
+  renderLicenses(panelHost, text, { title: t('licenses.title') });
 }
 
 function stepTextSize(delta) {
@@ -587,6 +594,7 @@ const PANELS = {
   [PANEL_BOOKMARKS]: drawBookmarksPanel,
   [PANEL_TOC]: drawTocPanel,
   [PANEL_OPTIONS]: drawOptionsPanel,
+  [PANEL_LICENSES]: drawLicensesPanel,
 };
 
 async function showPanel(name) {
@@ -692,6 +700,7 @@ async function dumpTabs(out) {
       notice,
       firstPageRendered: status === STATUS_OK && (reader?.pageOnScreen?.() ?? true),
       panel: panels.current(),
+      licensesText: panels.current() === PANEL_LICENSES ? panelHost.textContent : null,
       focused: document.activeElement?.localName ?? null,
       position,
       screenLine: reader?.screenLine?.() ?? null,
@@ -701,9 +710,10 @@ async function dumpTabs(out) {
   await invoke('smoke_write_dump', { out, json: JSON.stringify(rows) });
 }
 
-function onShellCommand({ action, path, out }) {
+function onShellCommand({ action, path, out, panel }) {
   if (action === 'measure-open') measureOpen(path);
   else if (action === 'dump-tabs') dumpTabs(out);
+  else if (action === 'show-panel') showPanel(panel);
 }
 
 function onWindowFocus({ payload: focused }) {

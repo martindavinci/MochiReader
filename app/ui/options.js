@@ -5,6 +5,9 @@ const THEME_ATTRIBUTE = 'data-theme';
 const TEXT_SIZE_VARIABLE = '--text-size';
 const SYSTEM = 'system';
 
+/** Not translated: it is the same notice as the one at the top of `licenses.txt`. */
+export const COPYRIGHT_NOTICE = 'Copyright (C) 2026 Martin DaVinci';
+
 /** Text sizes in pixels: `Ctrl +` and `Ctrl −` go along this list, and the options offer it. */
 export const TEXT_SIZES = [13, 14, 15, 16, 17, 18, 20, 22, 24, 26, 28, 32];
 
@@ -88,9 +91,9 @@ export function interfaceLang({ language }, systemLang) {
 /**
  * @param {HTMLElement} host
  * @param {Record<string, *>} options
- * @param {{onChange: (name: string, value: *) => void}} handlers
+ * @param {{onChange: (name: string, value: *) => void, onLicenses: () => void}} handlers
  */
-export function renderOptions(host, options, { onChange }) {
+export function renderOptions(host, options, { onChange, onLicenses }) {
   const document = host.ownerDocument;
 
   const field = ({ name, label, choices }) => {
@@ -114,8 +117,24 @@ export function renderOptions(host, options, { onChange }) {
     return row;
   };
 
+  // The notices GPL-3.0 asks of a program with an interface, and the way to the license.
+  const about = () => {
+    const paragraph = (text) => {
+      const made = document.createElement('p');
+      made.textContent = text;
+      return made;
+    };
+    const licenses = document.createElement('button');
+    licenses.textContent = t('about.licenses');
+    licenses.addEventListener('click', () => onLicenses());
+    const section = document.createElement('section');
+    section.className = 'about';
+    section.append(paragraph(COPYRIGHT_NOTICE), paragraph(t('about.notice')), licenses);
+    return section;
+  };
+
   const title = document.createElement('h1');
   title.className = 'panel-title';
   title.textContent = t('options.title');
-  host.replaceChildren(title, ...FIELDS.map(field));
+  host.replaceChildren(title, ...FIELDS.map(field), about());
 }

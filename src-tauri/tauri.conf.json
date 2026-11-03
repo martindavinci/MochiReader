@@ -24,6 +24,7 @@
   "bundle": {
     "active": true,
     "targets": ["nsis"],
-    "icon": ["icons/icon.ico"]
+    "icon": ["icons/icon.ico"],
+    "resources": { "../app/licenses.txt": "licenses.txt" }
   }
 }

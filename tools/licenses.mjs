@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Lists the licenses of everything MochiReader distributes.
+// Lists the licenses of everything MochiReader distributes: the program itself, what
+// is linked into it, and the installer that carries it.
 //   node tools/licenses.mjs           writes app/licenses.txt
 //   node tools/licenses.mjs --check   only checks, and fails if app/licenses.txt is
 //                                     missing or is not what the first form would write
@@ -9,11 +10,17 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { COPYRIGHT_NOTICE } from '../app/ui/options.js';
 import { isEntryPoint } from './is-entry-point.mjs';
 
+export { COPYRIGHT_NOTICE };
 export const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+export const SOURCE_REPOSITORY = 'https://github.com/martindavinci/MochiReader';
+export const NSIS_SOURCE =
+  'https://sourceforge.net/projects/nsis/files/NSIS%203/3.13/nsis-3.13-src.tar.bz2';
 
 const OUTPUT_FILE = join(REPO_ROOT, 'app', 'licenses.txt');
+const PROGRAM_LICENSE_FILE = 'LICENSE';
 const CARGO_MANIFEST = join(REPO_ROOT, 'src-tauri', 'Cargo.toml');
 const TARGET_PLATFORM = 'x86_64-pc-windows-msvc';
 const CARGO_OUTPUT_LIMIT_BYTES = 256 * 1024 * 1024;
@@ -21,16 +28,45 @@ const LICENSE_FILE_NAME = /^(licen[cs]e|copying|notice|unlicense)/i;
 const NORMAL_DEPENDENCY = null;
 const CRATES_IO_SOURCE = 'registry+https://github.com/rust-lang/crates.io-index';
 const MPL_LICENSE = /\bMPL-2\.0\b/;
+const RULE_WIDTH = 72;
+const SECTION_BREAK = `\n\n${'='.repeat(RULE_WIDTH)}\n\n`;
 const MPL_SOURCE_NOTICE = `\
 These components are used as published, without changes. As section 3.2 of
 MPL-2.0 asks, their source code is available: below each one are the published
 package of that version and, when it declares one, its project repository.`;
+// What GPL-3.0 section 4 and the "how to apply these terms" of the license ask for.
+const PROGRAM_NOTICE = `\
+MochiReader
+${COPYRIGHT_NOTICE}
 
-// What cargo metadata cannot see: the files under app/vendor/, and the Microsoft
-// loader that webview2-com-sys links statically into the program. That crate holds
-// x64/WebView2LoaderStatic.lib from the Microsoft.Web.WebView2 package at this
-// version, byte for byte, and the license is LICENSE.txt of that package. Move the
-// version when webview2-com-sys moves.
+MochiReader is free software: you can redistribute it and/or modify it under the
+terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later version.
+
+MochiReader is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE. See the GNU General Public License below for more details.
+
+The source code of MochiReader: ${SOURCE_REPOSITORY}`;
+// CPL-1.0, section 3, asks a distributor of its object code to say where the source is.
+const INSTALLER_NOTICE = `\
+The installer
+${'-'.repeat(RULE_WIDTH)}
+The installer of MochiReader is a separate program that carries it as data. It is
+built with NSIS, whose LZMA compression module is under the Common Public License
+1.0, with the special exception quoted at the end of the NSIS license below.
+The source code of NSIS: ${NSIS_SOURCE}`;
+
+// What cargo metadata cannot see: the files under app/vendor/, the Microsoft loader
+// that webview2-com-sys links statically into the program, and the Rust standard
+// library, linked statically too.
+// webview2-com-sys holds x64/WebView2LoaderStatic.lib from the Microsoft.Web.WebView2
+// package at this version, byte for byte, and the license is LICENSE.txt of that
+// package. Move the version when webview2-com-sys moves.
+// The notices of the standard library come from share/doc/rust/ of the toolchain, for
+// the crates in its rustlib/x86_64-pc-windows-msvc/lib that a program links. A test
+// holds the version to the one the workflows compile with: take the text again when
+// that moves.
 export const VENDORED = [
   {
     name: 'foliate-js',
@@ -55,6 +91,39 @@ export const VENDORED = [
     version: '1.0.3800.47',
     license: 'BSD-3-Clause',
     licenseFile: 'tools/vendored-licenses/webview2-sdk-LICENSE',
+  },
+  {
+    name: 'Rust standard library',
+    version: '1.99.1',
+    license: '(Apache-2.0 OR MIT) AND Unicode-3.0',
+    licenseFile: 'tools/vendored-licenses/rust-std-LICENSE',
+  },
+];
+
+// What `cargo tauri build` puts around the program in the *-setup.exe that release.yml
+// publishes, and no metadata lists: the NSIS stub, LZMA module and plug-ins, the
+// plug-in of Tauri, and the script Tauri writes for them. tauri-cli picks these
+// versions: a test holds this one to release.yml, and when that moves, read them again
+// in tauri-bundler, src/bundle/windows/nsis/mod.rs.
+export const INSTALLER_TAURI_CLI = '2.12.3';
+export const INSTALLER = [
+  {
+    name: 'NSIS installer runtime',
+    version: '3.13',
+    license: 'Zlib AND CPL-1.0',
+    licenseFile: 'tools/vendored-licenses/nsis-COPYING',
+  },
+  {
+    name: 'nsis-tauri-utils',
+    version: '0.5.3',
+    license: 'MIT OR Apache-2.0',
+    licenseFile: 'tools/vendored-licenses/nsis-tauri-utils-LICENSE',
+  },
+  {
+    name: 'Tauri installer template',
+    version: '2.10.3',
+    license: 'MIT OR Apache-2.0',
+    licenseFile: 'tools/vendored-licenses/tauri-bundler-LICENSE',
   },
 ];
 
@@ -96,10 +165,14 @@ const ALLOWED_LICENSES = new Set([
   'Zlib',
 ]);
 const ALLOWED_EXCEPTIONS = new Set(['LLVM-exception']);
+// CPL-1.0 cannot join a GPL work, so nothing linked into the program may use it. The
+// installer is not that work: GPL-3.0 section 5 calls a program carried next to
+// independent ones an aggregate, and the LZMA module has an exception for what binds to it.
+const INSTALLER_LICENSES = new Set([...ALLOWED_LICENSES, 'CPL-1.0']);
 
 // Evaluates an SPDX expression. `/` is the old cargo spelling of OR. Malformed
 // expressions throw, and the caller treats them as refused.
-function expressionIsAllowed(expression) {
+function expressionIsAllowed(expression, licenses) {
   const tokens = expression.match(/[()/]|[^\s()/]+/g) ?? [];
   let position = 0;
   const peek = () => tokens[position]?.toUpperCase();
@@ -114,9 +187,9 @@ function expressionIsAllowed(expression) {
       if (tokens[position++] !== ')') throw new Error('expected a closing parenthesis');
       return inner;
     }
-    if (peek() !== 'WITH') return ALLOWED_LICENSES.has(token);
+    if (peek() !== 'WITH') return licenses.has(token);
     position++;
-    return ALLOWED_LICENSES.has(token) && ALLOWED_EXCEPTIONS.has(tokens[position++]);
+    return licenses.has(token) && ALLOWED_EXCEPTIONS.has(tokens[position++]);
   };
   const parseAnd = () => {
     let allowed = parseAtom();
@@ -140,22 +213,30 @@ function expressionIsAllowed(expression) {
   return allowed;
 }
 
-function licenseIsAllowed(license) {
+function licenseIsAllowed(license, licenses) {
   // An AGPL dependency is an error even when offered as one choice among others.
   if (typeof license !== 'string' || /agpl/i.test(license)) return false;
   try {
-    return expressionIsAllowed(license);
+    return expressionIsAllowed(license, licenses);
   } catch {
     return false;
   }
 }
 
-export function checkLicenses(components) {
-  const refused = components.filter(({ license }) => !licenseIsAllowed(license));
+function refuseLicenses(components, licenses) {
+  const refused = components.filter(({ license }) => !licenseIsAllowed(license, licenses));
   if (refused.length > 0) {
     const lines = refused.map(({ name, license }) => `  ${name}: ${license ?? 'no license'}`);
     throw new Error(`AGPL or unknown licenses:\n${lines.join('\n')}`);
   }
+}
+
+export function checkLicenses(components) {
+  refuseLicenses(components, ALLOWED_LICENSES);
+}
+
+export function checkInstallerLicenses(components) {
+  refuseLicenses(components, INSTALLER_LICENSES);
 }
 
 // The file is compared byte for byte on other machines, so its order cannot follow
@@ -186,8 +267,6 @@ export function distributedCrates(metadata) {
 
 const toLf = (text) => text.replace(/\r\n/g, '\n');
 const normalizeText = (text) => toLf(text).trim();
-
-const RULE_WIDTH = 72;
 
 // A declared license is not enough: MIT and BSD, for two, require their text and
 // the copyright notice to ship with the program.
@@ -245,7 +324,7 @@ export function renderLicenses(components) {
   const sections = ordered.map(
     ({ names, body }) => `${names.join('\n')}\n${'-'.repeat(RULE_WIDTH)}\n${body}`,
   );
-  return `${[...notice, ...sections].join(`\n\n${'='.repeat(RULE_WIDTH)}\n\n`)}\n`;
+  return `${[...notice, ...sections].join(SECTION_BREAK)}\n`;
 }
 
 // Git may hand out the file with CRLF line ends, which change nothing in it.
@@ -286,17 +365,24 @@ export function crateLicenseTexts(crate) {
   return texts.length === 0 && tracked ? [readFileSync(join(REPO_ROOT, tracked), 'utf8')] : texts;
 }
 
+const withTrackedText = (component) => ({
+  ...component,
+  texts: [readFileSync(join(REPO_ROOT, component.licenseFile), 'utf8')],
+});
+
 export function runLicenses(args, crates, outputFile = OUTPUT_FILE) {
   checkLicenses([...VENDORED, ...crates]);
+  checkInstallerLicenses(INSTALLER);
 
   const components = [
-    ...VENDORED.map((component) => ({
-      ...component,
-      texts: [readFileSync(join(REPO_ROOT, component.licenseFile), 'utf8')],
-    })),
+    ...VENDORED.map(withTrackedText),
+    ...INSTALLER.map(withTrackedText),
     ...crates.map((crate) => ({ ...crate, texts: crateLicenseTexts(crate) })),
   ];
-  const text = renderLicenses(components);
+  const programLicense = normalizeText(readFileSync(join(REPO_ROOT, PROGRAM_LICENSE_FILE), 'utf8'));
+  const text = [PROGRAM_NOTICE, programLicense, INSTALLER_NOTICE, renderLicenses(components)].join(
+    SECTION_BREAK,
+  );
   if (args.includes('--check')) checkLicensesFile(text, outputFile);
   else writeFileSync(outputFile, text);
 }

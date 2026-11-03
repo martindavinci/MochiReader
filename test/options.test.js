@@ -7,6 +7,7 @@ import en from '../app/lang/en.js';
 import it from '../app/lang/it.js';
 import {
   applyOptions,
+  COPYRIGHT_NOTICE,
   DEFAULT_OPTIONS,
   interfaceLang,
   nextTextSize,
@@ -23,7 +24,13 @@ function page() {
 function draw(options = DEFAULT_OPTIONS) {
   const { host, Event } = page();
   const changes = [];
-  renderOptions(host, options, { onChange: (name, value) => changes.push([name, value]) });
+  let asked = 0;
+  renderOptions(host, options, {
+    onChange: (name, value) => changes.push([name, value]),
+    onLicenses: () => {
+      asked += 1;
+    },
+  });
   const field = (name) => host.querySelector(`select[name="${name}"]`);
   const choose = (name, value) => {
     const select = field(name);
@@ -31,7 +38,8 @@ function draw(options = DEFAULT_OPTIONS) {
     select.querySelectorAll('option').forEach((option) => option.toggleAttribute('selected', option.getAttribute('value') === value));
     select.dispatchEvent(new Event('change'));
   };
-  return { host, field, choose, changes };
+  const click = (element) => element.dispatchEvent(new Event('click'));
+  return { host, field, choose, changes, click, licensesAsked: () => asked };
 }
 
 const selected = (select) => select.querySelector('option[selected]').getAttribute('value');
@@ -102,6 +110,26 @@ test('the panel offers what the plan lists, in order, each showing its current v
   assert.deepEqual(values(field('sourceMode')), ['skip', 'name']);
   assert.deepEqual(values(field('epubView')), ['paginated', 'scrolled']);
   assert.deepEqual(values(field('language')), ['system', 'it', 'en']);
+});
+
+test('the panel gives the notices of the license and a way to read it', () => {
+  setLang('en');
+  const { host, click, licensesAsked } = draw();
+  const about = host.querySelector('.about');
+  assert.ok(about.textContent.includes(COPYRIGHT_NOTICE));
+  assert.ok(about.textContent.includes(en['about.notice']));
+  const button = about.querySelector('button');
+  assert.equal(button.textContent, en['about.licenses']);
+  assert.equal(licensesAsked(), 0);
+  click(button);
+  assert.equal(licensesAsked(), 1);
+});
+
+test('the notice says what the license requires in both languages', () => {
+  assert.match(en['about.notice'], /no warranty/i);
+  assert.match(en['about.notice'], /GNU General Public License/);
+  assert.match(it['about.notice'], /nessuna garanzia/i);
+  assert.match(it['about.notice'], /GNU General Public License/);
 });
 
 for (const [lang, table] of Object.entries({ it, en })) {

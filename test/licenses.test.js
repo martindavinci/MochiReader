@@ -5,9 +5,15 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  COPYRIGHT_NOTICE,
   CRATE_LICENSE_FILES,
+  INSTALLER,
+  INSTALLER_TAURI_CLI,
+  NSIS_SOURCE,
   REPO_ROOT,
+  SOURCE_REPOSITORY,
   VENDORED,
+  checkInstallerLicenses,
   checkLicenses,
   checkLicenseTexts,
   crateLicenseTexts,
@@ -71,11 +77,93 @@ test('the vendored list is allowed and its license files exist', () => {
   assert.doesNotThrow(() => checkLicenses(VENDORED));
   assert.deepEqual(
     VENDORED.map(({ name }) => name),
-    ['foliate-js', 'zip.js', 'fflate', 'WebView2 loader'],
+    ['foliate-js', 'zip.js', 'fflate', 'WebView2 loader', 'Rust standard library'],
   );
   for (const { licenseFile } of VENDORED) {
     assert.ok(existsSync(join(REPO_ROOT, licenseFile)), licenseFile);
   }
+});
+
+test('the standard library listed is the one the workflows compile with', () => {
+  const { version } = VENDORED.find(({ name }) => name === 'Rust standard library');
+  for (const workflow of ['ci.yml', 'release.yml']) {
+    const text = readFileSync(join(REPO_ROOT, '.github', 'workflows', workflow), 'utf8');
+    assert.ok(text.includes(`dtolnay/rust-toolchain@${version}`), workflow);
+  }
+});
+
+test('the license of the standard library covers the crates linked into the program', () => {
+  const { licenseFile } = VENDORED.find(({ name }) => name === 'Rust standard library');
+  const text = readFileSync(join(REPO_ROOT, licenseFile), 'utf8');
+  for (const part of [
+    /Copyright notices for The Rust Standard Library/,
+    /library\/core\/src\/unicode/,
+    /cfg-if-1\.0\.4/,
+    /hashbrown-0\.17\.1/,
+    /rustc-demangle-0\.1\.28/,
+    /windows-link-0\.2\.1/,
+    /Apache License/,
+    /Permission is hereby granted/,
+    /UNICODE LICENSE V3/i,
+  ]) {
+    assert.match(text, part);
+  }
+  assert.ok(!/<\/?(p|pre|code|h3|div)\b/.test(text), 'plain text, not the HTML it comes from');
+});
+
+test('the installer list holds what the NSIS bundle puts in the installer', () => {
+  const conf = JSON.parse(readFileSync(join(REPO_ROOT, 'src-tauri', 'tauri.conf.json'), 'utf8'));
+  assert.deepEqual(conf.bundle.targets, ['nsis']);
+  assert.deepEqual(
+    INSTALLER.map(({ name }) => name),
+    ['NSIS installer runtime', 'nsis-tauri-utils', 'Tauri installer template'],
+  );
+  for (const { licenseFile } of INSTALLER) {
+    assert.ok(existsSync(join(REPO_ROOT, licenseFile)), licenseFile);
+  }
+});
+
+test('the installer list follows the tauri-cli that builds the release', () => {
+  const release = readFileSync(join(REPO_ROOT, '.github', 'workflows', 'release.yml'), 'utf8');
+  const [, pinned] = release.match(/TAURI_CLI_VERSION:\s*['"]?([\d.]+)/);
+  assert.equal(pinned, INSTALLER_TAURI_CLI);
+});
+
+test('the license of NSIS holds each license it names, and the exception for the LZMA module', () => {
+  const { licenseFile, license } = INSTALLER.find(({ name }) => name === 'NSIS installer runtime');
+  assert.equal(license, 'Zlib AND CPL-1.0');
+  const text = readFileSync(join(REPO_ROOT, licenseFile), 'utf8');
+  assert.match(text, /ZLIB\/LIBPNG LICENSE/);
+  assert.match(text, /COMMON PUBLIC LICENSE VERSION 1\.0/);
+  assert.match(text, /SPECIAL EXCEPTION FOR LZMA COMPRESSION MODULE/);
+});
+
+test('the other installer parts carry both licenses they offer', () => {
+  for (const { name, licenseFile, license } of INSTALLER.filter((part) => part.license !== 'Zlib AND CPL-1.0')) {
+    assert.equal(license, 'MIT OR Apache-2.0', name);
+    const text = readFileSync(join(REPO_ROOT, licenseFile), 'utf8');
+    assert.match(text, /Permission is hereby granted/, name);
+    assert.match(text, /Apache License/, name);
+  }
+});
+
+test('the plug-in in the installer names the crates linked into it, with their notices', () => {
+  const { licenseFile } = INSTALLER.find(({ name }) => name === 'nsis-tauri-utils');
+  const text = readFileSync(join(REPO_ROOT, licenseFile), 'utf8');
+  assert.match(text, /semver/);
+  assert.match(text, /windows-sys/);
+  assert.match(text, /Copyright \(c\) Microsoft Corporation/);
+});
+
+test('CPL-1.0 is for the installer alone: nothing in the program may use it', () => {
+  refuses('CPL-1.0');
+  assert.throws(() => checkLicenses(INSTALLER), /NSIS installer runtime/);
+  assert.doesNotThrow(() => checkInstallerLicenses(INSTALLER));
+});
+
+test('the installer list still refuses what it does not name', () => {
+  assert.throws(() => checkInstallerLicenses([{ name: 'x', license: 'AGPL-3.0' }]), /x: AGPL/);
+  assert.throws(() => checkInstallerLicenses([{ name: 'y', license: 'Proprietary' }]), /y: Proprietary/);
 });
 
 test('only normal dependencies reachable from the app are distributed', () => {
@@ -264,6 +352,46 @@ test('the write mode writes the licenses of a crate with a license file', (t) =>
   const { crate, output } = crateIn(t, 'with-text', { LICENSE: 'the crate text' });
   runLicenses([], [crate], output);
   assert.match(readFileSync(output, 'utf8'), /with-text 1\.0\.0 \(MIT\)\n-+\nthe crate text/);
+});
+
+test('a crate under CPL-1.0 is refused in both modes', (t) => {
+  const { crate, output } = crateIn(t, 'common-public', { LICENSE: 'the crate text' });
+  const covered = { ...crate, license: 'CPL-1.0' };
+  for (const args of [[], ['--check']]) {
+    assert.throws(() => runLicenses(args, [covered], output), /common-public: CPL-1\.0/);
+  }
+});
+
+test('the file opens with the notice of the program, its source and its whole license', (t) => {
+  const { crate, output } = crateIn(t, 'with-text', { LICENSE: 'the crate text' });
+  runLicenses([], [crate], output);
+  const text = readFileSync(output, 'utf8');
+  assert.ok(text.startsWith(`MochiReader\n${COPYRIGHT_NOTICE}\n`));
+  assert.match(text, /either version 3 of the License, or \(at your option\) any later version/);
+  assert.match(text, /WITHOUT ANY WARRANTY/);
+  assert.ok(text.includes(SOURCE_REPOSITORY));
+  const license = readFileSync(join(REPO_ROOT, 'LICENSE'), 'utf8').replace(/\r\n/g, '\n').trim();
+  assert.ok(text.includes(license), 'the whole of the GPL');
+  assert.ok(text.indexOf(license) < text.indexOf('with-text 1.0.0'), 'before the other components');
+});
+
+test('the file lists the standard library and the installer, and where the source of NSIS is', (t) => {
+  const { crate, output } = crateIn(t, 'with-text', { LICENSE: 'the crate text' });
+  runLicenses([], [crate], output);
+  const text = readFileSync(output, 'utf8');
+  for (const { name, version, license } of [...VENDORED, ...INSTALLER]) {
+    assert.ok(text.includes(`${name} ${version} (${license})`), name);
+  }
+  assert.match(text, /COMMON PUBLIC LICENSE VERSION 1\.0/);
+  assert.ok(text.includes(NSIS_SOURCE));
+});
+
+test('the committed file holds the notice of the program and the license', () => {
+  const text = readFileSync(join(REPO_ROOT, 'app', 'licenses.txt'), 'utf8');
+  assert.ok(text.includes(COPYRIGHT_NOTICE));
+  assert.ok(text.includes('GNU GENERAL PUBLIC LICENSE'));
+  assert.match(text, /^Rust standard library /m);
+  assert.match(text, /^NSIS installer runtime /m);
 });
 
 test('the check fails when the licenses file is missing, and does not create it', (t) => {

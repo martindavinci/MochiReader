@@ -29,6 +29,7 @@ const PROTOCOL: &str = "mochi";
 const OPEN_PATHS_EVENT: &str = "open-paths";
 const SHELL_COMMAND_EVENT: &str = "shell-command";
 const CLOSING_EVENT: &str = "app-closing";
+const LICENSES_ASSET: &str = "licenses.txt";
 // The page saves what it has when the app closes, but a page that does not answer must not keep the window open.
 const CLOSE_SAVE_DEADLINE: Duration = Duration::from_millis(1500);
 // Only in the smoke build: the state of a test run stays out of the reader's own.
@@ -174,6 +175,16 @@ fn state_move_bookmarks(key: String, path: String, store: State<'_, Store>) {
     store.move_bookmarks(&key, &path);
 }
 
+/// The licenses, as the app carries them. Read only when asked for, and decompressed away from the page.
+#[tauri::command(async)]
+fn licenses_text(app: AppHandle) -> Result<String, String> {
+    let asset = app
+        .asset_resolver()
+        .get(LICENSES_ASSET.to_string())
+        .ok_or("the app carries no licenses")?;
+    String::from_utf8(asset.bytes).map_err(|error| error.to_string())
+}
+
 /// The page has saved what it had: the window can go.
 #[tauri::command(async)]
 fn close_ready(app: AppHandle) {
@@ -268,6 +279,13 @@ fn on_second_instance(app: &AppHandle, argv: Vec<String>, cwd: String) {
     if let Some(out) = launch.dump_tabs {
         if cfg!(feature = "smoke") {
             let command = json!({ "action": "dump-tabs", "out": out });
+            let _ = app.emit(SHELL_COMMAND_EVENT, command);
+        }
+        return;
+    }
+    if let Some(panel) = launch.show_panel {
+        if cfg!(feature = "smoke") {
+            let command = json!({ "action": "show-panel", "panel": panel });
             let _ = app.emit(SHELL_COMMAND_EVENT, command);
         }
         return;
@@ -386,6 +404,7 @@ pub fn run() {
             state_toggle_bookmark,
             state_move_bookmarks,
             close_ready,
+            licenses_text,
             #[cfg(feature = "smoke")]
             smoke_write_dump,
             #[cfg(feature = "smoke")]

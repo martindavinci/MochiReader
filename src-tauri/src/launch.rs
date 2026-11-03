@@ -7,6 +7,7 @@ const MEASURE_OPEN: &str = "--measure-open";
 const MEASURE_T0: &str = "--t0";
 const MEASURE_OUT: &str = "--measure-out";
 const DUMP_TABS: &str = "--dump-tabs";
+const SHOW_PANEL: &str = "--show-panel";
 const OPTION_MARK: &str = "--";
 
 /// A run of `measure.ps1 -Warm`: what to open, when it was launched as a FILETIME, and where the time goes.
@@ -24,6 +25,7 @@ pub struct Launch {
     pub measure: bool,
     pub measure_open: Option<MeasureOpen>,
     pub dump_tabs: Option<String>,
+    pub show_panel: Option<String>,
 }
 
 impl Launch {
@@ -43,6 +45,7 @@ impl Launch {
                 MEASURE_T0 => open_t0 = args.next().and_then(|t0| t0.parse().ok()),
                 MEASURE_OUT => open_out = args.next(),
                 DUMP_TABS => launch.dump_tabs = args.next(),
+                SHOW_PANEL => launch.show_panel = args.next(),
                 option if option.starts_with(OPTION_MARK) => {}
                 _ => launch.paths.push(absolute(arg)),
             }
@@ -126,6 +129,13 @@ mod tests {
         let launch = parse(&["--dump-tabs", "C:\\d.json"]);
         assert!(launch.paths.is_empty());
         assert_eq!(launch.dump_tabs.as_deref(), Some("C:\\d.json"));
+    }
+
+    #[test]
+    fn show_panel_takes_its_name() {
+        let launch = parse(&["--show-panel", "licenses"]);
+        assert!(launch.paths.is_empty());
+        assert_eq!(launch.show_panel.as_deref(), Some("licenses"));
     }
 
     #[test]

@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseHTML } from 'linkedom';
 import {
-  createClickShield, createPanels, createRowGuard, groupBookmarks, keepFocus, renderBookmarks, renderToc,
+  createClickShield, createPanels, createRowGuard, groupBookmarks, keepFocus, renderBookmarks, renderLicenses, renderToc,
 } from '../app/ui/panels.js';
 
 const atLine = (line) => ({ kind: 'md', line, sentence: 0 });
@@ -40,6 +40,15 @@ function drawBookmarks(bookmarks) {
   });
   return { host, click, opened, removed };
 }
+
+test('the licenses panel shows the text as it is, under its title', () => {
+  const { host } = page();
+  renderLicenses(host, 'a <b>license</b>\n  indented', { title: 'Licenses' });
+  assert.equal(host.querySelector('.panel-title').textContent, 'Licenses');
+  const text = host.querySelector('pre.licenses-text');
+  assert.equal(text.textContent, 'a <b>license</b>\n  indented');
+  assert.equal(host.querySelector('b'), null);
+});
 
 test('bookmarks group by document, in the order the documents first appear', () => {
   const groups = groupBookmarks([mark('k1', 'a.md', 1), mark('k2', 'b.md', 2), mark('k1', 'a.md', 3)]);

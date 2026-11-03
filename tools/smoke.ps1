@@ -119,6 +119,11 @@ $VK_RIGHT = 0x27
 $VK_ESCAPE = 0x1B
 $VK_D = 0x44
 $VK_T = 0x54
+$VK_TAB = 0x09
+$VK_RETURN = 0x0D
+$VK_OEM_COMMA = 0xBC
+# More than the controls of the options panel before its button.
+$MaxTabsToLicenses = 12
 $VK_OEM_PLUS = 0xBB
 $MOUSEEVENTF_LEFTDOWN = 2
 $MOUSEEVENTF_LEFTUP = 4
@@ -1369,6 +1374,40 @@ function Test-CorruptState {
   }
 }
 
+function Test-LicensesPanel {
+  Wait-AppGone
+  $note = New-Note 'licenze.md' 'Una frase da leggere.'
+  $app = Start-App @("`"$note`"")
+  try {
+    $window = Wait-AppWindow $app
+    Wait-Tabs 1 { param($t) $t[0].status -eq 'ok' } | Out-Null
+    Start-Second '--show-panel licenses'
+    $text = (Wait-Tabs 1 { param($t) $t[0].licensesText })[0].licensesText
+    foreach ($expected in 'GNU GENERAL PUBLIC LICENSE', 'Rust standard library', 'NSIS installer runtime', 'tauri 2.12.4') {
+      Assert-That ($text.Contains($expected)) "the licenses in the app name $expected"
+    }
+    Assert-That (-not $text.Contains('<!doctype')) 'the licenses are the file, not the page in its place'
+    Pass 'the app shows the licenses it carries'
+
+    [void][SmokeInput]::SetForegroundWindow($window)
+    Start-Sleep -Milliseconds $SecondProcessMs
+    # Another window can take the front at any step here: that says nothing about the app.
+    $notInFront = 'SKIP  the app is not in front, so the way from the options to the licenses was not checked'
+    if (-not (Assert-KeysDo $window @($VK_ESCAPE) { param($t) -not $t.panel } 'esc closes the licenses')) { $notInFront; return }
+    if (-not (Assert-KeysDo $window @($VK_CONTROL, $VK_OEM_COMMA) { param($t) $t.panel -eq 'options' } 'ctrl+comma opens the options')) { $notInFront; return }
+    $tabs = 0
+    while ((@(Get-Tabs)[0]).focused -ne 'button') {
+      $tabs++
+      Assert-That ($tabs -le $MaxTabsToLicenses) 'the options have a button for the licenses'
+      if (-not (Send-Keys $window @($VK_TAB))) { $notInFront; return }
+    }
+    if (-not (Assert-KeysDo $window @($VK_RETURN) { param($t) $t.licensesText } 'the button shows the licenses')) { $notInFront; return }
+    Pass 'the options lead to the licenses'
+  } finally {
+    Stop-App $app
+  }
+}
+
 Assert-AppNotRunning
 if (-not $NoBuild) { Build-App @('--features', 'smoke') }
 $AppExe = Join-Path $AppTarget 'debug\mochireader.exe'
@@ -1408,6 +1447,7 @@ $AllTests = @(
   'Test-EpubKeys',
   'Test-FixedLayoutEpub',
   'Test-CorruptState',
+  'Test-LicensesPanel',
   'Test-NetLogStaysLocal'
 )
 foreach ($name in $Only) {

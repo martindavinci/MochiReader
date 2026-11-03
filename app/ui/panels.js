@@ -172,6 +172,16 @@ export function renderBookmarks(host, bookmarks, { labels, dateOf, onOpen, onRem
 
 /**
  * @param {HTMLElement} host
+ * @param {string} text The licenses, kept as they are written.
+ * @param {{title: string}} labels
+ */
+export function renderLicenses(host, text, { title }) {
+  const element = elementIn(host);
+  host.replaceChildren(element('h1', 'panel-title', title), element('pre', 'licenses-text', text));
+}
+
+/**
+ * @param {HTMLElement} host
  * @param {import('../readers/reader.js').TocEntry[]} entries
  * @param {{labels: {title: string, empty: string}, onGo: (target: *) => void}} options
  */
