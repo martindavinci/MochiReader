@@ -113,6 +113,8 @@ $VK_T = 0x54
 $VK_OEM_PLUS = 0xBB
 $MOUSEEVENTF_LEFTDOWN = 2
 $MOUSEEVENTF_LEFTUP = 4
+$DoubleClickGapMs = 90
+$RowsOfHeadings = 40
 
 Add-Type @'
 using System;
@@ -1049,17 +1051,55 @@ function Test-EpubPosition {
   }
 }
 
-function Send-Click([IntPtr]$Window) {
+function Send-Click([IntPtr]$Window, [int]$Times = 1) {
   if ([SmokeInput]::GetForegroundWindow() -ne $Window) { return $false }
   $box = New-Object SmokeInput+Rect
   [void][SmokeInput]::GetWindowRect($Window, [ref]$box)
   $back = [System.Windows.Forms.Cursor]::Position
   [void][SmokeInput]::SetCursorPos([int](($box.Left + $box.Right) / 2), [int](($box.Top + $box.Bottom) / 2))
-  [SmokeInput]::mouse_event($MOUSEEVENTF_LEFTDOWN, 0, 0, 0, [UIntPtr]::Zero)
-  [SmokeInput]::mouse_event($MOUSEEVENTF_LEFTUP, 0, 0, 0, [UIntPtr]::Zero)
+  foreach ($press in 1..$Times) {
+    if ($press -gt 1) { Start-Sleep -Milliseconds $DoubleClickGapMs }
+    [SmokeInput]::mouse_event($MOUSEEVENTF_LEFTDOWN, 0, 0, 0, [UIntPtr]::Zero)
+    [SmokeInput]::mouse_event($MOUSEEVENTF_LEFTUP, 0, 0, 0, [UIntPtr]::Zero)
+  }
   Start-Sleep -Milliseconds $SecondProcessMs
   [System.Windows.Forms.Cursor]::Position = $back
   $true
+}
+
+# A note where a link lies under the middle of the window wherever it is scrolled to, and a list of headings that reaches
+# the middle of the window too. The first click of a double click on a row closes the list and uncovers a link.
+function Test-RowDoubleClick {
+  Wait-AppGone
+  $target = New-Note 'destinazione.md' 'La nota dei link.'
+  $picture = New-Object System.Drawing.Bitmap $ImageWidth, $ImageHeight
+  try { $picture.Save((Join-Path $Work 'link.png'), [System.Drawing.Imaging.ImageFormat]::Png) } finally { $picture.Dispose() }
+  $note = Join-Path $Work 'tutti link.md'
+  $link = '[![](link.png)](destinazione.md)'
+  Write-Note $note ((1..$RowsOfHeadings | ForEach-Object { "## Titolo $_`n`n$link`n`n$link`n" }) -join "`n")
+  $app = Start-App @("`"$note`"")
+  try {
+    $window = Wait-AppWindow $app
+    Wait-Tabs 1 { param($t) $t[0].status -eq 'ok' } | Out-Null
+    Start-Sleep -Milliseconds $ImagesSettleMs
+    [void][SmokeInput]::SetForegroundWindow($window)
+    Start-Sleep -Milliseconds $SecondProcessMs
+    if (-not (Assert-KeysDo $window @($VK_CONTROL, $VK_T) { param($t) $t.panel -eq 'toc' } 'ctrl+t opens the contents')) {
+      'SKIP  the app is not in front, so a double click on a row was not checked'
+      return
+    }
+    if (-not (Send-Click $window 2)) { 'SKIP  the app is not in front, so a double click on a row was not checked'; return }
+    Start-Sleep -Milliseconds $SaveSettleMs
+    $tabs = @(Get-Tabs)
+    Assert-That (-not $tabs[0].panel) 'the first click lands on a row, which closes the list'
+    Assert-That ($tabs.Count -eq 1) "the second click of a double click on a row opens nothing, found $($tabs.Count) tabs"
+    # Without a link there, no tab opening proves nothing.
+    if (-not (Send-Click $window)) { 'SKIP  the app is not in front, so the link behind the list was not checked'; return }
+    Wait-Tabs 2 { param($t) @($t | Where-Object { $_.path -eq $target }).Count -eq 1 } | Out-Null
+    Pass 'the second click of a double click on a row stays away from the link behind the list'
+  } finally {
+    Stop-App $app
+  }
 }
 
 # Presses keys and waits for the tabs to say what they should. False: Windows kept the keys away, nothing was checked.
@@ -1233,6 +1273,7 @@ $AllTests = @(
   'Test-CollapsedSections',
   'Test-PositionWithImages',
   'Test-WindowPlacement',
+  'Test-RowDoubleClick',
   'Test-EpubOpens',
   'Test-EpubScripts',
   'Test-EpubSelfScript',

@@ -267,6 +267,13 @@ foliate-view {
   transform: translateX(-50%);
 }
 
+/* Over everything for a moment, and it never shows. See createClickShield. */
+.click-shield {
+  position: fixed;
+  inset: 0;
+  z-index: 4;
+}
+
 /* Text */
 article {
   max-width: 70ch;

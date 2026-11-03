@@ -86,6 +86,32 @@ export function createRowGuard(ms = DOUBLE_CLICK_MS) {
 }
 
 /**
+ * A row that opens something takes its list away, and the second click of a double click lands on what was behind it,
+ * which can be a link. In a book that is inside a frame, where no listener here hears it: only lying on top stops it.
+ * @param {HTMLElement} parent Where the shield lives.
+ * @param {number} [ms] How long it stays up.
+ * @returns {{raise: () => void}}
+ */
+export function createClickShield(parent, ms = DOUBLE_CLICK_MS) {
+  const shield = parent.ownerDocument.createElement('div');
+  shield.className = 'click-shield';
+  shield.hidden = true;
+  // A press would take the focus away from the text, and the keys with it.
+  shield.addEventListener('mousedown', (event) => event.preventDefault());
+  parent.append(shield);
+  let timer = null;
+  return {
+    raise() {
+      shield.hidden = false;
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        shield.hidden = true;
+      }, ms);
+    },
+  };
+}
+
+/**
  * @template {{key: string, path: string, title: string}} B
  * @param {B[]} bookmarks
  * @returns {{key: string, path: string, title: string, bookmarks: B[]}[]} One group per document, in order of first

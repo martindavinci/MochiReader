@@ -984,6 +984,47 @@ test('the second click of a double click opens no bookmark either', async () => 
   assert.deepEqual(shell.calls, []);
 });
 
+const shieldUp = (shell) => shell.document.querySelector('.click-shield')?.hidden === false;
+
+// Hit testing is the browser's, so tools/smoke.ps1 clicks for real. Here: what opens from a list raises it, before it opens.
+for (const [what, open, row] of [
+  ['the contents', ['t', CTRL], '.toc-entry'],
+  ['the bookmarks', ['b', CTRL], '.bookmark-open'],
+  ['the recents', ['r', CTRL], '.recent-open'],
+]) {
+  test(`a row of ${what} that opens something covers the window until a double click is over`, async () => {
+    const shell = await startShell(async (path) => headedDoc(path), {
+      pending: [PATH_A],
+      bookmarks: [bookmarkOf(PATH_A, 5)],
+      recents: [RECENT_B],
+    });
+    await shell.settled();
+    assert.equal(shieldUp(shell), false);
+    await shell.press(...open);
+    await shell.click(shell.panel().querySelector(row));
+    assert.equal(shell.panel().hidden, true);
+    assert.equal(shieldUp(shell), true);
+    await doubleClickOver();
+    assert.equal(shieldUp(shell), false);
+  });
+}
+
+test('a recent opened from the first screen covers the window too', async () => {
+  const shell = await startShell(async (path) => markdownDoc(path, 'Testo'), { recents: [RECENT_A] });
+  await shell.settled();
+  await shell.click(shell.document.querySelector('#home .recent-open'));
+  assert.equal(shieldUp(shell), true);
+  assert.deepEqual(shell.calls, [PATH_A]);
+});
+
+test('the shield lies over the whole window and over every panel', () => {
+  const rule = /(^|\n)\.click-shield \{[^}]*\}/.exec(APP_CSS)[0];
+  assert.match(rule, /position: fixed/);
+  assert.match(rule, /inset: 0/);
+  const layers = [...APP_CSS.matchAll(/z-index: (\d+)/g)].map(([, layer]) => Number(layer));
+  assert.equal(Number(/z-index: (\d+)/.exec(rule)[1]), Math.max(...layers));
+});
+
 test('ctrl+d with the panel open leaves the list where it was', async () => {
   const shell = await startShell(async (path) => markdownDoc(path, 'Testo'), { pending: [PATH_A], bookmarks: [bookmarkOf(PATH_B, 3)] });
   await shell.settled();

@@ -2,7 +2,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseHTML } from 'linkedom';
-import { createPanels, createRowGuard, groupBookmarks, keepFocus, renderBookmarks, renderToc } from '../app/ui/panels.js';
+import {
+  createClickShield, createPanels, createRowGuard, groupBookmarks, keepFocus, renderBookmarks, renderToc,
+} from '../app/ui/panels.js';
 
 const atLine = (line) => ({ kind: 'md', line, sentence: 0 });
 const mark = (key, title, line, excerpt = `Brano ${line}`) => ({
@@ -277,4 +279,27 @@ test('a removal that fails does not leave the list deaf', async () => {
   await assert.rejects(remove());
   await remove().catch(() => {});
   assert.equal(calls, 2);
+});
+
+test('a shield over the window comes up for as long as a double click takes, and comes up once', async () => {
+  const { host } = page();
+  const { body } = host.ownerDocument;
+  const shield = createClickShield(body, SETTLE_MS);
+  const element = body.querySelector('.click-shield');
+  assert.equal(element.hidden, true);
+  shield.raise();
+  shield.raise();
+  assert.equal(body.querySelectorAll('.click-shield').length, 1);
+  assert.equal(element.hidden, false);
+  await untilSettled();
+  assert.equal(element.hidden, true);
+});
+
+test('pressing on the shield leaves the focus where it is, or the keys would stop reaching the text', () => {
+  const { host } = page();
+  const { body, defaultView } = host.ownerDocument;
+  createClickShield(body, SETTLE_MS).raise();
+  const press = new (defaultView.Event)('mousedown', { cancelable: true, bubbles: true });
+  body.querySelector('.click-shield').dispatchEvent(press);
+  assert.equal(press.defaultPrevented, true);
 });

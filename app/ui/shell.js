@@ -7,7 +7,7 @@ import { Tabs } from '../core/tabs.js';
 import { bookStyle } from '../readers/epub-style.js';
 import { openMarkdown } from '../readers/markdown.js';
 import { applyOptions, interfaceLang, nextTextSize, readOptions, renderOptions } from './options.js';
-import { createPanels, createRowGuard, keepFocus, renderBookmarks, renderToc } from './panels.js';
+import { createClickShield, createPanels, createRowGuard, keepFocus, renderBookmarks, renderToc } from './panels.js';
 import { renderRecents } from './recents.js';
 import { renderTabBar } from './tabbar.js';
 
@@ -64,6 +64,7 @@ const toast = document.getElementById('toast');
 const panelHost = document.getElementById('panel');
 const panels = createPanels(panelHost);
 const rowGuard = createRowGuard();
+const clickShield = createClickShield(document.body);
 let options = readOptions({});
 let shownTabId = null;
 let shownTitle = APP_NAME;
@@ -138,12 +139,18 @@ const recentsLabels = () => ({
   remove: t('recents.remove'),
 });
 
+/** What a row does when it opens something, which leaves the second click of a double click to what is behind it. */
+const openingRow = (action) => rowGuard.open((...args) => {
+  clickShield.raise();
+  return action(...args);
+});
+
 function drawRecents(recents, row) {
   drawnRecents = JSON.stringify(recents);
   const refocus = keepFocus(home, row);
   renderRecents(home, recents, {
     labels: { hint: t('app.noFile'), ...recentsLabels() },
-    onOpen: rowGuard.open(openPath),
+    onOpen: openingRow(openPath),
     onRemove: rowGuard.remove(removeRecent),
   });
   refocus();
@@ -466,7 +473,7 @@ async function drawRecentsPanel(row) {
     const refocus = keepFocus(panelHost, leaving);
     renderRecents(panelHost, recents, {
       labels: recentsLabels(),
-      onOpen: rowGuard.open((path) => {
+      onOpen: openingRow((path) => {
         closePanel();
         openPath(path);
       }),
@@ -509,7 +516,7 @@ async function drawBookmarksPanel(row) {
   renderBookmarks(panelHost, bookmarks, {
     labels: { title: t('bookmarks.title'), empty: t('bookmarks.empty'), remove: t('recents.remove') },
     dateOf: (ms) => new Date(ms).toLocaleDateString(getLang()),
-    onOpen: rowGuard.open(openBookmark),
+    onOpen: openingRow(openBookmark),
     onRemove: rowGuard.remove(async (bookmark, removed) => {
       await invoke('state_toggle_bookmark', { bookmark });
       await drawBookmarksPanel(removed);
@@ -521,11 +528,11 @@ async function drawBookmarksPanel(row) {
 function drawTocPanel() {
   renderToc(panelHost, activeEntry()?.reader?.toc() ?? [], {
     labels: { title: t('toc.title'), empty: t('toc.empty') },
-    onGo: (target) => {
+    onGo: openingRow((target) => {
       const { reader } = activeEntry();
       closePanel();
       reader.goTo(target);
-    },
+    }),
   });
 }
 
