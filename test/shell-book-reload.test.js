@@ -54,7 +54,13 @@ async function startBookShell({ bookmarks = [], makeBook = async () => goodBook(
       inits: [],
       goes: [],
       styles: [],
-      renderer: { setAttribute() {}, setStyles: (css) => element.styles.push(css), getContents: () => state.contents },
+      renderer: {
+        setAttribute() {},
+        setStyles: (css) => element.styles.push(css),
+        getContents: () => state.contents,
+        addEventListener() {},
+        removeEventListener() {},
+      },
       open: async (book) => {
         element.book = book;
       },

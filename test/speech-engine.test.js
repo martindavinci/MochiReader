@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { WebSpeechEngine, VOICES_WAIT_MS } from '../app/speech/engine-web.js';
+import { closestVoice, voiceGroups, WebSpeechEngine, VOICES_WAIT_MS } from '../app/speech/engine-web.js';
 import { SpeechPlayer } from '../app/speech/player.js';
 
 const voice = (name, lang, localService = true) => ({ voiceURI: `uri:${name}`, name, lang, localService });
@@ -733,4 +733,61 @@ test('players on different engines do not replace each other', async (t) => {
   await flush();
   assert.equal(a.state, 'playing');
   assert.equal(b.state, 'playing');
+});
+
+test('a voice is told apart from the others of its language by region', () => {
+  const uk = { id: 'uk', lang: 'en-GB' };
+  const us = { id: 'us', lang: 'en-US' };
+  assert.equal(closestVoice([uk, us], 'en-US'), us);
+  assert.equal(closestVoice([uk, us], 'en'), uk);
+  assert.equal(closestVoice([uk, us], 'it'), undefined);
+});
+
+test('an utterance speaks at full volume unless a test run turns it down', async () => {
+  const { engine, synth } = setup();
+  engine.speak('Uno.', { lang: 'it' });
+  assert.equal(Object.hasOwn(synth.spoken[0], 'volume'), false);
+  engine.stop();
+  engine.volume = 0.05;
+  engine.speak('Due.', { lang: 'it' });
+  assert.equal(synth.spoken[1].volume, 0.05);
+  engine.stop();
+});
+
+test('a trace hears when a sentence really starts and ends', async () => {
+  const { engine, synth } = setup();
+  const heard = [];
+  engine.onTrace = (event, text) => heard.push([event, text]);
+  const done = engine.speak('Uno.', { lang: 'it' });
+  synth.spoken[0].onstart();
+  synth.spoken[0].onend();
+  assert.equal(await done, 'end');
+  const failed = engine.speak('Due.', { lang: 'it' });
+  synth.spoken[1].onerror({ error: 'synthesis-failed' });
+  assert.equal(await failed, 'error');
+  assert.deepEqual(heard, [['start', 'Uno.'], ['end', 'Uno.'], ['error:synthesis-failed', 'Due.']]);
+});
+
+test('without a trace nothing listens for the start of a sentence', () => {
+  const { engine, synth } = setup();
+  engine.speak('Uno.', { lang: 'it' });
+  assert.equal(synth.spoken[0].onstart, undefined);
+  engine.stop();
+});
+
+test('voices are grouped by language, with the one to use marked', () => {
+  const list = [
+    { id: 'elsa', name: 'Elsa', lang: 'it-IT' },
+    { id: 'zira', name: 'Zira', lang: 'en-US' },
+    { id: 'cosimo', name: 'Cosimo', lang: 'it-IT' },
+  ];
+  assert.deepEqual(voiceGroups(list, { it: 'cosimo', en: 'gone' }), [
+    { lang: 'en', voices: [list[1]], selected: 'zira' },
+    { lang: 'it', voices: [list[0], list[2]], selected: 'cosimo' },
+  ]);
+});
+
+test('a page with no speech has no voices to list', async () => {
+  const engine = new WebSpeechEngine({ synth: undefined, Utterance: FakeUtterance });
+  assert.deepEqual(await engine.voices(), []);
 });

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { debounce, lineFromSourcepos, nearestBlock, SAVE_DEBOUNCE_MS } from '../core/position.js';
+import { debounce, lineFromSourcepos, nearestBlock, SAVE_DEBOUNCE_MS, SCROLL_KEYS } from '../core/position.js';
 import { excerptOf } from './excerpt.js';
 import { htmlParts } from './html-parts.js';
 
@@ -27,6 +27,8 @@ const FOLD_MARGIN_PX = 1;
 const MOVE_INPUTS = ['wheel', 'keydown', 'pointerdown'];
 // Pressed on its own on the way to a shortcut, which is no reason to leave a point: Ctrl+D saves that very point.
 const MODIFIER_KEYS = new Set(['Control', 'Shift', 'Alt', 'AltGraph', 'Meta']);
+// How far down the pane a sentence lands when the voice takes the text to it: what comes next is what stays in view.
+const FOLLOW_ROOM_SHARE = 0.25;
 
 const nextTurn = () => new Promise((resolve) => {
   setTimeout(resolve);
@@ -116,9 +118,13 @@ export function openMarkdown(doc, host) {
   // a block near the end cannot reach the top at all: what is on screen says nothing about the point being held.
   let held = null;
   let heldLayout = null;
+  let heldSentence = FIRST_SENTENCE;
+  // The sentence the voice is on. While it reads this is the position, wherever the reader has scrolled to.
+  let spoken = null;
 
   const letGo = () => {
     held = null;
+    heldSentence = FIRST_SENTENCE;
     heldLayout?.disconnect();
     heldLayout = null;
     MOVE_INPUTS.forEach((type) => host.removeEventListener(type, onMoveInput));
@@ -128,19 +134,42 @@ export function openMarkdown(doc, host) {
     if (!MODIFIER_KEYS.has(key)) letGo();
   };
 
-  const hold = (block) => {
+  const waitForMove = () => MOVE_INPUTS.forEach((type) => host.addEventListener(type, onMoveInput, { passive: true }));
+
+  const hold = (block, sentence = FIRST_SENTENCE) => {
     letGo();
     held = block;
+    heldSentence = sentence;
     heldLayout = new ResizeObserver(() => block.scrollIntoView({ block: 'start' }));
     heldLayout.observe(article);
-    MOVE_INPUTS.forEach((type) => host.addEventListener(type, onMoveInput, { passive: true }));
+    waitForMove();
   };
 
   const currentBlock = () => held ?? topBlock();
 
-  const moveTo = (block) => {
+  const moveTo = (block, sentence) => {
     block.scrollIntoView({ block: 'start' });
-    hold(block);
+    hold(block, sentence);
+  };
+
+  /** A sentence on screen stays where it is, and a closed `details` or a tab behind has no place to bring it to. */
+  const bringIntoView = (range) => {
+    const box = range.getBoundingClientRect();
+    if (!box.width && !box.height) return;
+    const pane = host.getBoundingClientRect();
+    const top = pane.top + coveredAtTop();
+    if (box.top >= top && box.bottom <= pane.bottom) return;
+    host.scrollTop += box.top - top - (pane.bottom - top) * FOLLOW_ROOM_SHARE;
+  };
+
+  const handCallbacks = [];
+  const handMoved = () => handCallbacks.forEach((callback) => callback());
+  const onHandKey = ({ key }) => {
+    if (SCROLL_KEYS.has(key)) handMoved();
+  };
+  // On the pane itself means on its scrollbar: the text is what covers the rest of it.
+  const onHandPress = ({ target }) => {
+    if (target === host) handMoved();
   };
 
   /** To the first of `candidates` past the current line in the direction of `delta`, if there is one. */
@@ -161,7 +190,11 @@ export function openMarkdown(doc, host) {
   });
   const headingBlocks = () => blocks().filter((block) => block.matches(HEADING_SELECTOR));
 
-  const position = () => ({ kind: 'md', line: lineOrNone(currentBlock()), sentence: FIRST_SENTENCE });
+  const position = () => ({
+    kind: 'md',
+    line: spoken?.line ?? lineOrNone(currentBlock()),
+    sentence: spoken?.sentence ?? heldSentence,
+  });
 
   const notifyMove = debounce(() => {
     const at = position();
@@ -185,16 +218,50 @@ export function openMarkdown(doc, host) {
       const all = blocks();
       const index = nearestBlock(all.map(lineOf), target.line);
       if (index < 0) return;
-      moveTo(all[index]);
+      spoken = null;
+      moveTo(all[index], target.sentence);
     },
     speechRoots: async () => {
       await filled;
-      return [{ root: article, section: null }];
+      const isLarge = article.classList.contains('large');
+      return (isLarge ? [...article.children] : [article]).map((root) => ({ root, section: null }));
     },
     onMove: (callback) => moveCallbacks.push(callback),
-    onInput: (callback) => article.addEventListener('click', callback),
+    onInput: (callback) => {
+      article.addEventListener('click', callback);
+      article.addEventListener('contextmenu', callback);
+    },
     setStyle: () => {},
     nextSpeechSection: async () => false,
+    prevSpeechSection: async () => false,
+    speechStart: () => {
+      const { line, sentence } = position();
+      return { line, sentence };
+    },
+    speakAt: ({ range, line, sentence, follow }) => {
+      letGo();
+      spoken = { line, sentence };
+      if (follow && range) bringIntoView(range);
+    },
+    // Nothing scrolls for this: the sentence is on screen, or the reader went away from it and knows.
+    speechStopped: () => {
+      if (!spoken) return;
+      const { line, sentence } = spoken;
+      spoken = null;
+      if (line === null) return;
+      const all = blocks();
+      held = all[nearestBlock(all.map(lineOf), line)] ?? null;
+      heldSentence = sentence;
+      waitForMove();
+    },
+    onHandMove: (callback) => {
+      if (handCallbacks.length === 0) {
+        host.addEventListener('wheel', handMoved, { passive: true });
+        host.addEventListener('keydown', onHandKey, { passive: true });
+        host.addEventListener('pointerdown', onHandPress, { passive: true });
+      }
+      handCallbacks.push(callback);
+    },
     excerpt: () => excerptOf(currentBlock()?.textContent ?? ''),
     moveBlock: (delta) => step(landingBlocks, delta),
     moveSection: (delta) => step(headingBlocks, delta),
@@ -203,6 +270,9 @@ export function openMarkdown(doc, host) {
       letGo();
       notifyMove.cancel();
       host.removeEventListener('scroll', notifyMove);
+      host.removeEventListener('wheel', handMoved);
+      host.removeEventListener('keydown', onHandKey);
+      host.removeEventListener('pointerdown', onHandPress);
       article.remove();
     },
   };

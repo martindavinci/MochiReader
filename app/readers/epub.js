@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Nothing of foliate-js loads until the first book opens: a Markdown file never pays for it.
-import { debounce, SAVE_DEBOUNCE_MS } from '../core/position.js';
+import { debounce, SAVE_DEBOUNCE_MS, SCROLL_KEYS } from '../core/position.js';
 import { HIGHLIGHT_RULE, relativeDocumentSizes, relativeSizes } from './epub-style.js';
 import { epubKey, mainTitle } from './epub-key.js';
 import { isUnreadablePage, keepSectionsLoading, sectionPage, sectionType } from './epub-section.js';
@@ -39,6 +39,9 @@ const SECTION_END = 1;
 const FILE_NAME = /^.*\/|\.[^.]*$/g;
 const LINKS = 'a, area';
 const XLINK_NAMESPACE = 'http://www.w3.org/1999/xlink';
+// Why foliate moved. A change of layout keeps a place, and a swipe is the one move by hand with no key to see.
+const MOVED_BY_LAYOUT = 'anchor';
+const MOVED_BY_SWIPE = 'snap';
 
 const pause = (ms) => new Promise((resolve) => {
   setTimeout(resolve, ms);
@@ -161,6 +164,27 @@ export async function nextSpeechSection(view, wait = pause) {
   throw new Error('the next section did not come');
 }
 
+/**
+ * Moves back to the section before, to read it aloud.
+ * @param {object} view The foliate view.
+ * @returns {Promise<boolean>} `false` at the start of the reading order.
+ * @throws {Error} If no section can be shown.
+ */
+export async function prevSpeechSection(view) {
+  if (view.isFixedLayout) {
+    const spread = spreadOfSection(view);
+    await view.renderer.goToSpread(spread - 1, SPREAD_START);
+    return spreadOfSection(view) !== spread;
+  }
+  const current = shownIndex(view);
+  if (current === undefined) throw new Error('no section on screen');
+  const index = view.book.sections.findLastIndex((section, at) => at < current && section.linear !== NOT_IN_READING_ORDER);
+  if (index < 0) return false;
+  await view.renderer.goTo({ index });
+  if (shownIndex(view) === undefined) throw new Error('the section before could not be shown');
+  return true;
+}
+
 function closeView(view) {
   try {
     view.close();
@@ -192,14 +216,25 @@ function followOtherLinks(view, doc, index, openExternal) {
 }
 
 /** @returns {(callback: (event: Event) => void) => void} What the reader offers as `onInput`. */
-function watchSections(view, openExternal) {
+function watchSections(view, openExternal, handCallbacks) {
   const callbacks = [];
   const pass = (event) => callbacks.forEach((callback) => callback(event));
+  // A book on pages has nothing to scroll: its pages only turn with the keys of the app.
+  const handMoved = () => {
+    if (view.renderer.scrolled) handCallbacks.forEach((callback) => callback());
+  };
+  // Out here means on the scrollbar: everything else is inside the frame.
+  view.addEventListener('pointerdown', handMoved);
   view.addEventListener('load', ({ detail: { doc, index } }) => {
     followOtherLinks(view, doc, index, openExternal);
-    // Neither leaves the frame of the section, and a new section is a new frame.
+    // None of these leaves the frame of the section, and a new section is a new frame.
     doc.addEventListener('keydown', pass);
     doc.addEventListener('click', pass);
+    doc.addEventListener('contextmenu', pass);
+    doc.addEventListener('wheel', handMoved, { passive: true });
+    doc.addEventListener('keydown', ({ key }) => {
+      if (SCROLL_KEYS.has(key)) handMoved();
+    });
     if (!view.isFixedLayout || !doc.head) return;
     // A fixed layout takes no style from the renderer, and keeps its own colours and sizes.
     const style = doc.createElement('style');
@@ -212,12 +247,62 @@ function watchSections(view, openExternal) {
 /**
  * The contract of `reader.js` over a foliate view that already shows a page.
  * @param {object} view
- * @param {{key?: string, title?: string, onInput?: (callback: (event: Event) => void) => void}} info
+ * @param {{key?: string, title?: string, onInput?: (callback: (event: Event) => void) => void,
+ *   place?: {cfi: string, sentence?: number}|null, handCallbacks?: (() => void)[]}} info `place` is where the page on
+ *   screen was asked for, which can be anywhere inside it.
  * @returns {import('./reader.js').Reader}
  */
-export function makeReader(view, { key, title, onInput = () => {} }) {
+export function makeReader(view, { key, title, onInput = () => {}, place = null, handCallbacks = [] }) {
   const moveCallbacks = [];
-  const position = () => ({ kind: 'epub', cfi: view.lastLocation.cfi, sentence: FIRST_SENTENCE });
+  const sectionCallbacks = [];
+  // A page only says where it starts, and a place inside it holds for as long as it stays on screen.
+  const held = (at) => (at?.cfi
+    ? { cfi: at.cfi, sentence: at.sentence ?? FIRST_SENTENCE, page: view.lastLocation?.cfi, section: shownIndex(view) }
+    : null);
+  let holding = held(place);
+  // The sentence the voice is on. While it reads this is the position, wherever the reader has scrolled to.
+  let spoken = null;
+
+  const placeHeld = () => spoken ?? (holding?.page === view.lastLocation?.cfi ? holding : null);
+
+  const position = () => {
+    const at = placeHeld();
+    return { kind: 'epub', cfi: at?.cfi ?? view.lastLocation.cfi, sentence: at?.sentence ?? FIRST_SENTENCE };
+  };
+
+  const onRelocate = ({ detail }) => {
+    if (holding && detail?.reason === MOVED_BY_LAYOUT && detail.index === holding.section) holding.page = view.lastLocation?.cfi;
+    else if (holding?.page !== view.lastLocation?.cfi) holding = null;
+    if (detail?.reason === MOVED_BY_SWIPE) handCallbacks.forEach((callback) => callback());
+  };
+  view.renderer.addEventListener('relocate', onRelocate);
+  const onSectionLoad = () => sectionCallbacks.forEach((callback) => callback());
+  view.addEventListener('load', onSectionLoad);
+
+  /** Whether the page on screen shows the start of `range`. A page of another document does not. */
+  const onPage = ({ startContainer, startOffset }) => {
+    const shown = view.lastLocation?.range;
+    if (shown?.startContainer?.ownerDocument !== startContainer.ownerDocument) return false;
+    return shown.comparePoint(startContainer, startOffset) === 0;
+  };
+
+  const placeOf = (range) => {
+    if (view.isFixedLayout) return view.lastLocation.cfi;
+    const shown = view.renderer.getContents().find(({ doc }) => doc === range.startContainer.ownerDocument);
+    return view.getCFI(shown?.index ?? shownIndex(view), range);
+  };
+
+  const pointOf = ({ cfi }) => {
+    try {
+      const doc = view.renderer.getContents()[0]?.doc;
+      const range = view.resolveCFI(cfi).anchor(doc);
+      return { node: range.startContainer, offset: range.startOffset };
+    } catch (error) {
+      console.warn(error);
+      return null;
+    }
+  };
+
   const notifyMove = debounce(() => {
     const at = position();
     moveCallbacks.forEach((callback) => callback(at));
@@ -250,8 +335,11 @@ export function makeReader(view, { key, title, onInput = () => {} }) {
     lang: bookLang(view.book.metadata),
     toc: () => flattenToc(view.book.toc),
     position,
-    goTo: async ({ cfi, href }) => {
+    goTo: async ({ cfi, href, sentence }) => {
+      spoken = null;
+      holding = null;
       await view.goTo(cfi ?? href);
+      holding = held({ cfi, sentence });
     },
     speechRoots: async () => shownDocs().map(({ doc, index }) => ({
       root: doc.body,
@@ -261,6 +349,26 @@ export function makeReader(view, { key, title, onInput = () => {} }) {
     onInput,
     setStyle: (css) => view.renderer.setStyles?.(css),
     nextSpeechSection: () => nextSpeechSection(view),
+    prevSpeechSection: () => prevSpeechSection(view),
+    speechStart: () => {
+      const at = placeHeld();
+      const point = at && pointOf(at);
+      if (point) return point;
+      const page = view.lastLocation?.range;
+      return page ? { node: page.startContainer, offset: page.startOffset } : null;
+    },
+    speakAt: ({ range, sentence, follow }) => {
+      // Text the app added is nowhere in the book, so the place stays on the sentence before it.
+      if (!range) return;
+      spoken = { cfi: placeOf(range), sentence };
+      if (follow && !view.isFixedLayout && !onPage(range)) view.renderer.scrollToAnchor(range);
+    },
+    speechStopped: () => {
+      if (spoken) holding = held(spoken);
+      spoken = null;
+    },
+    onHandMove: (callback) => handCallbacks.push(callback),
+    onSectionShown: (callback) => sectionCallbacks.push(callback),
     excerpt: () => {
       const text = view.lastLocation?.range?.toString() ?? shownDocs()[0]?.doc.body.textContent ?? '';
       return excerptOf(text.replace(SPACES, ' '));
@@ -280,6 +388,8 @@ export function makeReader(view, { key, title, onInput = () => {} }) {
     destroy: () => {
       notifyMove.cancel();
       view.removeEventListener('relocate', notifyMove);
+      view.renderer.removeEventListener('relocate', onRelocate);
+      view.removeEventListener('load', onSectionLoad);
       closeView(view);
     },
   };
@@ -319,6 +429,7 @@ async function readFile(url) {
   return new File([await response.blob()], BOOK_FILE_NAME);
 }
 
+/** @returns {Promise<boolean>} Whether the book opened at `cfi`, and not at any other page. */
 async function showFirstPage(view, cfi) {
   try {
     await view.init({ lastLocation: cfi });
@@ -326,10 +437,10 @@ async function showFirstPage(view, cfi) {
     // The saved place may no longer exist in this file. Any page beats no book.
     console.warn(error);
   }
-  if (!view.lastLocation) {
-    await view.goTo(view.book.sections.findIndex((section) => section.linear !== NOT_IN_READING_ORDER));
-  }
+  const landed = Boolean(view.lastLocation);
+  if (!landed) await view.goTo(view.book.sections.findIndex((section) => section.linear !== NOT_IN_READING_ORDER));
   if (!view.lastLocation) throw new Error('the book has no page to show');
+  return landed;
 }
 
 /**
@@ -351,7 +462,8 @@ export async function openEpub(url, host, opts, loadFoliate = importFoliate) {
     keepSectionsLoading(book.sections, opts.unreadableSection);
     prepareSections(book, opts);
     letSizesFollowTheText(book);
-    const onInput = watchSections(view, opts.openExternal);
+    const handCallbacks = [];
+    const onInput = watchSections(view, opts.openExternal, handCallbacks);
     view.addEventListener('external-link', (event) => {
       event.preventDefault();
       opts.openExternal(event.detail.href_);
@@ -364,8 +476,14 @@ export async function openEpub(url, host, opts, loadFoliate = importFoliate) {
     const key = await epubKey(book.metadata, opts.hash, book.sections.length);
     const saved = await opts.savedPosition(key);
     host.replaceChildren(view);
-    await showFirstPage(view, saved?.cfi);
-    return makeReader(view, { key, title: mainTitle(book.metadata?.title), onInput });
+    const landed = await showFirstPage(view, saved?.cfi);
+    return makeReader(view, {
+      key,
+      title: mainTitle(book.metadata?.title),
+      onInput,
+      handCallbacks,
+      place: landed ? saved : null,
+    });
   } catch (error) {
     closeView(view);
     throw error;

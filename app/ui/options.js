@@ -4,6 +4,8 @@ import { t } from '../core/i18n.js';
 const THEME_ATTRIBUTE = 'data-theme';
 const TEXT_SIZE_VARIABLE = '--text-size';
 const SYSTEM = 'system';
+const VOICE_OPTIONS_CLASS = 'voice-options';
+const ABOUT_CLASS = 'about';
 
 /** Not translated: it is the same notice as the one at the top of `licenses.txt`. */
 export const COPYRIGHT_NOTICE = 'Copyright (C) 2026 Martin DaVinci';
@@ -89,6 +91,38 @@ export function interfaceLang({ language }, systemLang) {
 }
 
 /**
+ * The voices are asked for separately, and they come when the rest of the panel is on screen.
+ * @param {HTMLElement} host The panel, with its options already drawn.
+ * @param {{lang: string, name: string, voices: {id: string, name: string}[], selected: string}[]} groups
+ * @param {(lang: string, voiceId: string) => void} onVoice
+ */
+export function renderVoiceOptions(host, groups, onVoice) {
+  const document = host.ownerDocument;
+  host.querySelector(`.${VOICE_OPTIONS_CLASS}`)?.remove();
+  const section = document.createElement('section');
+  section.className = VOICE_OPTIONS_CLASS;
+  section.append(...groups.map(({ lang, name, voices, selected }) => {
+    const select = document.createElement('select');
+    select.setAttribute('name', `voice-${lang}`);
+    select.append(...voices.map((voice) => {
+      const option = document.createElement('option');
+      option.setAttribute('value', voice.id);
+      if (voice.id === selected) option.setAttribute('selected', '');
+      option.textContent = voice.name;
+      return option;
+    }));
+    select.addEventListener('change', () => onVoice(lang, select.value));
+    const caption = document.createElement('span');
+    caption.textContent = t('options.voice', { lang: name });
+    const row = document.createElement('label');
+    row.className = 'option';
+    row.append(caption, select);
+    return row;
+  }));
+  host.querySelector(`.${ABOUT_CLASS}`).before(section);
+}
+
+/**
  * @param {HTMLElement} host
  * @param {Record<string, *>} options
  * @param {{onChange: (name: string, value: *) => void, onLicenses: () => void}} handlers
@@ -128,7 +162,7 @@ export function renderOptions(host, options, { onChange, onLicenses }) {
     licenses.textContent = t('about.licenses');
     licenses.addEventListener('click', () => onLicenses());
     const section = document.createElement('section');
-    section.className = 'about';
+    section.className = ABOUT_CLASS;
     section.append(paragraph(COPYRIGHT_NOTICE), paragraph(t('about.notice')), licenses);
     return section;
   };

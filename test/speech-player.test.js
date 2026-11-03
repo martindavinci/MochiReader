@@ -894,3 +894,38 @@ test('a position with only the block plays from that block', () => {
   assert.equal(jumped.engine.lastText, 'Due.');
   assert.deepEqual(jumped.player.current, { block: 1, sentence: 0 });
 });
+
+test('parking a loaded document pauses on its place with no sound, and resuming reads from there', async () => {
+  const engine = fakeEngine();
+  const states = [];
+  const moved = [];
+  const player = new SpeechPlayer({
+    engine,
+    sleep: async () => {},
+    onState: (state) => states.push(state),
+    onSentence: (at) => moved.push(at),
+  });
+  player.load([para('Uno.', 'Due.')], { block: 0, sentence: 1 });
+  player.park();
+  assert.equal(player.state, 'paused');
+  assert.deepEqual(states.at(-1), 'paused');
+  assert.deepEqual(moved, [{ block: 0, sentence: 1 }]);
+  assert.deepEqual(engine.calls, []);
+  player.resume();
+  await flush();
+  assert.equal(engine.calls[0].text, 'Due.');
+  player.stop();
+});
+
+test('with nothing loaded, or already reading, parking does nothing', async () => {
+  const engine = fakeEngine();
+  const player = new SpeechPlayer({ engine, sleep: async () => {} });
+  player.park();
+  assert.equal(player.state, 'idle');
+  player.load([para('Uno.')]);
+  player.play();
+  await flush();
+  player.park();
+  assert.equal(player.state, 'playing');
+  player.stop();
+});

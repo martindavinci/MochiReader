@@ -139,6 +139,13 @@ export class SpeechPlayer {
     if (this.#state === 'playing') this.#halt('paused');
   }
 
+  /** A document just loaded goes straight to a pause on its place, without a sound. */
+  park() {
+    if (this.#state !== 'idle' || !this.#hasText()) return;
+    this.#setState('paused');
+    this.#notifySentence();
+  }
+
   resume() {
     if (this.#state === 'paused') this.#start();
   }

@@ -12,6 +12,7 @@ import {
   mainTitle,
   makeReader,
   nextSpeechSection,
+  prevSpeechSection,
   openEpub,
   readingBlocks,
 } from '../app/readers/epub.js';
@@ -989,4 +990,242 @@ test('the renderer takes the view asked for and one column', async (t) => {
   assert.equal(view.renderer.attributes.get('flow'), 'scrolled');
   assert.equal(view.renderer.attributes.get('max-column-count'), '1');
   assert.match(view.renderer.attributes.get('max-inline-size'), /^\d+px$/);
+});
+
+/** A view whose renderer can say where a place is. Enough of foliate for the place being read. */
+function speakingView({ scrolled = false } = {}) {
+  const view = new FakeView();
+  view.getCFI = (index, range) => `cfi(${index},${range?.tag ?? ''})`;
+  view.resolveCFI = (cfi) => ({ anchor: () => ({ startContainer: 'resolved', startOffset: cfi.length }) });
+  view.renderer.scrolled = scrolled;
+  view.renderer.anchored = [];
+  view.renderer.scrollToAnchor = async (range) => view.renderer.anchored.push(range);
+  const { doc } = view.renderer;
+  view.visible = { comparePoint: () => 0, startContainer: { ownerDocument: doc }, startOffset: 2 };
+  view.lastLocation = { cfi: 'page-cfi', range: view.visible };
+  return view;
+}
+
+const sentenceIn = (view, tag) => ({ tag, startContainer: { ownerDocument: view.renderer.doc }, startOffset: 0 });
+
+test('the sentence being read is the position of a book, under its own place', () => {
+  const view = speakingView();
+  const reader = makeReader(view, {});
+  reader.speakAt({ range: sentenceIn(view, 's1'), sentence: 4, follow: false });
+  assert.deepEqual(reader.position(), { kind: 'epub', cfi: 'cfi(0,s1)', sentence: 4 });
+});
+
+test('a page in the book is turned only when the sentence is not on it', () => {
+  const view = speakingView();
+  const reader = makeReader(view, {});
+  const onPage = sentenceIn(view, 'on');
+  reader.speakAt({ range: onPage, sentence: 0, follow: true });
+  assert.deepEqual(view.renderer.anchored, []);
+  view.visible.comparePoint = () => 1;
+  const past = sentenceIn(view, 'past');
+  reader.speakAt({ range: past, sentence: 1, follow: true });
+  assert.deepEqual(view.renderer.anchored, [past]);
+});
+
+test('not following, a book stays on its page', () => {
+  const view = speakingView();
+  view.visible.comparePoint = () => 1;
+  const reader = makeReader(view, {});
+  reader.speakAt({ range: sentenceIn(view, 'past'), sentence: 1, follow: false });
+  assert.deepEqual(view.renderer.anchored, []);
+});
+
+test('a page that shows another document does not count as showing the sentence', () => {
+  const view = speakingView();
+  view.visible = { comparePoint: () => assert.fail('another document'), startContainer: { ownerDocument: {} } };
+  view.lastLocation = { cfi: 'page-cfi', range: view.visible };
+  const reader = makeReader(view, {});
+  reader.speakAt({ range: sentenceIn(view, 's'), sentence: 0, follow: true });
+  assert.equal(view.renderer.anchored.length, 1);
+});
+
+test('text the app added has no place of its own: the position stays on the sentence before it', () => {
+  const view = speakingView();
+  const reader = makeReader(view, {});
+  reader.speakAt({ range: sentenceIn(view, 's1'), sentence: 4, follow: true });
+  reader.speakAt({ range: null, sentence: 5, follow: true });
+  assert.deepEqual(reader.position(), { kind: 'epub', cfi: 'cfi(0,s1)', sentence: 4 });
+});
+
+test('a fixed layout keeps the place of its page, which nothing has to turn', () => {
+  const sections = [{}, {}];
+  const renderer = new FakeFixedRenderer([[sections[0]], [sections[1]]]);
+  const view = new FakeView(renderer, { isFixedLayout: true });
+  view.lastLocation = { cfi: 'page-cfi', range: null };
+  const reader = makeReader(view, {});
+  reader.speakAt({ range: { startContainer: { ownerDocument: renderer.doc } }, sentence: 1, follow: true });
+  assert.deepEqual(reader.position(), { kind: 'epub', cfi: 'page-cfi', sentence: 1 });
+});
+
+test('when the voice stops, its sentence stays the position while the page stays', () => {
+  const view = speakingView();
+  const reader = makeReader(view, {});
+  reader.speakAt({ range: sentenceIn(view, 's1'), sentence: 4, follow: false });
+  reader.speechStopped();
+  assert.equal(reader.position().cfi, 'cfi(0,s1)');
+  assert.equal(reader.position().sentence, 4);
+  view.lastLocation = { cfi: 'next-page', range: view.visible };
+  assert.equal(reader.position().cfi, 'next-page');
+  assert.equal(reader.position().sentence, 0);
+});
+
+test('a book opened at a place inside its page keeps that place while the page stays', () => {
+  const view = speakingView();
+  const reader = makeReader(view, { place: { cfi: 'saved-sentence', sentence: 3 } });
+  assert.deepEqual(reader.position(), { kind: 'epub', cfi: 'saved-sentence', sentence: 3 });
+  view.lastLocation = { cfi: 'next-page', range: view.visible };
+  assert.deepEqual(reader.position(), { kind: 'epub', cfi: 'next-page', sentence: 0 });
+});
+
+test('going to a place keeps it while the page stays, and takes the position from the voice', async () => {
+  const view = speakingView();
+  const reader = makeReader(view, {});
+  reader.speakAt({ range: sentenceIn(view, 's1'), sentence: 4, follow: false });
+  await reader.goTo({ kind: 'epub', cfi: 'bookmark', sentence: 2 });
+  assert.deepEqual(reader.position(), { kind: 'epub', cfi: 'bookmark', sentence: 2 });
+  await reader.goTo({ kind: 'epub', href: 'a.xhtml' });
+  assert.equal(reader.position().cfi, 'page-cfi');
+});
+
+test('a change of layout moves where the page starts, and the place stays', () => {
+  const view = speakingView();
+  const reader = makeReader(view, { place: { cfi: 'saved', sentence: 2 } });
+  view.lastLocation = { cfi: 'reflowed', range: view.visible };
+  view.renderer.dispatchEvent(new CustomEvent('relocate', { detail: { reason: 'anchor', index: 0 } }));
+  assert.equal(reader.position().cfi, 'saved');
+  view.lastLocation = { cfi: 'next-page', range: view.visible };
+  view.renderer.dispatchEvent(new CustomEvent('relocate', { detail: { reason: 'page', index: 0 } }));
+  assert.equal(reader.position().cfi, 'next-page');
+});
+
+test('a new section settling into its layout is a move away, not a change of layout', () => {
+  const view = speakingView();
+  const reader = makeReader(view, { place: { cfi: 'saved', sentence: 2 } });
+  view.lastLocation = { cfi: 'next-section', range: view.visible };
+  view.renderer.dispatchEvent(new CustomEvent('relocate', { detail: { reason: 'anchor', index: 2 } }));
+  assert.equal(reader.position().cfi, 'next-section');
+});
+
+test('a place given up does not come back with a change of layout', () => {
+  const view = speakingView();
+  const reader = makeReader(view, { place: { cfi: 'saved', sentence: 2 } });
+  view.lastLocation = { cfi: 'next-page', range: view.visible };
+  view.renderer.dispatchEvent(new CustomEvent('relocate', { detail: { reason: 'page', index: 0 } }));
+  view.lastLocation = { cfi: 'reflowed', range: view.visible };
+  view.renderer.dispatchEvent(new CustomEvent('relocate', { detail: { reason: 'anchor', index: 0 } }));
+  assert.equal(reader.position().cfi, 'reflowed');
+});
+
+test('reading starts at the place held, or at the start of the page', () => {
+  const view = speakingView();
+  const reader = makeReader(view, {});
+  assert.deepEqual(reader.speechStart(), { node: view.visible.startContainer, offset: 2 });
+  const held = makeReader(view, { place: { cfi: 'saved', sentence: 0 } });
+  assert.deepEqual(held.speechStart(), { node: 'resolved', offset: 'saved'.length });
+});
+
+test('reading starts at the start of the page if the place cannot be found, or at the start of a fixed page', () => {
+  const view = speakingView();
+  view.resolveCFI = () => {
+    throw new Error('not in this file');
+  };
+  const warn = console.warn;
+  console.warn = () => {};
+  const reader = makeReader(view, { place: { cfi: 'saved', sentence: 0 } });
+  assert.deepEqual(reader.speechStart(), { node: view.visible.startContainer, offset: 2 });
+  console.warn = warn;
+  const sections = [{}];
+  const fixed = new FakeView(new FakeFixedRenderer([sections]), { isFixedLayout: true });
+  fixed.lastLocation = { cfi: 'page', range: null };
+  assert.equal(makeReader(fixed, {}).speechStart(), null);
+});
+
+test('a new section on screen is told, and no more once the book has closed', () => {
+  const view = speakingView();
+  const reader = makeReader(view, {});
+  let shown = 0;
+  reader.onSectionShown(() => {
+    shown += 1;
+  });
+  view.dispatchEvent(new CustomEvent('load', { detail: { doc: view.renderer.doc, index: 0 } }));
+  assert.equal(shown, 1);
+  reader.destroy();
+  view.dispatchEvent(new CustomEvent('load', { detail: { doc: view.renderer.doc, index: 0 } }));
+  assert.equal(shown, 1);
+});
+
+test('the section before is the one before in the reading order', async () => {
+  const view = new FakeView();
+  view.renderer.at = 2;
+  view.renderer.goTo = async ({ index }) => {
+    view.renderer.at = index;
+  };
+  assert.equal(await prevSpeechSection(view), true);
+  assert.equal(view.renderer.at, 0);
+  assert.equal(await prevSpeechSection(view), false);
+});
+
+test('in a fixed layout the section before is the spread before', async () => {
+  const sections = [{}, {}];
+  const renderer = new FakeFixedRenderer([[sections[0]], [sections[1]]]);
+  const view = new FakeView(renderer, { isFixedLayout: true });
+  renderer.spread = 1;
+  assert.equal(await prevSpeechSection(view), true);
+  assert.equal(renderer.spread, 0);
+  assert.equal(await prevSpeechSection(view), false);
+});
+
+test('scrolling a book by hand counts in its scrolling view only', async (t) => {
+  t.after(stubFetch(okFile()));
+  const { host, view, foliate } = fakeFoliate();
+  const reader = await openEpub('u', host, openOptions(), foliate);
+  let moves = 0;
+  reader.onHandMove(() => {
+    moves += 1;
+  });
+  const { document, window } = parseHTML('<html><head></head><body><p>One</p></body></html>');
+  view.dispatchEvent(new CustomEvent('load', { detail: { doc: document, index: 0 } }));
+  const input = (type, fields = {}) => document.dispatchEvent(Object.assign(new window.Event(type), fields));
+  input('wheel');
+  input('keydown', { key: 'PageDown' });
+  assert.equal(moves, 0, 'a paginated book does not scroll');
+  view.renderer.scrolled = true;
+  input('wheel');
+  assert.equal(moves, 1);
+  input('keydown', { key: 'PageDown' });
+  assert.equal(moves, 2);
+  input('keydown', { key: 'Enter' });
+  assert.equal(moves, 2);
+  view.dispatchEvent(new Event('pointerdown'));
+  assert.equal(moves, 3, 'a press outside the frame is on the scrollbar');
+});
+
+test('a swipe to another page is a move by hand in a paginated book too', () => {
+  const view = speakingView();
+  const reader = makeReader(view, {});
+  let moves = 0;
+  reader.onHandMove(() => {
+    moves += 1;
+  });
+  view.renderer.dispatchEvent(new CustomEvent('relocate', { detail: { reason: 'snap' } }));
+  assert.equal(moves, 1);
+  view.renderer.dispatchEvent(new CustomEvent('relocate', { detail: { reason: 'navigation' } }));
+  assert.equal(moves, 1);
+});
+
+test('a right click in a section of the book reaches the reader too', async (t) => {
+  t.after(stubFetch(okFile()));
+  const { host, view, foliate } = fakeFoliate();
+  const reader = await openEpub('u', host, openOptions(), foliate);
+  const seen = [];
+  reader.onInput((event) => seen.push(event.type));
+  const { document, window } = parseHTML('<html><head></head><body><p>One</p></body></html>');
+  view.dispatchEvent(new CustomEvent('load', { detail: { doc: document, index: 0 } }));
+  document.dispatchEvent(new window.Event('contextmenu'));
+  assert.deepEqual(seen, ['contextmenu']);
 });

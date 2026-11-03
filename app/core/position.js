@@ -2,6 +2,9 @@
 
 export const SAVE_DEBOUNCE_MS = 500;
 
+/** The keys that scroll the text while the voice reads. Space is not one of them: then it pauses. */
+export const SCROLL_KEYS = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End']);
+
 const NO_LINE = 0;
 const NO_BLOCK = -1;
 const SOURCEPOS_LINE = /^(\d+):/;

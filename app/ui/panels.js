@@ -200,3 +200,12 @@ export function renderToc(host, entries, { labels, onGo }) {
     entries.length > 0 ? list : element('p', 'panel-empty', labels.empty),
   );
 }
+
+/**
+ * @param {HTMLElement} host
+ * @param {string[]} paragraphs What a panel with nothing to choose has to say.
+ */
+export function renderMessage(host, paragraphs) {
+  const element = elementIn(host);
+  host.replaceChildren(...paragraphs.map((text) => element('p', 'panel-message', text)));
+}

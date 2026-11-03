@@ -200,8 +200,8 @@ test('every part of a large document sits directly in the text and has an expect
 
 test('the speech roots of a large document hold all of it', async () => {
   const { reader } = setup({ html: longList() });
-  const [{ root }] = await reader.speechRoots();
-  assert.equal(root.querySelectorAll('li').length, ALL_ITEMS);
+  const roots = await reader.speechRoots();
+  assert.equal(roots.reduce((items, { root }) => items + root.querySelectorAll('li').length, 0), ALL_ITEMS);
 });
 
 test('going to a line of a large document waits for that line', async () => {
@@ -651,4 +651,154 @@ test('a modifier pressed on the way to a shortcut keeps the place, and a key tha
   }
   press('PageDown');
   assert.equal(line(reader), 1);
+});
+
+/** A range the voice is on, somewhere on the page. */
+const rangeAt = (top, height = 20) => ({ getBoundingClientRect: () => ({ top, bottom: top + height, width: 300, height }) });
+
+const inputOn = (document, target, type, fields = {}) => {
+  const event = new document.defaultView.Event(type, { bubbles: true });
+  Object.assign(event, fields);
+  target.dispatchEvent(event);
+};
+
+test('the sentence being read is the position, wherever the reader has scrolled to', () => {
+  const { reader, host, document } = setup();
+  reader.speakAt({ range: null, line: 5, sentence: 2, follow: false });
+  assert.deepEqual(reader.position(), { kind: 'md', line: 5, sentence: 2 });
+  host.scrollTop = 250;
+  inputOn(document, host, 'wheel');
+  assert.deepEqual(reader.position(), { kind: 'md', line: 5, sentence: 2 });
+});
+
+test('a sentence with no line of its own leaves the line where it is', () => {
+  const { reader } = setup();
+  reader.speakAt({ range: null, line: null, sentence: 0, follow: false });
+  assert.deepEqual(reader.position(), { kind: 'md', line: 1, sentence: 0 });
+});
+
+test('following brings a sentence on screen, with room above it', () => {
+  const { reader, host } = setup({ scrollTop: 100 });
+  reader.speakAt({ range: rangeAt(800), line: 5, sentence: 0, follow: true });
+  assert.equal(host.scrollTop, 100 + 800 - 500 * 0.25);
+  host.scrollTop = 100;
+  reader.speakAt({ range: rangeAt(-40), line: 5, sentence: 0, follow: true });
+  assert.equal(host.scrollTop, 100 - 40 - 500 * 0.25);
+});
+
+test('a sentence already on screen moves nothing', () => {
+  const { reader, host } = setup({ scrollTop: 100 });
+  reader.speakAt({ range: rangeAt(200), line: 5, sentence: 0, follow: true });
+  assert.equal(host.scrollTop, 100);
+});
+
+test('what covers the top of the pane does not count as on screen', () => {
+  scrollPaddingTop = '60px';
+  try {
+    const { reader, host } = setup({ scrollTop: 100 });
+    reader.speakAt({ range: rangeAt(30), line: 5, sentence: 0, follow: true });
+    assert.equal(host.scrollTop, 100 + 30 - 60 - (500 - 60) * 0.25);
+  } finally {
+    scrollPaddingTop = 'auto';
+  }
+});
+
+test('not following, or with the sentence nowhere on the page, nothing scrolls', () => {
+  const { reader, host } = setup({ scrollTop: 100 });
+  reader.speakAt({ range: rangeAt(800), line: 5, sentence: 0, follow: false });
+  assert.equal(host.scrollTop, 100);
+  const unseen = { getBoundingClientRect: () => ({ top: 0, bottom: 0, width: 0, height: 0 }) };
+  reader.speakAt({ range: unseen, line: 5, sentence: 0, follow: true });
+  assert.equal(host.scrollTop, 100);
+});
+
+test('when the voice stops, its sentence stays the position until the reader moves, and nothing scrolls', () => {
+  const { reader, host, document, scrolled } = setup();
+  reader.speakAt({ range: null, line: 5, sentence: 2, follow: false });
+  reader.speechStopped();
+  assert.deepEqual(reader.position(), { kind: 'md', line: 5, sentence: 2 });
+  layoutChanged();
+  assert.deepEqual(scrolled, []);
+  host.scrollTop = 250;
+  inputOn(document, host, 'wheel');
+  assert.deepEqual(reader.position(), { kind: 'md', line: 5, sentence: 0 });
+});
+
+test('stopping with no sentence read keeps nothing', () => {
+  const { reader, host } = setup({ scrollTop: 250 });
+  reader.speechStopped();
+  host.scrollTop = 0;
+  assert.deepEqual(reader.position(), { kind: 'md', line: 1, sentence: 0 });
+});
+
+test('going to a saved place keeps the number of its sentence until the reader moves', async () => {
+  const { reader, host, document } = setup();
+  await reader.goTo({ kind: 'md', line: 5, sentence: 3 });
+  assert.deepEqual(reader.position(), { kind: 'md', line: 5, sentence: 3 });
+  assert.deepEqual(reader.speechStart(), { line: 5, sentence: 3 });
+  inputOn(document, host, 'wheel');
+  assert.equal(reader.position().sentence, 0);
+});
+
+test('going somewhere while the voice reads takes the position there', async () => {
+  const { reader } = setup();
+  reader.speakAt({ range: null, line: 5, sentence: 2, follow: false });
+  await reader.goTo({ kind: 'md', line: 9, sentence: 0 });
+  assert.deepEqual(reader.position(), { kind: 'md', line: 9, sentence: 0 });
+});
+
+test('the wheel, the scrolling keys and the scrollbar count as moving by hand', () => {
+  const { reader, host, document, blocks } = setup();
+  let moves = 0;
+  reader.onHandMove(() => {
+    moves += 1;
+  });
+  inputOn(document, host, 'wheel');
+  assert.equal(moves, 1);
+  for (const key of ['ArrowDown', 'ArrowUp', 'PageDown', 'PageUp', 'Home', 'End']) {
+    moves = 0;
+    inputOn(document, host, 'keydown', { key });
+    assert.equal(moves, 1, key);
+  }
+  moves = 0;
+  inputOn(document, host, 'keydown', { key: 'Enter' });
+  inputOn(document, host, 'keydown', { key: 'Control' });
+  assert.equal(moves, 0);
+  inputOn(document, blocks[1], 'pointerdown');
+  assert.equal(moves, 0, 'a press on the text is no scrolling');
+  inputOn(document, host, 'pointerdown');
+  assert.equal(moves, 1, 'a press on the pane itself is on its scrollbar');
+});
+
+test('a closed reader hears no more of the hand', () => {
+  const { reader, host, document } = setup();
+  let moves = 0;
+  reader.onHandMove(() => {
+    moves += 1;
+  });
+  reader.destroy();
+  inputOn(document, host, 'wheel');
+  assert.equal(moves, 0);
+});
+
+test('a right click in the text reaches onInput too', () => {
+  const { reader, blocks, document } = setup();
+  const seen = [];
+  reader.onInput((event) => seen.push(event.type));
+  blocks[1].dispatchEvent(new document.defaultView.Event('contextmenu', { bubbles: true }));
+  assert.deepEqual(seen, ['contextmenu']);
+});
+
+test('a Markdown file has one section, so there is none before it either', async () => {
+  assert.equal(await setup().reader.prevSpeechSection(), false);
+});
+
+test('a large document offers its parts one by one, so that reading can start without stopping the page', async () => {
+  const html = '<p data-sourcepos="1:1-1:9">Testo del documento.</p>'.repeat(40_000);
+  assert.ok(html.length >= LARGE_DOC_CHARS);
+  const { reader, host } = setup({ html });
+  const roots = await reader.speechRoots();
+  assert.ok(roots.length > 1);
+  assert.deepEqual(roots.map(({ root }) => root), [...host.querySelector('article').children]);
+  reader.destroy();
 });

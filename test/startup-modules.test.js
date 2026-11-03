@@ -8,7 +8,19 @@ const ENTRY_POINT = 'ui/shell.js';
 // Only what is imported at the top of a module loads with it. `import()` waits until it is needed.
 const STATIC_IMPORT = /^(?:import|export)\s[^;'"]*?['"](\.[^'"]+)['"]/gm;
 // What only reading aloud or a book needs. Each file of the first frame adds to the start of the app.
-const NOT_AT_START = ['speech/lang-profiles.js', 'readers/epub.js', 'vendor/foliate/view.js'];
+const NOT_AT_START = [
+  'speech/lang-profiles.js',
+  'speech/lang.js',
+  'speech/session.js',
+  'speech/player.js',
+  'speech/engine-web.js',
+  'speech/extract.js',
+  'speech/media-keys.js',
+  'speech/test-hooks.js',
+  'ui/speechbar.js',
+  'readers/epub.js',
+  'vendor/foliate/view.js',
+];
 
 function modulesFrom(entry) {
   const seen = new Set();

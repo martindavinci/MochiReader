@@ -6,8 +6,8 @@ import { fileName, isSupported, OPENABLE_EXTENSIONS } from '../core/paths.js';
 import { Tabs } from '../core/tabs.js';
 import { bookStyle } from '../readers/epub-style.js';
 import { openMarkdown } from '../readers/markdown.js';
-import { applyOptions, interfaceLang, nextTextSize, readOptions, renderOptions } from './options.js';
-import { createClickShield, createPanels, createRowGuard, keepFocus, renderBookmarks, renderLicenses, renderToc } from './panels.js';
+import { applyOptions, interfaceLang, nextTextSize, readOptions, renderOptions, renderVoiceOptions } from './options.js';
+import { createClickShield, createPanels, createRowGuard, keepFocus, renderBookmarks, renderLicenses, renderMessage, renderToc } from './panels.js';
 import { renderRecents } from './recents.js';
 import { renderTabBar } from './tabbar.js';
 
@@ -38,6 +38,7 @@ const PANEL_BOOKMARKS = 'bookmarks';
 const PANEL_TOC = 'toc';
 const PANEL_OPTIONS = 'options';
 const PANEL_LICENSES = 'licenses';
+const PANEL_VOICE_HELP = 'voice-help';
 const FORWARD = 1;
 const BACK = -1;
 // The page scrolls the text of a Markdown file on its own, as long as the key reaches it. A book turns its own pages.
@@ -45,10 +46,20 @@ const PAGE_ACTIONS = new Set(['scroll.page']);
 // What a focused button or list answers to itself, and so must not also act on the text behind it.
 const CONTROLS = 'button, select, input, #panel';
 const CONTROL_KEYS = new Set([' ', '+', '-', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown']);
+const MEDIA_KEY_PREFIX = 'Media';
+const LINK_SELECTOR = 'a[href]';
+const CONTEXT_MENU = 'contextmenu';
+const CLICK = 'click';
+// What the session does on its own, as soon as it is there. Until then there is no reading for them to act on.
+const SPEECH_COMMANDS = [
+  'speech.toggle', 'speech.prevSentence', 'speech.nextSentence', 'speech.prevBlock', 'speech.nextBlock',
+  'speech.prevSection', 'speech.nextSection', 'speech.slower', 'speech.faster',
+];
 // A key held down repeats. For these that is still what the reader wants; closing every tab is not.
 const REPEATING_ACTIONS = new Set([
   'tab.next', 'text.bigger', 'text.smaller', 'block.prev', 'block.next', 'section.prev', 'section.next',
-  'page.prev', 'page.next', 'scroll.page',
+  'page.prev', 'page.next', 'scroll.page', 'speech.prevSentence', 'speech.nextSentence', 'speech.prevBlock',
+  'speech.nextBlock', 'speech.prevSection', 'speech.nextSection', 'speech.slower', 'speech.faster',
 ]);
 
 const tabs = new Tabs();
@@ -72,6 +83,9 @@ let shownTitle = APP_NAME;
 let toastTimer = null;
 let drawnRecents = null;
 let followingSystemTheme = false;
+/** Reading aloud, once it has been asked for: everything it needs stays out of the first frame. */
+let speech = null;
+let speechLoading = null;
 
 const twoFrames = () => new Promise((resolve) => {
   requestAnimationFrame(() => requestAnimationFrame(resolve));
@@ -96,6 +110,7 @@ function refresh() {
   if ((active?.id ?? null) !== shownTabId) panels.close();
   shownTabId = active?.id ?? null;
   for (const [id, entry] of entries) entry.pane.classList.toggle('active', id === active?.id);
+  speech?.tabShown(entries.get(active?.id));
   home.classList.toggle('active', !active);
   if (!panels.current()) focusText();
   renderTabBar(tabBar, tabs.all(), active?.id, {
@@ -125,6 +140,7 @@ function savePosition(entry, position = entry.reader?.position()) {
 function closeTab(id) {
   const entry = entries.get(id);
   if (entry) savePosition(entry);
+  speech?.tabClosed(entry);
   entry?.reader?.destroy();
   entry?.pane.remove();
   entries.delete(id);
@@ -240,9 +256,50 @@ function followSystemTheme() {
   matchMedia(DARK_SYSTEM_THEME).addEventListener('change', styleBooks);
 }
 
+function loadSpeech() {
+  speechLoading ??= import('../speech/session.js').then(({ createSession }) => {
+    speech = createSession({
+      invoke,
+      save: (entry) => savePosition(entry),
+      isInFront: (entry) => activeEntry() === entry,
+      nameOf: ({ path }) => fileName(path),
+      showMessage: showToast,
+      showVoiceHelp,
+      sourceMode: () => options.sourceMode,
+    });
+    return speech;
+  });
+  return speechLoading;
+}
+
+async function readAloud() {
+  const entry = activeEntry();
+  if (entry?.reader) await (await loadSpeech()).start(entry);
+}
+
+function showVoiceHelp(paragraphs) {
+  panels.show(PANEL_VOICE_HELP);
+  renderMessage(panelHost, paragraphs);
+  panels.focus();
+}
+
+/** The menu of the text offers to read from the point it was opened on. The default one of the browser is off. */
+async function openReadMenu(entry, event) {
+  event.preventDefault();
+  const { clientX: x, clientY: y, target } = event;
+  const doc = target.ownerDocument;
+  const frame = doc.defaultView.frameElement?.getBoundingClientRect();
+  const { openTextMenu } = await import('./speechbar.js');
+  openTextMenu(document, { x: x + (frame?.left ?? 0), y: y + (frame?.top ?? 0) }, async () => {
+    (await loadSpeech()).readFromScreen(entry, doc, x, y);
+  });
+}
+
 /** A key pressed in a book stays in its frame, so it comes here from the reader. */
-function onBookInput(event) {
+function onBookInput(entry, event) {
   if (event.type === KEY_DOWN) onKeyDown(event);
+  else if (event.type === CONTEXT_MENU) openReadMenu(entry, event);
+  else if (event.type === CLICK) speech?.textClicked(entry, event);
 }
 
 async function showBook(doc, host, savedPosition) {
@@ -278,7 +335,7 @@ function adoptBook(doc, entry, reader) {
   entry.key = reader.key;
   entry.title = reader.title || doc.name;
   entry.notice = '';
-  reader.onInput(onBookInput);
+  reader.onInput((event) => onBookInput(entry, event));
   reader.onMove((position) => savePosition(entry, position));
   entry.status = STATUS_OK;
   entry.restored = true;
@@ -301,8 +358,15 @@ async function mountBook(doc, id, entry, savedPosition) {
 function mountMarkdown(doc, entry) {
   entry.reader = openMarkdown(doc, entry.pane);
   entry.reader.onInput((event) => {
-    const link = event.target.closest('a[href]');
-    if (!link) return;
+    if (event.type === CONTEXT_MENU) {
+      openReadMenu(entry, event);
+      return;
+    }
+    const link = event.target.closest(LINK_SELECTOR);
+    if (!link) {
+      speech?.textClicked(entry, event);
+      return;
+    }
     event.preventDefault();
     follow(linkAction(link.getAttribute('href')), entry.pane);
   });
@@ -368,6 +432,7 @@ async function reloadBook(doc, id, entry) {
   entry.kind = doc.kind;
   entry.modified = doc.modifiedMs ?? null;
   adoptBook(doc, entry, reader);
+  await speech?.readerMoved(entry);
 }
 
 async function reload(id, entry) {
@@ -383,6 +448,7 @@ async function reload(id, entry) {
   setFileNotice(entry, '');
   await mount(doc, id, entry);
   await settle(id, entry, position);
+  await speech?.readerMoved(entry);
 }
 
 /** Text already open stays readable whatever the disk says. A drive that does not answer says nothing about the file. */
@@ -513,6 +579,7 @@ async function openBookmark({ key, path, position, title }) {
     return;
   }
   await entry?.reader?.goTo(position);
+  await speech?.readerMoved(entry);
 }
 
 async function drawBookmarksPanel(row) {
@@ -534,10 +601,11 @@ async function drawBookmarksPanel(row) {
 function drawTocPanel() {
   renderToc(panelHost, activeEntry()?.reader?.toc() ?? [], {
     labels: { title: t('toc.title'), empty: t('toc.empty') },
-    onGo: openingRow((target) => {
-      const { reader } = activeEntry();
+    onGo: openingRow(async (target) => {
+      const entry = activeEntry();
       closePanel();
-      reader.goTo(target);
+      await entry.reader.goTo(target);
+      await speech?.readerMoved(entry);
     }),
   });
 }
@@ -565,6 +633,7 @@ function changeOption(name, value) {
   invoke('state_set_option', { name, value });
   if (name === 'epubView') openBooks().forEach(({ reader }) => reader.setFlow(value));
   if (name === 'language') {
+    speech?.redraw();
     refresh();
     if (!tabs.active()) showRecents();
   }
@@ -574,8 +643,23 @@ function changeOption(name, value) {
   }
 }
 
+function chooseDefaultVoice(lang, voiceId) {
+  invoke('state_set_voice', { lang, voiceId });
+  speech?.defaultVoiceChanged(lang, voiceId);
+}
+
+/** Asks for what only reading aloud needs, so they come a moment after the rest of the panel. */
+async function drawVoiceOptions() {
+  const { languageName, voiceGroups, WebSpeechEngine } = await import('../speech/engine-web.js');
+  const [voices, { voices: saved }] = await Promise.all([new WebSpeechEngine().voices(), invoke('state_get')]);
+  if (panels.current() !== PANEL_OPTIONS) return;
+  const groups = voiceGroups(voices, saved).map((group) => ({ ...group, name: languageName(group.lang) }));
+  renderVoiceOptions(panelHost, groups, chooseDefaultVoice);
+}
+
 function drawOptionsPanel() {
   renderOptions(panelHost, options, { onChange: changeOption, onLicenses: () => showPanel(PANEL_LICENSES) });
+  drawVoiceOptions();
 }
 
 async function drawLicensesPanel() {
@@ -634,7 +718,6 @@ async function pickFiles() {
   if (paths) await openPaths(paths);
 }
 
-// Speech has no actions here yet: its keys still stay away from the browser.
 const SHORTCUTS = {
   'file.open': pickFiles,
   'tab.close': () => {
@@ -660,6 +743,8 @@ const SHORTCUTS = {
   'page.next': () => activeEntry()?.reader?.goRight?.(),
   'page.prev': () => activeEntry()?.reader?.goLeft?.(),
   'scroll.page': () => activeEntry()?.reader?.next?.(),
+  'speech.start': readAloud,
+  ...Object.fromEntries(SPEECH_COMMANDS.map((action) => [action, () => speech?.command(action)])),
 };
 
 /**
@@ -669,12 +754,16 @@ const SHORTCUTS = {
 function onKeyDown(event) {
   const chord = { key: event.key, ctrl: event.ctrlKey, shift: event.shiftKey, alt: event.altKey };
   const kind = activeEntry()?.kind ?? '';
-  const action = resolveKey(chord, { speaking: false, kind });
+  const speaking = speech?.active() ?? false;
+  const action = resolveKey(chord, { speaking, kind });
   if (!action || (PAGE_ACTIONS.has(action) && kind !== KIND_EPUB)) return;
   if (!event.ctrlKey && CONTROL_KEYS.has(event.key) && event.target.closest?.(CONTROLS)) return;
   event.preventDefault();
   event.stopPropagation();
-  if (!event.repeat || REPEATING_ACTIONS.has(action)) SHORTCUTS[action]?.();
+  if (event.repeat && !REPEATING_ACTIONS.has(action)) return;
+  // Windows may tell of the same press through the media session too, and that goes through the same place.
+  if (speaking && event.key.startsWith(MEDIA_KEY_PREFIX)) speech.pressKey(action);
+  else SHORTCUTS[action]?.();
 }
 
 async function measureOpen(path) {
@@ -688,7 +777,9 @@ async function measureOpen(path) {
 
 async function dumpTabs(out) {
   const rows = await Promise.all(tabs.all().map(async ({ id, path }) => {
-    const { status, kind, key, title, reader, notice } = entries.get(id);
+    const entry = entries.get(id);
+    const { status, kind, key, title, reader, notice } = entry;
+    const report = speech?.report(entry) ?? null;
     const position = reader ? reader.position() : null;
     const roots = reader ? await reader.speechRoots() : [];
     return {
@@ -705,15 +796,38 @@ async function dumpTabs(out) {
       position,
       screenLine: reader?.screenLine?.() ?? null,
       text: roots.map(({ root }) => root.textContent).join('\n'),
+      excerpt: reader?.excerpt() ?? null,
+      speech: report,
+      speechBar: report && document.getElementById('speechbar').textContent,
+      panelText: panels.current() ? panelHost.textContent : null,
+      textMenu: document.querySelector('.text-menu')?.textContent ?? null,
+      toast: toast.hidden ? null : toast.textContent,
     };
   }));
   await invoke('smoke_write_dump', { out, json: JSON.stringify(rows) });
 }
 
-function onShellCommand({ action, path, out, panel }) {
+/** Only the smoke build sends these two. Reading is started the way a key starts it. */
+async function onSpeechTest({ action, command, volume, log }) {
+  const [session, hooks] = await Promise.all([loadSpeech(), import('../speech/test-hooks.js')]);
+  if (action === 'speech-test') {
+    hooks.applySpeechTest(session, { volume, log }, invoke);
+  } else if (command === 'speech.start') {
+    hooks.markRestart();
+    readAloud();
+  } else if (command === 'tab.close') {
+    SHORTCUTS[command]();
+  } else {
+    hooks.runSpeechTest(command, session);
+  }
+}
+
+function onShellCommand(command) {
+  const { action, path, out, panel } = command;
   if (action === 'measure-open') measureOpen(path);
   else if (action === 'dump-tabs') dumpTabs(out);
   else if (action === 'show-panel') showPanel(panel);
+  else if (action === 'speech' || action === 'speech-test') onSpeechTest(command);
 }
 
 function onWindowFocus({ payload: focused }) {
@@ -723,6 +837,7 @@ function onWindowFocus({ payload: focused }) {
 }
 
 async function onAppClosing() {
+  speech?.stop();
   await Promise.allSettled([...entries.values()].map((entry) => savePosition(entry)));
   await invoke('close_ready');
 }

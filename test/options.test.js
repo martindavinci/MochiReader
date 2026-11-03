@@ -7,6 +7,7 @@ import en from '../app/lang/en.js';
 import it from '../app/lang/it.js';
 import {
   applyOptions,
+  renderVoiceOptions,
   COPYRIGHT_NOTICE,
   DEFAULT_OPTIONS,
   interfaceLang,
@@ -154,4 +155,36 @@ test('a change reports the value as the app stores it', () => {
   choose('theme', 'dark');
   choose('textSize', '22');
   assert.deepEqual(changes, [['theme', 'dark'], ['textSize', 22]]);
+});
+
+const GROUPS = [
+  { lang: 'en', name: 'English', voices: [{ id: 'zira', name: 'Zira' }], selected: 'zira' },
+  { lang: 'it', name: 'Italian', voices: [{ id: 'elsa', name: 'Elsa' }, { id: 'cosimo', name: 'Cosimo' }], selected: 'cosimo' },
+];
+
+test('each language with voices gets a list of them, with the last used selected', () => {
+  setLang('en');
+  const { host, field } = draw();
+  renderVoiceOptions(host, GROUPS, () => {});
+  assert.deepEqual(values(field('voice-it')), ['elsa', 'cosimo']);
+  assert.equal(selected(field('voice-it')), 'cosimo');
+  assert.equal(selected(field('voice-en')), 'zira');
+  const label = field('voice-it').closest('label').querySelector('span').textContent;
+  assert.ok(label.includes('Italian'), label);
+});
+
+test('the voices come before the notices at the bottom of the panel, and drawing them again replaces them', () => {
+  const { host } = draw();
+  renderVoiceOptions(host, GROUPS, () => {});
+  renderVoiceOptions(host, GROUPS, () => {});
+  assert.equal(host.querySelectorAll('select[name="voice-it"]').length, 1);
+  assert.equal(host.querySelector('.about').previousElementSibling, host.querySelector('.voice-options'));
+});
+
+test('choosing a voice says for which language', () => {
+  const { host, choose } = draw();
+  const chosen = [];
+  renderVoiceOptions(host, GROUPS, (lang, id) => chosen.push([lang, id]));
+  choose('voice-it', 'elsa');
+  assert.deepEqual(chosen, [['it', 'elsa']]);
 });

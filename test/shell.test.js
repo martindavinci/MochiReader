@@ -6,6 +6,8 @@ import { readFileSync } from 'node:fs';
 import { parseHTML } from 'linkedom';
 import en from '../app/lang/en.js';
 import it from '../app/lang/it.js';
+import { MEDIA_PRESS_WINDOW_MS } from '../app/speech/media-keys.js';
+import { withHighlights } from './speech-fakes.js';
 
 const PATH_A = 'C:/x/a.md';
 const PATH_B = 'C:/x/b.md';
@@ -19,6 +21,7 @@ const CHANGED_AT = 1000;
 const SAVE_WAIT_MS = 600;
 // Past the second click of a double click.
 const DOUBLE_CLICK_OVER_MS = 600;
+const MEDIA_WINDOW_OVER_MS = MEDIA_PRESS_WINDOW_MS + 50;
 
 const keyOf = (path) => `md:${path.toLowerCase()}`;
 
@@ -46,7 +49,7 @@ let run = 0;
 
 /** Starts a fresh copy of the real shell on the real page, with a fake Tauri around it. */
 async function startShell(openDocument, {
-  pending = [], positions = {}, recents = [], fileModified, bookmarks = [], options = {}, picked = null,
+  pending = [], positions = {}, recents = [], fileModified, bookmarks = [], options = {}, picked = null, voices = {},
 } = {}) {
   const { window, document, HTMLElement } = parseHTML(INDEX_HTML);
   const focused = [];
@@ -84,6 +87,7 @@ async function startShell(openDocument, {
     bookmarks,
     options,
     optionWrites: [],
+    voiceWrites: [],
     dialogs: [],
     picked,
     themeAtFirstPaint: undefined,
@@ -100,10 +104,13 @@ async function startShell(openDocument, {
     },
     state_get: () => {
       state.asked.push('state_get');
-      return { recents: state.recents, bookmarks: state.bookmarks };
+      return { recents: state.recents, bookmarks: state.bookmarks, voices, options: state.options };
     },
     state_get_options: () => state.options,
     licenses_text: () => 'the license text',
+    state_set_voice: (args) => {
+      state.voiceWrites.push(args);
+    },
     state_set_option: ({ name, value }) => {
       state.optionWrites.push([name, value]);
       state.options[name] = value;
@@ -1300,4 +1307,368 @@ test('escape in a list of the options still closes the panel', async () => {
   await shell.press(',', CTRL);
   await shell.press('Escape', { target: shell.panel().querySelector('select') });
   assert.equal(shell.panel().hidden, true);
+});
+
+// Reading aloud, through the real shell, session, player and extraction. Only speechSynthesis and the media session are fake.
+const speechShellStop = async (shell) => {
+  shell.bar().querySelector('[data-action="speech.stop"]').dispatchEvent(new shell.window.Event('click'));
+  await shell.wait();
+};
+
+const speechShellDown = () => {
+  delete globalThis.navigator.mediaSession;
+  delete globalThis.speechSynthesis;
+};
+
+const FAKE_VOICES = [
+  { voiceURI: 'uri:elsa', name: 'Elsa', lang: 'it-IT', localService: true },
+  { voiceURI: 'uri:cosimo', name: 'Cosimo', lang: 'it-IT', localService: true },
+  { voiceURI: 'uri:zira', name: 'Zira', lang: 'en-US', localService: true },
+];
+
+const speechDoc = (path, { lang = 'it' } = {}) => ({
+  ...markdownDoc(path, ''),
+  rendered: {
+    html: '<p data-sourcepos="1:1-1:9">Uno è qui. Due è qui.</p><p data-sourcepos="3:1-3:9">Tre è qui. <a href="https://e.org/a">Vai</a>.</p>',
+    lang,
+    headings: [],
+  },
+});
+
+async function startReadingShell(openDocument = async (path) => speechDoc(path), shellOptions = {}, voices = FAKE_VOICES) {
+  const spoken = [];
+  const synth = {
+    getVoices: () => voices,
+    speak: (utterance) => spoken.push(utterance),
+    cancel: () => {
+      const last = spoken.at(-1);
+      if (last && !last.settled) {
+        last.settled = true;
+        last.onerror?.({ error: 'canceled' });
+      }
+    },
+    addEventListener() {},
+    removeEventListener() {},
+  };
+  globalThis.speechSynthesis = synth;
+  globalThis.SpeechSynthesisUtterance = class {
+    constructor(text) {
+      this.text = text;
+    }
+  };
+  const handlers = new Map();
+  const mediaSession = {
+    setActionHandler: (name, handler) => (handler ? handlers.set(name, handler) : handlers.delete(name)),
+    metadata: null,
+    playbackState: 'none',
+  };
+  Object.defineProperty(globalThis.navigator, 'mediaSession', { configurable: true, value: mediaSession });
+  globalThis.MediaMetadata = class {
+    constructor(data) {
+      Object.assign(this, data);
+    }
+  };
+  // linkedom has no layout, so every block would count as at the top: each tab starts on the first line.
+  const atTop = { [keyOf(PATH_A)]: atLine(1), [keyOf(PATH_B)]: atLine(1) };
+  const shell = await startShell(openDocument, { positions: atTop, options: { language: 'en' }, ...shellOptions });
+  const { document, window } = shell;
+  withHighlights(document);
+  window.HTMLElement.prototype.play = async function play() {
+    this.isPlaying = true;
+  };
+  window.HTMLElement.prototype.pause = function pause() {
+    this.isPlaying = false;
+  };
+  window.HTMLElement.prototype.load = function load() {};
+  const wait = async () => {
+    for (let turn = 0; turn < 60; turn += 1) await shell.settled();
+  };
+  const finishSentence = async () => {
+    const last = spoken.at(-1);
+    last.settled = true;
+    last.onend();
+    await wait();
+  };
+  const bar = () => document.getElementById('speechbar');
+  const pressReady = async (key, options) => {
+    const event = await shell.press(key, options);
+    await wait();
+    return event;
+  };
+  return { ...shell, spoken, said: () => spoken.map(({ text }) => text), wait, finishSentence, bar, pressReady, handlers, mediaSession };
+}
+
+test('F5 starts reading from where the reader is, with a bar that was not there before', async (t) => {
+  t.after(() => speechShellDown());
+  const shell = await startReadingShell();
+  await shell.openPaths([PATH_A]);
+  assert.equal(shell.bar(), null);
+  const event = await shell.pressReady('F5');
+  assert.equal(event.defaultPrevented, true);
+  assert.deepEqual(shell.said(), ['Uno è qui.']);
+  assert.equal(shell.bar().hidden, false);
+  assert.ok(shell.bar().textContent.includes('a.md'));
+  assert.deepEqual(shell.state.saved.at(-1), { key: keyOf(PATH_A), position: { kind: 'md', line: 1, sentence: 0 } });
+  await shell.pressReady('Escape');
+  await speechShellStop(shell);
+});
+
+test('each sentence saves its place, and a tab closed while reading stops and keeps it', async (t) => {
+  t.after(() => speechShellDown());
+  const shell = await startReadingShell();
+  await shell.openPaths([PATH_A]);
+  await shell.pressReady('F5');
+  await shell.finishSentence();
+  assert.deepEqual(shell.said(), ['Uno è qui.', 'Due è qui.']);
+  assert.deepEqual(shell.state.saved.at(-1).position, { kind: 'md', line: 1, sentence: 1 });
+  await shell.pressReady('w', { ctrl: true });
+  assert.deepEqual(shell.state.saved.at(-1).position, { kind: 'md', line: 1, sentence: 1 });
+  assert.equal(shell.bar().hidden, true);
+  assert.equal(shell.spoken.at(-1).settled, true);
+});
+
+test('space pauses and resumes while reading, and scrolls otherwise', async (t) => {
+  t.after(() => speechShellDown());
+  const shell = await startReadingShell();
+  await shell.openPaths([PATH_A]);
+  await shell.pressReady('F5');
+  const paused = await shell.pressReady(' ');
+  assert.equal(paused.defaultPrevented, true);
+  assert.equal(shell.bar().querySelector('[data-action="speech.toggle"]').getAttribute('aria-label'), en['speech.resume']);
+  await shell.pressReady(' ');
+  assert.deepEqual(shell.said(), ['Uno è qui.', 'Uno è qui.']);
+  await speechShellStop(shell);
+  const scroll = await shell.pressReady(' ');
+  assert.equal(scroll.defaultPrevented, false);
+});
+
+test('while reading, the arrows move by sentence and plus and minus change the speed, which is kept', async (t) => {
+  t.after(() => speechShellDown());
+  const shell = await startReadingShell();
+  await shell.openPaths([PATH_A]);
+  await shell.pressReady('F5');
+  await shell.pressReady('ArrowRight');
+  assert.equal(shell.said().at(-1), 'Due è qui.');
+  await shell.pressReady('ArrowLeft');
+  assert.equal(shell.said().at(-1), 'Uno è qui.');
+  await shell.pressReady('ArrowRight', { shift: true });
+  assert.equal(shell.said().at(-1), 'Tre è qui.');
+  await shell.pressReady('+');
+  assert.equal(shell.spoken.at(-1).rate, 1.3);
+  assert.deepEqual(shell.state.optionWrites.at(-1), ['speechRate', 1.3]);
+  await shell.pressReady('-');
+  assert.equal(shell.spoken.at(-1).rate, 1);
+  await speechShellStop(shell);
+});
+
+test('a key held down goes on moving the sentence, but does not pause again and again', async (t) => {
+  t.after(() => speechShellDown());
+  const shell = await startReadingShell();
+  await shell.openPaths([PATH_A]);
+  await shell.pressReady('F5');
+  await shell.pressReady('ArrowRight', { repeat: true });
+  assert.equal(shell.said().at(-1), 'Due è qui.');
+  await shell.pressReady(' ', { repeat: true });
+  assert.equal(shell.bar().querySelector('[data-action="speech.toggle"]').getAttribute('aria-label'), en['speech.pause']);
+  await speechShellStop(shell);
+});
+
+test('a media key in front counts once, however it arrives, and starts the reading from idle', async (t) => {
+  t.after(() => speechShellDown());
+  const shell = await startReadingShell();
+  await shell.openPaths([PATH_A]);
+  await shell.pressReady('MediaPlayPause');
+  assert.deepEqual(shell.said(), ['Uno è qui.']);
+  const toggle = () => shell.bar().querySelector('[data-action="speech.toggle"]').getAttribute('aria-label');
+  await shell.press('MediaPlayPause');
+  shell.handlers.get('pause')();
+  await shell.wait();
+  assert.equal(toggle(), en['speech.resume']);
+  await new Promise((resolve) => {
+    setTimeout(resolve, MEDIA_WINDOW_OVER_MS);
+  });
+  shell.handlers.get('play')();
+  await shell.press('MediaPlayPause');
+  await shell.wait();
+  assert.equal(toggle(), en['speech.pause']);
+  await speechShellStop(shell);
+});
+
+test('a click on a sentence jumps there while reading; from idle it makes no sound', async (t) => {
+  t.after(() => speechShellDown());
+  const shell = await startReadingShell();
+  await shell.openPaths([PATH_A]);
+  const [, second] = shell.panes()[0].querySelectorAll('p');
+  shell.document.caretPositionFromPoint = () => ({ offsetNode: second.firstChild, offset: 2 });
+  second.dispatchEvent(new shell.window.Event('click', { bubbles: true }));
+  await shell.wait();
+  assert.deepEqual(shell.spoken, []);
+  await shell.pressReady('F5');
+  second.dispatchEvent(new shell.window.Event('click', { bubbles: true }));
+  await shell.wait();
+  assert.equal(shell.said().at(-1), 'Tre è qui.');
+  await speechShellStop(shell);
+});
+
+test('a link clicked while reading is followed, and the voice stays', async (t) => {
+  t.after(() => speechShellDown());
+  const shell = await startReadingShell();
+  await shell.openPaths([PATH_A]);
+  await shell.pressReady('F5');
+  const link = shell.panes()[0].querySelector('a');
+  link.dispatchEvent(new shell.window.Event('click', { bubbles: true, cancelable: true }));
+  await shell.wait();
+  assert.deepEqual(shell.said(), ['Uno è qui.']);
+  await speechShellStop(shell);
+});
+
+test('the menu of the text reads from where it was opened', async (t) => {
+  t.after(() => speechShellDown());
+  const shell = await startReadingShell();
+  await shell.openPaths([PATH_A]);
+  const [, second] = shell.panes()[0].querySelectorAll('p');
+  shell.document.caretPositionFromPoint = () => ({ offsetNode: second.firstChild, offset: 1 });
+  const event = new shell.window.Event('contextmenu', { bubbles: true, cancelable: true });
+  Object.assign(event, { clientX: 30, clientY: 40 });
+  second.dispatchEvent(event);
+  await shell.wait();
+  assert.equal(event.defaultPrevented, true);
+  const menu = shell.document.querySelector('.text-menu');
+  assert.equal(menu.style.left, '30px');
+  menu.querySelector('button').dispatchEvent(new shell.window.Event('click'));
+  await shell.wait();
+  assert.deepEqual(shell.said(), ['Tre è qui.']);
+  await speechShellStop(shell);
+});
+
+test('another tab goes on reading the first until it is asked to read, and the bar says which', async (t) => {
+  t.after(() => speechShellDown());
+  const shell = await startReadingShell();
+  await shell.openPaths([PATH_A]);
+  await shell.pressReady('F5');
+  await shell.openPaths([PATH_B]);
+  await shell.wait();
+  assert.deepEqual(shell.said(), ['Uno è qui.']);
+  assert.ok(shell.bar().textContent.includes('a.md'));
+  await shell.pressReady('F5');
+  assert.equal(shell.spoken.length, 2);
+  assert.ok(shell.bar().textContent.includes('b.md'));
+  await speechShellStop(shell);
+});
+
+test('a document with nothing to read says so', async (t) => {
+  t.after(() => speechShellDown());
+  const shell = await startReadingShell(async (path) => ({
+    ...markdownDoc(path, ''),
+    rendered: { html: '<pre data-sourcepos="1:1-1:9">codice</pre>', lang: 'it', headings: [] },
+  }));
+  await shell.openPaths([PATH_A]);
+  await shell.pressReady('F5');
+  assert.equal(shell.toast().textContent, en['speech.nothingToRead']);
+  assert.deepEqual(shell.spoken, []);
+});
+
+test('with no voice for the language, a panel says how to add one in Windows and Esc closes it', async (t) => {
+  t.after(() => speechShellDown());
+  const shell = await startReadingShell(async (path) => speechDoc(path, { lang: 'fr' }));
+  await shell.openPaths([PATH_A]);
+  await shell.pressReady('F5');
+  assert.deepEqual(shell.spoken, []);
+  const text = shell.panel().textContent;
+  assert.ok(text.includes('Add voices'));
+  assert.ok(text.includes('French'));
+  assert.ok(text.includes(en['speech.hiddenVoice']));
+  await shell.pressReady('Escape');
+  assert.equal(shell.panel().hidden, true);
+});
+
+test('the options offer a voice for each language, the last used selected, and keep a new choice', async (t) => {
+  t.after(() => speechShellDown());
+  const shell = await startReadingShell(undefined, { voices: { it: 'uri:cosimo' } });
+  await shell.pressReady(',', { ctrl: true });
+  const it = shell.panel().querySelector('select[name="voice-it"]');
+  assert.ok(it);
+  assert.equal(it.querySelector('option[selected]').getAttribute('value'), 'uri:cosimo');
+  assert.ok(shell.panel().querySelector('select[name="voice-en"]'));
+  it.querySelectorAll('option').forEach((option) => option.toggleAttribute('selected', option.getAttribute('value') === 'uri:elsa'));
+  it.dispatchEvent(new shell.window.Event('change'));
+  await shell.wait();
+  assert.deepEqual(shell.state.voiceWrites, [{ lang: 'it', voiceId: 'uri:elsa' }]);
+});
+
+test('the voice chosen in the options is the one the reading uses', async (t) => {
+  t.after(() => speechShellDown());
+  const shell = await startReadingShell(undefined, { voices: { it: 'uri:cosimo' } });
+  await shell.openPaths([PATH_A]);
+  await shell.pressReady('F5');
+  assert.equal(shell.spoken[0].voice.voiceURI, 'uri:cosimo');
+  await speechShellStop(shell);
+});
+
+test('going to an entry of the contents while reading takes the voice there', async (t) => {
+  t.after(() => speechShellDown());
+  const shell = await startReadingShell(async (path) => ({
+    ...speechDoc(path),
+    rendered: { ...speechDoc(path).rendered, headings: [{ level: 1, text: 'Tre', line: 3 }] },
+  }));
+  await shell.openPaths([PATH_A]);
+  await shell.pressReady('F5');
+  await shell.pressReady('t', { ctrl: true });
+  shell.panel().querySelector('.toc-entry').dispatchEvent(new shell.window.Event('click'));
+  await shell.wait();
+  assert.equal(shell.said().at(-1), 'Tre è qui.');
+  await speechShellStop(shell);
+});
+
+test('a file changed while reading goes on in the new text', async (t) => {
+  t.after(() => speechShellDown());
+  let text = speechDoc;
+  let modified = CHANGED_AT;
+  const shell = await startReadingShell(async (path) => ({ ...text(path), modifiedMs: modified }), { fileModified: async () => modified });
+  await shell.openPaths([PATH_A]);
+  await shell.pressReady('F5');
+  await shell.state.settle;
+  await new Promise((resolve) => {
+    setTimeout(resolve, 0);
+  });
+  text = (path) => ({
+    ...markdownDoc(path, 'Testo nuovo.'),
+  });
+  modified = CHANGED_AT + 1;
+  await shell.focusWindow();
+  await shell.wait();
+  assert.equal(shell.said().at(-1), 'Testo nuovo.');
+  await speechShellStop(shell);
+});
+
+test('closing the app stops the voice and saves its sentence', async (t) => {
+  t.after(() => speechShellDown());
+  const shell = await startReadingShell();
+  await shell.openPaths([PATH_A]);
+  await shell.pressReady('F5');
+  await shell.finishSentence();
+  await shell.emit('app-closing');
+  await shell.wait();
+  assert.equal(shell.bar().hidden, true);
+  assert.deepEqual(shell.state.saved.at(-1).position, { kind: 'md', line: 1, sentence: 1 });
+  assert.equal(shell.state.closed, 1);
+});
+
+test('the report of the tabs says how the reading goes', async (t) => {
+  t.after(() => speechShellDown());
+  const shell = await startReadingShell();
+  await shell.openPaths([PATH_A]);
+  await shell.pressReady('F5');
+  await shell.emit('shell-command', { action: 'dump-tabs', out: 'x' });
+  await shell.wait();
+  const [row] = shell.state.dump;
+  assert.equal(row.speech.state, 'playing');
+  assert.equal(row.speech.sentence, 'Uno è qui.');
+  assert.equal(row.speechBar.includes('a.md'), true);
+  assert.equal(row.speech.audioPlaying, true);
+  await speechShellStop(shell);
+  await shell.emit('shell-command', { action: 'dump-tabs', out: 'x' });
+  await shell.wait();
+  assert.equal(shell.state.dump[0].speech, null);
+  assert.equal(shell.state.dump[0].speechBar, null);
 });

@@ -355,3 +355,63 @@ th { background: var(--surface); }
 
 .tag { color: var(--muted); font-size: 0.9em; }
 .footnotes { color: var(--muted); font-size: 0.9em; }
+
+/* The bar of a reading, only there while there is one. */
+#speechbar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem 0.75rem;
+  overflow: hidden;
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+}
+
+#speechbar button, #speechbar select {
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+#speechbar button { min-width: 1.9rem; padding: 0.15rem 0.4rem; }
+#speechbar button:hover { background: var(--line); }
+#speechbar :focus-visible { outline: 2px solid var(--link); outline-offset: -2px; }
+#speechbar select { max-width: 12rem; padding: 0.15rem 0.25rem; }
+#speechbar select option { background: var(--bg); color: var(--fg); }
+.speech-name { flex: 1; min-width: 0; overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
+.speech-rate { min-width: 2.5rem; text-align: center; font-variant-numeric: tabular-nums; }
+#speechbar .speech-follow { color: var(--link); font-weight: 600; }
+
+/* The sentence being read. A book has the same rule in its own style. */
+::highlight(mochi-tts) { background-color: rgb(255 200 60 / 45%); }
+
+/* The menu of the text. */
+.text-menu {
+  position: fixed;
+  z-index: 3;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 25%);
+  font-size: 14px;
+}
+
+.text-menu button {
+  padding: 0.35rem 0.8rem;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+}
+
+.text-menu button:hover, .text-menu button:focus-visible { background: var(--surface); outline: none; }
+
+.panel-message { margin: 0 0 0.6rem; }
+.panel-message:last-child { margin-bottom: 0; }
