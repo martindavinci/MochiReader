@@ -22,6 +22,8 @@ function makeRepoCopy(t) {
   const real = join(root, 'real');
   mkdirSync(join(real, 'src-tauri'), { recursive: true });
   cpSync(join(REPO_ROOT, 'tools'), join(real, 'tools'), { recursive: true });
+  // tools/licenses.mjs takes the copyright notice from the app.
+  cpSync(join(REPO_ROOT, 'app'), join(real, 'app'), { recursive: true });
   writeFileSync(join(real, 'package.json'), JSON.stringify({ version: '0.1.0' }));
   writeFileSync(join(real, 'src-tauri', 'tauri.conf.json'), JSON.stringify({ version: '0.1.0' }));
   writeFileSync(join(real, 'src-tauri', 'Cargo.toml'), '[package]\nversion = "0.1.0"\n');
@@ -57,7 +59,9 @@ test('licenses --check runs when reached through a junction', (t) => {
 
 test('licenses --check runs on its real path', (t) => {
   const { real } = makeRepoCopy(t);
-  assert.equal(runScript(real, 'licenses.mjs', '--check').status, EXIT_FAILURE);
+  const { status, stderr } = runScript(real, 'licenses.mjs', '--check');
+  assert.equal(status, EXIT_FAILURE);
+  assert.match(stderr, /cargo/);
 });
 
 test('importing a tool does not run it, whatever the first argument is', (t) => {
