@@ -35,6 +35,10 @@ test('the window stays hidden until the first draw', () => {
   assert.equal(windowConf.title, 'MochiReader');
 });
 
+test('the window takes the focus when it shows, because moving it into the hidden page holds up the first request', () => {
+  assert.equal(windowConf.focus, false);
+});
+
 test('browser flags keep throttling off, which the Tauri option cannot on Windows, and the runtime off the network', () => {
   assert.equal(windowConf.backgroundThrottling, undefined);
   assert.equal(

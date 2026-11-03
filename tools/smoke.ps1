@@ -374,6 +374,28 @@ function Send-Keys([IntPtr]$Window, [byte[]]$Keys) {
   $true
 }
 
+# The window takes the focus when it shows, not before: the keys must reach the text from then on, with nothing clicked.
+function Test-FirstKeysReachTheText {
+  Wait-AppGone
+  $note = Join-Path $Work 'primi tasti.md'
+  Write-Note $note (New-LongText 'Paragrafo' $LongNoteParagraphs)
+  $app = Start-App @("`"$note`"")
+  try {
+    $window = Wait-AppWindow $app
+    $before = (Wait-Tabs 1 { param($t) $t[0].status -eq 'ok' })[0].position.line
+    if (-not (Send-Keys $window ([byte[]]@($VK_NEXT)))) {
+      'SKIP  the app did not come to the front, so the first key was not sent and nothing was checked'
+      return
+    }
+    Start-Sleep -Milliseconds $SaveSettleMs
+    $line = (Get-Tabs)[0].position.line
+    Assert-That ($line -gt $before) "the first key scrolls the text: line $before, then $line"
+    Pass 'the window comes to the front on its own and the first key reaches the text'
+  } finally {
+    Stop-App $app
+  }
+}
+
 function Test-BrowserKeysKeepTheSession {
   Wait-AppGone
   $first = New-Note 'tasti uno.md' 'Testo uno.'
@@ -1424,6 +1446,7 @@ $AllTests = @(
   'Test-UnreachableFile',
   'Test-FailedTabRetries',
   'Test-LargeFile',
+  'Test-FirstKeysReachTheText',
   'Test-BrowserKeysKeepTheSession',
   'Test-DeletedFile',
   'Test-Position',
