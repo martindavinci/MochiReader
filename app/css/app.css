@@ -92,10 +92,22 @@ body {
 .pane:focus { outline: none; }
 
 /* A book lays out and scrolls its own text, in whatever a message above it leaves of the pane. */
-.pane:has(> foliate-view) {
+.pane:has(> foliate-view), .pane:has(> .book-stage), .book-stage {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+/* A book being reloaded opens here, and takes over only once it has a page to show. */
+.book-stage {
+  flex: 1;
+  min-height: 0;
+}
+
+.book-stage.waiting {
+  position: absolute;
+  inset: 0;
+  visibility: hidden;
 }
 
 foliate-view {
@@ -104,7 +116,7 @@ foliate-view {
   min-height: 0;
 }
 
-.pane:has(> foliate-view) > .file-notice { flex: none; }
+.pane:has(> foliate-view) > .file-notice, .pane:has(> .book-stage) > .file-notice { flex: none; }
 
 #home, .notice {
   max-width: 70ch;

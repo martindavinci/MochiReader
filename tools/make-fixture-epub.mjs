@@ -69,6 +69,9 @@ function zip(entries) {
   return Buffer.concat([...locals, directory, end]);
 }
 
+const XHTML_TYPE = 'application/xhtml+xml';
+const HTML_TYPE = 'text/html';
+
 const xhtml = (title, body, head = '') => `<?xml version="1.0" encoding="UTF-8"?>
 <html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
 <head><title>${title}</title>${head}</head>
@@ -111,24 +114,26 @@ const FONT_ENCRYPTION = `<?xml version="1.0" encoding="UTF-8"?>
 </encryption>
 `;
 
-// Pages of a set size, one to a screen: a renderer of its own in foliate-js, with no style sheet to set.
-const FIXED_LAYOUT_METADATA = `    <meta property="rendition:layout">pre-paginated</meta>
-    <meta property="rendition:spread">none</meta>
-`;
+// Pages of a set size: a renderer of its own in foliate-js, with no style sheet to set. They come one to a screen
+// with `spread` none. With no `spread` they come in pairs, and the first page has an empty frame next to it.
+const fixedLayoutMetadata = (spread) => `    <meta property="rendition:layout">pre-paginated</meta>
+${spread ? `    <meta property="rendition:spread">${spread}</meta>
+` : ''}`;
 const FIXED_LAYOUT_VIEWPORT = '<meta name="viewport" content="width=600, height=800"/>';
 
 // `identifier` is left out of the metadata altogether when it is null, `encryption`
-// adds META-INF/encryption.xml with that content, and `fixedLayout` makes it a book of pages.
-function epub({ identifier, title, chapters, encryption, fixedLayout = false }) {
+// adds META-INF/encryption.xml with that content, and `fixedLayout` makes it a book of pages. A chapter can name
+// the `mediaType` its file is declared with.
+function epub({ identifier, title, chapters, encryption, fixedLayout = false, spread = 'none' }) {
   const uniqueIdentifier = identifier ? ' unique-identifier="book-id"' : '';
   const identifierElement = identifier
     ? `    <dc:identifier id="book-id">${identifier}</dc:identifier>\n`
     : '';
   const manifestItems = chapters
     .map(
-      ({ properties }, index) =>
+      ({ properties, mediaType = XHTML_TYPE }, index) =>
         `    <item id="chapter-${index + 1}" href="chapter-${index + 1}.xhtml" ` +
-        `media-type="application/xhtml+xml"${properties ? ` properties="${properties}"` : ''}/>`,
+        `media-type="${mediaType}"${properties ? ` properties="${properties}"` : ''}/>`,
     )
     .join('\n');
   const spineItems = chapters
@@ -140,7 +145,7 @@ function epub({ identifier, title, chapters, encryption, fixedLayout = false }) 
 ${identifierElement}    <dc:title>${title}</dc:title>
     <dc:language>en</dc:language>
     <meta property="dcterms:modified">2026-11-02T00:00:00Z</meta>
-${fixedLayout ? FIXED_LAYOUT_METADATA : ''}  </metadata>
+${fixedLayout ? fixedLayoutMetadata(spread) : ''}  </metadata>
   <manifest>
     <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
 ${manifestItems}
@@ -200,6 +205,19 @@ const SCRIPTED_CHAPTERS = [
   },
 ];
 
+// The CSP lets a book name a script of the app itself, which would run in the frame of the book. Declared as HTML
+// because Chromium runs no module script in XHTML. The elements are the ones the shell looks for on its page: if it
+// runs, it fills them with its first screen, next to the one sentence that should be here.
+const SELF_SCRIPT_CHAPTERS = [
+  {
+    title: 'A Chapter Naming The App',
+    mediaType: HTML_TYPE,
+    body: `<p>This book names a script of the application.</p>
+<i id="tabbar"></i><i id="panes"></i><i id="home"></i><i id="toast"></i><i id="panel"></i>
+<script type="module" src="http://tauri.localhost/ui/shell.js"></script>`,
+  },
+];
+
 const plain = epub({
   identifier: 'urn:uuid:6f1d6a51-3c0e-4e0a-9b52-0d7a3f2c1e01',
   title: 'Plain Fixture',
@@ -231,6 +249,18 @@ export const FIXTURES = {
     title: 'Fixed Layout Fixture',
     chapters: PROSE_CHAPTERS,
     fixedLayout: true,
+  }),
+  'self-script.epub': epub({
+    identifier: 'urn:uuid:6f1d6a51-3c0e-4e0a-9b52-0d7a3f2c1e06',
+    title: 'Self Script Fixture',
+    chapters: SELF_SCRIPT_CHAPTERS,
+  }),
+  'fixed-spread.epub': epub({
+    identifier: 'urn:uuid:6f1d6a51-3c0e-4e0a-9b52-0d7a3f2c1e07',
+    title: 'Fixed Spread Fixture',
+    chapters: PROSE_CHAPTERS,
+    fixedLayout: true,
+    spread: null,
   }),
   // A real ZIP signature whose central directory has been cut away.
   'corrupt.epub': plain.subarray(0, Math.floor(plain.length / 2)),

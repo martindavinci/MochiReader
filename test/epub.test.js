@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { DOMParser, parseHTML } from 'linkedom';
 import {
+  blockFrom,
   bookLang,
   epubKey,
   flattenToc,
@@ -12,8 +13,11 @@ import {
   makeReader,
   nextSpeechSection,
   openEpub,
+  readingBlocks,
 } from '../app/readers/epub.js';
 import { HIGHLIGHT_RULE } from '../app/readers/epub-style.js';
+
+const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 
 const noWait = async () => {};
 const SAVE_WAIT_MS = 600;
@@ -152,6 +156,20 @@ test('nothing of foliate-js loads before the first book', () => {
   assert.deepEqual(staticImports('app/readers/epub-style.js'), []);
 });
 
+test('the frames of a book run no script at all, whatever the book names', () => {
+  for (const file of ['paginator.js', 'fixed-layout.js']) {
+    const source = read(`app/vendor/foliate/${file}`);
+    assert.match(source, /setAttribute\('sandbox', 'allow-same-origin'\)/, file);
+    assert.doesNotMatch(source, /allow-scripts/, file);
+  }
+});
+
+test('a fresh copy of foliate gets its frames closed to scripts again', () => {
+  const script = read('tools/vendor-foliate.sh');
+  assert.ok(script.includes('allow-same-origin allow-scripts'));
+  assert.match(script, /SANDBOXED_FILES=\(paginator\.js fixed-layout\.js\)/);
+});
+
 test('the book module hands on the key and the title', async () => {
   assert.equal(await epubKey({ identifier: 'x', title: 'T' }, () => 'h'), 'epub:x|T');
   assert.equal(mainTitle({ it: 'Il titolo' }), 'Il titolo');
@@ -199,6 +217,19 @@ test('the table of contents comes flat, in reading order, with places to go to',
     { label: 'Due', target: { kind: 'epub', href: 'c.xhtml' } },
   ]);
   assert.deepEqual(flattenToc(undefined), []);
+});
+
+test('an entry of the contents with no text is named after its file, and the others stay', () => {
+  const toc = [
+    { label: 'Chapter A', href: 'a.xhtml' },
+    { label: null, href: 'Text/b.xhtml#part' },
+    { label: '  ', href: 'c.xhtml', subitems: [{ label: 'Inside', href: 'c.xhtml#d' }] },
+  ];
+  assert.deepEqual(flattenToc(toc).map(({ label }) => label), ['Chapter A', 'b', 'c', 'Inside']);
+});
+
+test('an entry of the contents with neither text nor place has an empty name, and does not fail', () => {
+  assert.deepEqual(flattenToc([{ label: null, subitems: [] }]).map(({ label }) => label), ['']);
 });
 
 test('the next section to read skips the ones outside the reading order', async () => {
@@ -321,6 +352,31 @@ test('an empty frame of a spread is not read', async () => {
   assert.equal(roots[0].section, 1);
 });
 
+test('the empty frame next to a page of a spread is not a page', async () => {
+  const fixed = new FakeFixedRenderer([[{}]]);
+  const blank = parseHTML('<html><head></head><body></body></html>').document;
+  Object.defineProperty(blank, 'URL', { value: 'about:blank' });
+  const page = fixed.doc;
+  let focused = null;
+  const frameWindow = (doc) => ({
+    focus: () => {
+      focused = doc;
+    },
+  });
+  Object.defineProperty(blank, 'defaultView', { value: frameWindow(blank) });
+  Object.defineProperty(page, 'defaultView', { value: frameWindow(page) });
+  fixed.getContents = () => [{ doc: blank }, { doc: page }];
+  const view = new FakeView(fixed, { isFixedLayout: true });
+  view.lastLocation = { cfi: 'epubcfi(/6/2)', range: null };
+  const reader = makeReader(view, {});
+  reader.focus();
+  assert.ok(focused === page, 'the keys go to the page, not to the frame that has no listeners');
+  assert.equal(reader.excerpt(), 'Fixed page');
+  const roots = await reader.speechRoots();
+  assert.equal(roots.length, 1);
+  assert.ok(roots[0].root === page.body);
+});
+
 test('the excerpt is the text on the page, in one line', () => {
   assert.equal(makeReader(new FakeView(), {}).excerpt(), 'Visible text here');
 });
@@ -360,6 +416,129 @@ test('sections move on both renderers', async () => {
   const sections = [{}, {}];
   const fixed = new FakeFixedRenderer([[sections[0]], [sections[1]]]);
   await makeReader(new FakeView(fixed, { isFixedLayout: true }), {}).moveSection(1);
+  assert.equal(fixed.spread, 1);
+});
+
+// A range from inside one block to inside another, by place among the boundaries of all the blocks.
+function rangeOver(blocks, first, last) {
+  const place = (node, offset) => blocks.indexOf(node) * 2 + (offset === 0 ? 0 : 1);
+  const make = (from, to) => ({
+    comparePoint: (node, offset) => {
+      const at = place(node, offset);
+      if (at < from) return -1;
+      return at > to ? 1 : 0;
+    },
+    cloneRange: () => make(from, to),
+    collapse(toStart) {
+      Object.assign(this, make(toStart ? from : to, toStart ? from : to));
+    },
+  });
+  return make(first * 2 + 0.5, last * 2 + 0.5);
+}
+
+const blocksDoc = (html) => parseHTML(`<html><head></head><body>${html}</body></html>`).document;
+
+test('the blocks of a section are its paragraphs, items and headings, in order, without their wrappers', () => {
+  const { body } = blocksDoc(`<div><h1>T</h1><p>One</p><ul><li>Two</li><li><p>Three</p></li></ul></div>
+    <p>   </p><div>Four</div><blockquote><p>Five</p></blockquote><p><img src="i.png" alt=""/></p>`);
+  assert.deepEqual(readingBlocks(body).map((block) => block.textContent), ['T', 'One', 'Two', 'Three', 'Four', 'Five', '']);
+});
+
+test('an item with a sublist is a block for its own text', () => {
+  const { body } = blocksDoc('<ul><li>Own text<ul><li>Inner</li></ul></li></ul>');
+  assert.deepEqual(readingBlocks(body).map((block) => block.firstChild.textContent), ['Own text', 'Inner']);
+});
+
+test('a block the book hides is not a place to stop', () => {
+  const { body } = blocksDoc('<p>Shown</p><p id="gone">Hidden</p>');
+  body.querySelector('p').getClientRects = () => [{}];
+  body.querySelector('#gone').getClientRects = () => [];
+  assert.deepEqual(readingBlocks(body).map((block) => block.textContent), ['Shown']);
+});
+
+test('the next block starts after what is shown, the previous one ends before it', () => {
+  const { body } = blocksDoc('<p>a</p><p>b</p><p>c</p><p>d</p>');
+  const blocks = [...body.querySelectorAll('p')];
+  const shown = rangeOver(blocks, 1, 2);
+  assert.ok(blockFrom(blocks, shown, 1) === blocks[3]);
+  assert.ok(blockFrom(blocks, shown, -1) === blocks[0]);
+  assert.equal(blockFrom(blocks, rangeOver(blocks, 0, 3), 1), null);
+  assert.equal(blockFrom(blocks, rangeOver(blocks, 0, 3), -1), null);
+});
+
+function blocksView({ flow = 'paginated', index = 1, sections = [{}, {}, { linear: 'no' }, {}] } = {}) {
+  const doc = blocksDoc('<p>a</p><p>b</p><p>c</p><p>d</p>');
+  const renderer = new FakeRenderer(sections);
+  renderer.doc = doc;
+  renderer.at = index;
+  renderer.scrolled = flow === 'scrolled';
+  renderer.went = [];
+  renderer.goTo = async (target) => {
+    renderer.went.push(target);
+  };
+  const view = new FakeView(renderer);
+  const blocks = [...doc.querySelectorAll('p')];
+  view.lastLocation = { cfi: 'x', range: rangeOver(blocks, 1, 2) };
+  return { view, renderer, blocks };
+}
+
+test('in a paged book the next block is past the page, so the key always shows something new', async () => {
+  const { view, renderer, blocks } = blocksView();
+  const reader = makeReader(view, {});
+  await reader.moveBlock(1);
+  assert.equal(renderer.went[0].index, 1);
+  assert.ok(renderer.went[0].anchor() === blocks[3]);
+  await reader.moveBlock(-1);
+  assert.ok(renderer.went[1].anchor() === blocks[0]);
+});
+
+test('in a scrolling book the next block is the one after the top of the screen', async () => {
+  const { view, renderer, blocks } = blocksView({ flow: 'scrolled' });
+  const reader = makeReader(view, {});
+  await reader.moveBlock(1);
+  assert.ok(renderer.went[0].anchor() === blocks[2]);
+  await reader.moveBlock(-1);
+  assert.ok(renderer.went[1].anchor() === blocks[0]);
+});
+
+test('past the last block comes the start of the next section in the reading order', async () => {
+  const { view, renderer, blocks } = blocksView();
+  view.lastLocation.range = rangeOver(blocks, 0, 3);
+  await makeReader(view, {}).moveBlock(1);
+  assert.deepEqual(renderer.went, [{ index: 3, anchor: 0 }]);
+});
+
+test('before the first block comes the end of the section before', async () => {
+  const { view, renderer, blocks } = blocksView();
+  view.lastLocation.range = rangeOver(blocks, 0, 3);
+  await makeReader(view, {}).moveBlock(-1);
+  assert.deepEqual(renderer.went, [{ index: 0, anchor: 1 }]);
+});
+
+test('the blocks of a book have an end on both sides', async () => {
+  const last = blocksView({ index: 3 });
+  last.view.lastLocation.range = rangeOver(last.blocks, 0, 3);
+  await makeReader(last.view, {}).moveBlock(1);
+  assert.deepEqual(last.renderer.went, []);
+
+  const first = blocksView({ index: 0 });
+  first.view.lastLocation.range = rangeOver(first.blocks, 0, 3);
+  await makeReader(first.view, {}).moveBlock(-1);
+  assert.deepEqual(first.renderer.went, []);
+});
+
+test('a section with no text to stand on still moves on', async () => {
+  const { view, renderer } = blocksView();
+  view.lastLocation.range = null;
+  await makeReader(view, {}).moveBlock(1);
+  assert.deepEqual(renderer.went, [{ index: 3, anchor: 0 }]);
+});
+
+test('in a fixed layout the blocks are all on screen, so the key goes to the next spread', async () => {
+  const sections = [{}, {}];
+  const fixed = new FakeFixedRenderer([[sections[0]], [sections[1]]]);
+  const view = new FakeView(fixed, { isFixedLayout: true });
+  await makeReader(view, {}).moveBlock(1);
   assert.equal(fixed.spread, 1);
 });
 
@@ -579,6 +758,56 @@ test('external links are stopped at once and handed to the app', async (t) => {
   view.dispatchEvent(event);
   assert.ok(event.defaultPrevented);
   assert.deepEqual(opened, ['https://e.org/']);
+});
+
+/** Sends a file through the transform of foliate as its loader does, and gives back what would reach the frame. */
+const transformed = async (book, type, data) => {
+  const event = new CustomEvent('data', { detail: { data, type } });
+  book.transformTarget.dispatchEvent(event);
+  return event.detail.data;
+};
+
+const bookWithTransform = (over = {}) => ({ ...plainBook(), transformTarget: new EventTarget(), ...over });
+
+test('the sizes of a book follow the text size, in style sheets and in documents', async (t) => {
+  t.after(stubFetch(okFile()));
+  const book = bookWithTransform();
+  const { host, foliate } = fakeFoliate({ makeBook: async () => book });
+  await openEpub('u', host, openOptions(), foliate);
+  assert.equal(await transformed(book, 'text/css', 'p { font-size: 12pt }'), 'p { font-size: 1rem }');
+  assert.equal(
+    await transformed(book, 'application/xhtml+xml', '<p style="font-size: 24px">x</p>'),
+    '<p style="font-size: 1.5rem">x</p>',
+  );
+  assert.equal(
+    await transformed(book, 'text/html', '<head><style>p { line-height: 16px }</style></head>'),
+    '<head><style>p { line-height: 1rem }</style></head>',
+  );
+});
+
+test('only text is rewritten: an image of the book reaches its frame as it is', async (t) => {
+  t.after(stubFetch(okFile()));
+  const book = bookWithTransform();
+  const { host, foliate } = fakeFoliate({ makeBook: async () => book });
+  await openEpub('u', host, openOptions(), foliate);
+  const image = new Blob(['font-size: 12pt']);
+  assert.ok(await transformed(book, 'image/png', Promise.resolve(image)) === image);
+});
+
+test('a file the book cannot give stays a failure for its frame', async (t) => {
+  t.after(stubFetch(okFile()));
+  const book = bookWithTransform();
+  const { host, foliate } = fakeFoliate({ makeBook: async () => book });
+  await openEpub('u', host, openOptions(), foliate);
+  await assert.rejects(transformed(book, 'text/css', Promise.reject(new Error('gone'))), /gone/);
+});
+
+test('a book of fixed pages keeps the sizes its pages are drawn with', async (t) => {
+  t.after(stubFetch(okFile()));
+  const book = bookWithTransform({ rendition: { layout: 'pre-paginated' } });
+  const { host, foliate } = fakeFoliate({ makeBook: async () => book });
+  await openEpub('u', host, openOptions(), foliate);
+  assert.equal(await transformed(book, 'text/css', 'p { font-size: 12pt }'), 'p { font-size: 12pt }');
 });
 
 test('the renderer takes the view asked for and one column', async (t) => {

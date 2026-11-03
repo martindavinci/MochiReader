@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Nothing of foliate-js loads until the first book opens: a Markdown file never pays for it.
 import { debounce, SAVE_DEBOUNCE_MS } from '../core/position.js';
-import { HIGHLIGHT_RULE } from './epub-style.js';
+import { HIGHLIGHT_RULE, relativeDocumentSizes, relativeSizes } from './epub-style.js';
 import { epubKey, mainTitle } from './epub-key.js';
 import { excerptOf } from './excerpt.js';
 
@@ -25,6 +25,17 @@ const COLUMN_WIDTH = '660px';
 const BUSY_RETRY_MS = 150;
 const BUSY_RETRIES = 10;
 const SPACES = /\s+/g;
+// A spread with one page keeps a frame next to it that never loads anything, so it has no listeners.
+const EMPTY_FRAME_URL = 'about:blank';
+const FIXED_LAYOUT = 'pre-paginated';
+const STYLE_SHEET_TYPE = 'text/css';
+const DOCUMENT_TYPES = new Set(['application/xhtml+xml', 'text/html', 'image/svg+xml']);
+const BLOCKS = 'p, li, h1, h2, h3, h4, h5, h6, blockquote, pre, dt, dd, figure, div, tr';
+const PICTURES = 'img, svg, image';
+const TEXT_NODE = 3;
+const SECTION_START = 0;
+const SECTION_END = 1;
+const FILE_NAME = /^.*\/|\.[^.]*$/g;
 
 const pause = (ms) => new Promise((resolve) => {
   setTimeout(resolve, ms);
@@ -53,15 +64,65 @@ export function isDrmProtected(encryptionXml, parser = new DOMParser()) {
   return methods.some((method) => !FONT_OBFUSCATION.has(method.getAttribute('Algorithm')));
 }
 
+/** An entry can hold only a picture, and foliate gives it no text. It is still a way into the book. */
+const nameOfFile = (href) => (href ?? '').split('#')[0].replace(FILE_NAME, '');
+
 /**
- * @param {{label: string, href: string, subitems?: object[]}[]} [toc] As foliate reads it from the book.
+ * @param {{label: string|null, href: string, subitems?: object[]}[]} [toc] As foliate reads it from the book.
  * @returns {import('./reader.js').TocEntry[]}
  */
 export function flattenToc(toc) {
   return (toc ?? []).flatMap(({ label, href, subitems }) => [
-    { label: label.trim(), target: { kind: 'epub', href } },
+    { label: label?.trim() || nameOfFile(href), target: { kind: 'epub', href } },
     ...flattenToc(subitems),
   ]);
+}
+
+const hasOwnText = (element) => [...element.childNodes]
+  .some((node) => node.nodeType === TEXT_NODE && node.textContent.trim());
+
+/**
+ * @param {Element} body The body of a section.
+ * @returns {Element[]} The places to stop at, in order: the innermost blocks, and an outer one for its own text.
+ */
+export function readingBlocks(body) {
+  return [...body.querySelectorAll(BLOCKS)].filter((element) => {
+    if (element.getClientRects?.().length === 0) return false;
+    if (element.querySelector(BLOCKS)) return hasOwnText(element);
+    return Boolean(element.textContent.trim() || element.querySelector(PICTURES));
+  });
+}
+
+/**
+ * @param {Element[]} blocks
+ * @param {Range} shown
+ * @param {1|-1} delta
+ * @returns {Element|null} The first block that starts after `shown`, or the last that ends before it.
+ */
+export function blockFrom(blocks, shown, delta) {
+  const found = delta > 0
+    ? blocks.find((block) => shown.comparePoint(block, 0) > 0)
+    : blocks.findLast((block) => shown.comparePoint(block, block.childNodes.length) < 0);
+  return found ?? null;
+}
+
+/** A page can hold many blocks and shows them all, so only what is past the page is a move. Scrolling, the top decides. */
+function shownPart({ renderer, lastLocation }) {
+  const range = lastLocation?.range;
+  if (!range || !renderer.scrolled) return range ?? null;
+  const top = range.cloneRange();
+  top.collapse(true);
+  return top;
+}
+
+function neighbourSection(view, index, delta) {
+  const { sections } = view.book;
+  for (let at = index + delta; at >= 0 && at < sections.length; at += delta) {
+    if (sections[at].linear !== NOT_IN_READING_ORDER) {
+      return view.renderer.goTo({ index: at, anchor: delta > 0 ? SECTION_START : SECTION_END });
+    }
+  }
+  return undefined;
 }
 
 const spreadOfSection = ({ renderer, book }) => renderer.getSpreadOf(book.sections[renderer.index]).index;
@@ -140,12 +201,23 @@ export function makeReader(view, { key, title, onInput = () => {} }) {
   }, SAVE_DEBOUNCE_MS);
   view.addEventListener('relocate', notifyMove);
 
-  const shownDocs = () => view.renderer.getContents().filter(({ doc }) => doc?.body);
+  const shownDocs = () => view.renderer.getContents().filter(({ doc }) => doc?.body && doc.URL !== EMPTY_FRAME_URL);
 
   const moveSection = (delta) => {
     const { renderer } = view;
     if (view.isFixedLayout) return renderer.goToSpread(spreadOfSection(view) + delta, SPREAD_START);
     return delta > 0 ? renderer.nextSection() : renderer.prevSection();
+  };
+
+  const moveBlock = async (delta) => {
+    // Every block of a fixed page is on screen already.
+    if (view.isFixedLayout) return moveSection(delta);
+    const [shown] = shownDocs();
+    const part = shownPart(view);
+    const block = shown && part ? blockFrom(readingBlocks(shown.doc.body), part, delta) : null;
+    if (block) return view.renderer.goTo({ index: shown.index, anchor: () => block });
+    const index = shownIndex(view);
+    return index === undefined ? undefined : neighbourSection(view, index, delta);
   };
 
   return {
@@ -170,6 +242,7 @@ export function makeReader(view, { key, title, onInput = () => {} }) {
       const text = view.lastLocation?.range?.toString() ?? shownDocs()[0]?.doc.body.textContent ?? '';
       return excerptOf(text.replace(SPACES, ' '));
     },
+    moveBlock,
     moveSection,
     goLeft: () => view.goLeft(),
     goRight: () => view.goRight(),
@@ -185,6 +258,15 @@ export function makeReader(view, { key, title, onInput = () => {} }) {
       closeView(view);
     },
   };
+}
+
+/** Sizes are rewritten on the way into the frame. The pages of a fixed layout are drawn with the sizes they have. */
+function letSizesFollowTheText(book) {
+  if (book.rendition?.layout === FIXED_LAYOUT) return;
+  book.transformTarget?.addEventListener('data', ({ detail }) => {
+    const rewrite = detail.type === STYLE_SHEET_TYPE ? relativeSizes : DOCUMENT_TYPES.has(detail.type) && relativeDocumentSizes;
+    if (rewrite) detail.data = Promise.resolve(detail.data).then(rewrite);
+  });
 }
 
 async function readFile(url) {
@@ -222,6 +304,7 @@ export async function openEpub(url, host, opts, loadFoliate = importFoliate) {
   try {
     const book = await makeBook(await readFile(url));
     if (isDrmProtected(await book.loadText(ENCRYPTION_FILE), opts.parser)) throw new Error('the book has DRM');
+    letSizesFollowTheText(book);
     const onInput = watchSections(view);
     view.addEventListener('external-link', (event) => {
       event.preventDefault();

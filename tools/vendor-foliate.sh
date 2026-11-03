@@ -21,6 +21,10 @@ readonly KEPT_FILES=(
   vendor/fflate.js
   LICENSE
 )
+# foliate lets a section run scripts only for a WebKit bug, and this app only runs on WebView2. A CSP with 'self' is not
+# enough: a book could still name a script of the app, which would run in its frame next to the Tauri IPC.
+readonly SANDBOXED_FILES=(paginator.js fixed-layout.js)
+readonly FOLIATE_SANDBOX='allow-same-origin allow-scripts'
 # foliate-js ships zip.js and fflate minified and without their license texts.
 readonly ZIP_JS_LICENSE_URL="https://raw.githubusercontent.com/gildas-lormeau/zip.js/841affffeaa2bd840f3cb26686142c7eb8ee7cbf/LICENSE"
 readonly FFLATE_LICENSE_URL="https://raw.githubusercontent.com/101arrowz/fflate/dcb3714a6c25db3a2748641019c5277413d09714/LICENSE"
@@ -47,6 +51,15 @@ for file in "${KEPT_FILES[@]}"; do
     echo "foliate-js ${FOLIATE_COMMIT} has no ${file}" >&2
     exit 1
   fi
+done
+
+for file in "${SANDBOXED_FILES[@]}"; do
+  if ! grep -q "'${FOLIATE_SANDBOX}'" "${source_dir}/${file}"; then
+    echo "foliate-js ${FOLIATE_COMMIT} has no sandbox to close in ${file}" >&2
+    exit 1
+  fi
+  sed -i -e '/`allow-scripts` is needed for events because of WebKit bug/,+1d' \
+    -e "s/'${FOLIATE_SANDBOX}'/'allow-same-origin'/" "${source_dir}/${file}"
 done
 
 rm -rf "${target}"

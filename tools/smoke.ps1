@@ -92,7 +92,10 @@ $NowhereCfi = 'epubcfi(/6/40!/4/2/1:0)'
 $CanaryWaitS = 5
 $ScriptedSentence = 'This book tries to reach the application from its content.'
 $CanaryFile = 'canary'
+$SelfScriptSentence = 'This book names a script of the application.'
 $NotABook = 'This is not a ZIP file.'
+# What a file holds while a copy or a sync is writing it: the start of a ZIP, with no directory at its end.
+$CutBookBytes = 1000
 $VK_LEFT = 0x25
 $VK_RIGHT = 0x27
 $VK_ESCAPE = 0x1B
@@ -779,6 +782,24 @@ function Test-EpubScripts {
   }
 }
 
+# What the CSP lets through: a script of the app itself, named by the book. It would fill its page in the book's frame.
+function Test-EpubSelfScript {
+  Wait-AppGone
+  $book = Copy-Fixture 'self-script.epub'
+  $app = Start-App @("`"$book`"")
+  try {
+    Wait-AppWindow $app | Out-Null
+    $tab = (Wait-Tabs 1 { param($t) $t[0].status -ne 'loading' })[0]
+    Assert-That ($tab.status -eq 'ok' -and $tab.firstPageRendered) "the book naming the app opens, not: $($tab.status), $($tab.notice)"
+    Start-Sleep -Seconds $CanaryWaitS
+    $text = (@(Get-Tabs)[0]).text.Trim()
+    Assert-That ($text -eq $SelfScriptSentence) "a script of the app ran in the frame of a book, which now holds: $text"
+    Pass 'a book cannot run a script of the app in its own frame'
+  } finally {
+    Stop-App $app
+  }
+}
+
 function Test-BrokenEpubs {
   Wait-AppGone
   $empty = Join-Path $Work 'vuoto.epub'
@@ -976,23 +997,64 @@ function Test-EpubKeys {
   }
 }
 
-function Test-FixedLayoutEpub {
+# A book changing on disk. Whether the new file can be read shows only once it has a page, so until then the old one stays.
+function Test-EpubChangesOnDisk {
   Wait-AppGone
-  $book = Copy-Fixture 'fixed.epub'
+  $book = Copy-Fixture 'plain.epub'
+  $whole = [System.IO.File]::ReadAllBytes($book)
+  Open-ToSavePosition $book
+  Set-SavedCfi $PlainKey $PlainSecondChapterCfi
+  $app = Start-App @("`"$book`"")
+  try {
+    $window = Wait-AppWindow $app
+    Wait-Tabs 1 { param($t) $t[0].status -eq 'ok' -and $t[0].text.Contains($PlainSecondChapter) } | Out-Null
+
+    [System.IO.File]::WriteAllBytes($book, $whole[0..($CutBookBytes - 1)])
+    if (-not (Invoke-FocusReturn $window)) {
+      'SKIP  Windows did not let the focus move, so a second process asks for the check instead'
+      Start-Second "`"$book`""
+    }
+    $tab = (Wait-Tabs 1 { param($t) $t[0].notice.Length -gt 0 })[0]
+    Assert-That ($tab.status -eq 'ok') "a book cut short on disk keeps its tab as it was, not: $($tab.status)"
+    Assert-That ($tab.firstPageRendered) 'a book cut short on disk still shows its page'
+    Assert-That ($tab.text.Contains($PlainSecondChapter)) "the text stays when the book is cut short on disk, not: $($tab.text)"
+    Pass 'a book cut short on disk keeps its text and gets a message'
+
+    [System.IO.File]::WriteAllBytes($book, $whole)
+    if (-not (Invoke-FocusReturn $window)) { Start-Second "`"$book`"" }
+    $tab = (Wait-Tabs 1 { param($t) $t[0].notice.Length -eq 0 })[0]
+    Assert-That ($tab.status -eq 'ok' -and $tab.firstPageRendered) "the whole book comes back, not: $($tab.status)"
+    Assert-That ($tab.text.Contains($PlainSecondChapter)) "the whole book comes back at the same place, not: $($tab.text)"
+    Pass 'a book whole again on disk comes back by itself at the same place'
+  } finally {
+    Stop-App $app
+  }
+}
+
+function Test-FixedLayoutEpub {
+  # Pages one to a screen, and pages in pairs, where the first page has an empty frame next to it.
+  foreach ($fixture in 'fixed.epub', 'fixed-spread.epub') { Test-FixedLayoutBook $fixture }
+}
+
+function Test-FixedLayoutBook([string]$Fixture) {
+  Wait-AppGone
+  $book = Copy-Fixture $Fixture
   $app = Start-App @("`"$book`"")
   try {
     $window = Wait-AppWindow $app
     $tab = (Wait-Tabs 1 { param($t) $t[0].status -ne 'loading' })[0]
-    Assert-That ($tab.status -eq 'ok' -and $tab.firstPageRendered) "a book of fixed pages opens, not: $($tab.status), $($tab.notice)"
-    Assert-That ($tab.text.Contains($PlainFirstChapter)) "the first fixed page has its text, not: $($tab.text)"
-    Pass 'a book of fixed pages opens'
+    Assert-That ($tab.status -eq 'ok' -and $tab.firstPageRendered) "$Fixture opens, not: $($tab.status), $($tab.notice)"
+    Assert-That ($tab.text.Contains($PlainFirstChapter)) "the first page of $Fixture has its text, not: $($tab.text)"
+    Pass "$Fixture opens"
     [void][SmokeInput]::SetForegroundWindow($window)
     Start-Sleep -Milliseconds $SecondProcessMs
-    if (-not (Assert-KeysDo $window @($VK_RIGHT) { param($t) $t.text.Contains($PlainSecondChapter) } 'the right arrow goes to the next fixed page')) {
-      'SKIP  the app is not in front, so the keys in a book of fixed pages were not checked'
+    if (-not (Assert-KeysDo $window @($VK_CONTROL, $VK_T) { param($t) $t.panel -eq 'toc' } "ctrl+t opens the contents of $Fixture")) {
+      "SKIP  the app is not in front, so the keys in $Fixture were not checked"
       return
     }
-    Pass 'the right arrow goes to the next fixed page'
+    Assert-That (Assert-KeysDo $window @($VK_ESCAPE) { param($t) -not $t.panel } "esc closes the contents of $Fixture") 'the keys stay with the app'
+    Assert-That (Assert-KeysDo $window @($VK_RIGHT) { param($t) $t.text.Contains($PlainSecondChapter) } "the right arrow goes to the next page of $Fixture") 'the keys stay with the app'
+    Pass "the keys of the app work in $Fixture"
   } finally {
     Stop-App $app
   }
@@ -1040,10 +1102,12 @@ $AllTests = @(
   'Test-WindowPlacement',
   'Test-EpubOpens',
   'Test-EpubScripts',
+  'Test-EpubSelfScript',
   'Test-BrokenEpubs',
   'Test-EpubObfuscatedFont',
   'Test-EpubWithoutIdentifier',
   'Test-EpubPosition',
+  'Test-EpubChangesOnDisk',
   'Test-EpubKeys',
   'Test-FixedLayoutEpub',
   'Test-CorruptState'

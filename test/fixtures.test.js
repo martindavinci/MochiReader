@@ -39,11 +39,13 @@ test('every fixture of the plan is generated', () => {
   assert.deepEqual(Object.keys(FIXTURES).sort(), [
     'corrupt.epub',
     'drm.epub',
+    'fixed-spread.epub',
     'fixed.epub',
     'no-id.epub',
     'obfuscated-font.epub',
     'plain.epub',
     'scripted.epub',
+    'self-script.epub',
   ]);
 });
 

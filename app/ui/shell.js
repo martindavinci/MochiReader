@@ -231,20 +231,24 @@ function onBookInput(event) {
   if (event.type === KEY_DOWN) onKeyDown(event);
 }
 
+async function showBook(doc, host, savedPosition) {
+  const { openEpub } = await import('../readers/epub.js');
+  return openEpub(doc.fileUrl, host, {
+    flow: options.epubView,
+    style: currentBookStyle(),
+    hash: () => invoke('file_hash', { path: doc.path }),
+    savedPosition,
+    openExternal: (url) => invoke('open_external', { url }),
+  });
+}
+
 async function openBook(doc, id, entry, savedPosition) {
   // The pane stays empty for as long as the book is not ready to take its place, and only then is the message safe.
   const slow = setTimeout(() => {
     if (entry.pane.childElementCount === 0) showNotice(entry, STATUS_LOADING, t('open.loading'));
   }, SLOW_OPEN_MS);
   try {
-    const { openEpub } = await import('../readers/epub.js');
-    return await openEpub(doc.fileUrl, entry.pane, {
-      flow: options.epubView,
-      style: currentBookStyle(),
-      hash: () => invoke('file_hash', { path: doc.path }),
-      savedPosition,
-      openExternal: (url) => invoke('open_external', { url }),
-    });
+    return await showBook(doc, entry.pane, savedPosition);
   } catch (error) {
     console.warn(error);
     if (entries.get(id) === entry) showNotice(entry, STATUS_ERROR, t('epub.error'));
@@ -254,14 +258,7 @@ async function openBook(doc, id, entry, savedPosition) {
   }
 }
 
-/** @param {(key: string) => Promise<object|null>} savedPosition Where the book opens: it opens right there. */
-async function mountBook(doc, id, entry, savedPosition) {
-  const reader = await openBook(doc, id, entry, savedPosition);
-  if (!reader) return;
-  if (entries.get(id) !== entry) {
-    reader.destroy();
-    return;
-  }
+function adoptBook(doc, entry, reader) {
   entry.reader = reader;
   entry.key = reader.key;
   entry.title = reader.title || doc.name;
@@ -272,6 +269,17 @@ async function mountBook(doc, id, entry, savedPosition) {
   entry.restored = true;
   followSystemTheme();
   if (activeEntry() === entry && !panels.current()) focusText();
+}
+
+/** @param {(key: string) => Promise<object|null>} savedPosition Where the book opens: it opens right there. */
+async function mountBook(doc, id, entry, savedPosition) {
+  const reader = await openBook(doc, id, entry, savedPosition);
+  if (!reader) return;
+  if (entries.get(id) !== entry) {
+    reader.destroy();
+    return;
+  }
+  adoptBook(doc, entry, reader);
 }
 
 function mountMarkdown(doc, entry) {
@@ -311,15 +319,50 @@ async function restorePosition(id, entry) {
   if (entries.get(id) === entry) await settle(id, entry, saved);
 }
 
+/**
+ * Opening the file is only the start for a book: whether it can be read shows once it has a page. Until then the book
+ * on screen stays, so a file that is broken or still being copied takes nothing away. It keeps the old date, so the
+ * next look at the file tries again. A frame cannot move without loading again, so the new book opens where it stays.
+ */
+async function reloadBook(doc, id, entry) {
+  const stage = document.createElement('div');
+  stage.className = 'book-stage waiting';
+  entry.pane.append(stage);
+  let reader;
+  try {
+    reader = await showBook(doc, stage, async () => entry.reader.position());
+  } catch (error) {
+    console.warn(error);
+    stage.remove();
+    if (entries.get(id) === entry) setFileNotice(entry, t('file.notReloaded'));
+    return;
+  }
+  if (entries.get(id) !== entry) {
+    reader.destroy();
+    return;
+  }
+  setFileNotice(entry, '');
+  entry.reader.destroy();
+  [...entry.pane.children].filter((child) => child !== stage).forEach((child) => child.remove());
+  stage.classList.remove('waiting');
+  entry.kind = doc.kind;
+  entry.modified = doc.modifiedMs ?? null;
+  adoptBook(doc, entry, reader);
+}
+
 async function reload(id, entry) {
   const doc = await invoke('open_document', { path: entry.path });
   if (entries.get(id) !== entry) return;
+  if (doc.kind === KIND_EPUB) {
+    await reloadBook(doc, id, entry);
+    return;
+  }
   const position = entry.reader.position();
   entry.reader.destroy();
   entry.reader = null;
   setFileNotice(entry, '');
-  await mount(doc, id, entry, async () => position);
-  if (entry.reader && !entry.restored) await settle(id, entry, position);
+  await mount(doc, id, entry);
+  await settle(id, entry, position);
 }
 
 /** Text already open stays readable whatever the disk says. A drive that does not answer says nothing about the file. */

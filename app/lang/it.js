@@ -13,6 +13,7 @@ export default {
   'open.error.timeout': 'Il file non ha risposto in tempo. L\'unità potrebbe essere lenta o scollegata.',
 
   'file.deleted': 'Questo file non è più sul disco. Stai leggendo l\'ultima versione aperta.',
+  'file.notReloaded': 'Questo file è cambiato e ora non si può leggere. Stai leggendo l\'ultima versione aperta.',
   'epub.error': 'Questo libro non si può aprire: è danneggiato o protetto da DRM.',
 
   'tabs.close': 'Chiudi scheda',
