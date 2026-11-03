@@ -58,6 +58,21 @@ $FaqNearestLine = 203
 $VK_DOWN = 0x28
 $FaqWalkPresses = 4
 $FaqWalkRounds = 8
+# Notes of images with no size in the text, so the page only reaches its real length as they load: four lines each.
+$ImageWidth = 700
+$ImageHeight = 500
+$ImagesLines = 4
+$ShortImages = 6
+$LongImages = 60
+# Captions of the short note with more than a screen after them, and one too close to the end to reach the top.
+$ShortImagesLines = 7, 9, 11, 15
+$ShortImagesEndLine = 19
+# A caption near the end of the long note, past where a page with no images yet ends, and one in the middle.
+$LongImagesLines = 231, 119
+$ImagesRounds = 2
+$ImagesFlowRounds = 5
+# Time for images still loading to change the page, before checking that nothing moved.
+$ImagesSettleMs = 1000
 $PlacedX = 140
 $PlacedY = 90
 $PlacedWidth = 760
@@ -81,6 +96,7 @@ public static class SmokeInput {
 }
 '@
 Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
 
 function Pass([string]$Message) { "PASS  $Message" }
 
@@ -449,13 +465,13 @@ function Test-CollapsedSections {
   $app = Start-App @("`"$note`"")
   try {
     $window = Wait-AppWindow $app
-    Wait-Tabs 1 { param($t) $t[0].status -eq 'ok' -and $t[0].position.line -eq $FaqNearestLine } | Out-Null
+    Wait-Tabs 1 { param($t) $t[0].status -eq 'ok' -and $t[0].screenLine -eq $FaqNearestLine } | Out-Null
     Pass "a position in a closed section opens at the nearest block on screen, line $FaqNearestLine"
 
     Write-Note $note (New-FaqText 'Cambiata')
     Start-Second "`"$note`""
     $tabs = Wait-Tabs 1 { param($t) $t[0].text.Contains('Cambiata lunga') }
-    Assert-That ($tabs[0].position.line -eq $FaqNearestLine) "a file with closed sections read again stays at line $FaqNearestLine, not $($tabs[0].position.line)"
+    Assert-That ($tabs[0].screenLine -eq $FaqNearestLine) "a file with closed sections read again stays at line $FaqNearestLine, not $($tabs[0].screenLine)"
     Pass 'a file with closed sections changed on disk is read again and keeps the position'
 
     foreach ($round in 1..$FaqWalkRounds) {
@@ -476,8 +492,7 @@ function Test-CollapsedSections {
       Stop-App $app
       $app = Start-App @("`"$note`"")
       $window = Wait-AppWindow $app
-      $tabs = Wait-Tabs 1 { param($t) $t[0].status -eq 'ok' }
-      Wait-Tabs 1 { param($t) $t[0].position.line -eq $line } | Out-Null
+      Wait-Tabs 1 { param($t) $t[0].status -eq 'ok' -and $t[0].screenLine -eq $line } | Out-Null
     }
     Pass "$FaqWalkRounds times scroll, close, open again past closed sections: the same point"
   } finally {
@@ -509,13 +524,13 @@ function Test-Position {
   $app = Start-App @("`"$note`"")
   try {
     $window = Wait-AppWindow $app
-    Wait-Tabs 1 { param($t) $t[0].status -eq 'ok' -and $t[0].position.line -eq $SavedLine } | Out-Null
+    Wait-Tabs 1 { param($t) $t[0].status -eq 'ok' -and $t[0].screenLine -eq $SavedLine } | Out-Null
     Pass "a file opens at its saved position, line $SavedLine"
 
     Write-Note $note (New-LongText 'Cambiato' $LongNoteParagraphs)
     Start-Second "`"$note`""
     $tabs = Wait-Tabs 1 { param($t) $t[0].text.Contains('Cambiato numero 1.') }
-    Assert-That ($tabs[0].position.line -eq $SavedLine) "a file read again stays at line $SavedLine, not $($tabs[0].position.line)"
+    Assert-That ($tabs[0].screenLine -eq $SavedLine) "a file read again stays at line $SavedLine, not $($tabs[0].screenLine)"
     Pass 'a file changed on disk is read again and keeps the position'
 
     Write-Note $note (New-LongText 'Breve' $ShortNoteParagraphs)
@@ -543,7 +558,7 @@ function Test-Position {
       Stop-App $app
       $app = Start-App @("`"$note`"")
       Wait-AppWindow $app | Out-Null
-      Wait-Tabs 1 { param($t) $t[0].status -eq 'ok' -and $t[0].position.line -eq $line } | Out-Null
+      Wait-Tabs 1 { param($t) $t[0].status -eq 'ok' -and $t[0].screenLine -eq $line } | Out-Null
       Pass 'open, scroll, close, open again: the same point'
     } else {
       'SKIP  the app is not in front, so a real scroll was not checked'
@@ -551,6 +566,105 @@ function Test-Position {
   } finally {
     Stop-App $app
   }
+}
+
+function New-ImagesNote([string]$Name, [int]$Images) {
+  $folder = Join-Path $Work ([System.IO.Path]::GetFileNameWithoutExtension($Name))
+  New-Item -ItemType Directory $folder | Out-Null
+  $picture = New-Object System.Drawing.Bitmap $ImageWidth, $ImageHeight
+  try {
+    # A file for each, so that the page has to wait for each.
+    $blocks = 1..$Images | ForEach-Object {
+      $picture.Save((Join-Path $folder "img$_.png"), [System.Drawing.Imaging.ImageFormat]::Png)
+      "![]($([uri]::EscapeDataString((Split-Path $folder -Leaf)))/img$_.png)`n`nDidascalia $_.`n"
+    }
+  } finally {
+    $picture.Dispose()
+  }
+  $note = Join-Path $Work $Name
+  Write-Note $note ($blocks -join "`n")
+  $note
+}
+
+function Open-ToSavePosition([string]$Note) {
+  $app = Start-App @("`"$Note`"")
+  try {
+    Wait-AppWindow $app | Out-Null
+    Wait-Tabs 1 { param($t) $t[0].status -eq 'ok' } | Out-Null
+  } finally {
+    Stop-App $app
+  }
+}
+
+# Without a real scroll the line must stay what it was. `-Reachable` also asks for it to be at the top of the screen,
+# which a page without its images is too short for, so this cannot pass if the images do not arrive.
+function Assert-OpensAt([string]$Note, [string]$Name, [int]$Line, [switch]$Reachable) {
+  $app = Start-App @("`"$Note`"")
+  try {
+    Wait-AppWindow $app | Out-Null
+    Wait-Tabs 1 { param($t) $t[0].status -eq 'ok' } | Out-Null
+    if ($Reachable) { Wait-Tabs 1 { param($t) $t[0].screenLine -eq $Line } | Out-Null }
+    Start-Sleep -Milliseconds $ImagesSettleMs
+    $tab = (Get-Tabs)[0]
+    Assert-That ($tab.position.line -eq $Line) "${Name}: the position stays at line $Line, not $($tab.position.line)"
+    if ($Reachable) { Assert-That ($tab.screenLine -eq $Line) "${Name}: line $Line stays at the top, not $($tab.screenLine)" }
+  } finally {
+    Stop-App $app
+  }
+  $saved = (Get-SavedPosition $Name).line
+  Assert-That ($saved -eq $Line) "${Name}: closing keeps saved line $Line, not $saved"
+}
+
+function Test-PositionWithImages {
+  Wait-AppGone
+  $name = 'immagini brevi.md'
+  $note = New-ImagesNote $name $ShortImages
+  Open-ToSavePosition $note
+  foreach ($round in 1..$ImagesRounds) {
+    foreach ($line in $ShortImagesLines) {
+      Set-SavedLine $name $line
+      Assert-OpensAt $note $name $line -Reachable
+    }
+    Set-SavedLine $name $ShortImagesEndLine
+    Assert-OpensAt $note $name $ShortImagesEndLine
+  }
+  Pass "a note of images opens at its saved line and keeps it, $ImagesRounds rounds of $($ShortImagesLines.Count + 1) lines"
+
+  $longName = 'immagini lunghe.md'
+  $long = New-ImagesNote $longName $LongImages
+  Open-ToSavePosition $long
+  foreach ($round in 1..$ImagesRounds) {
+    foreach ($line in $LongImagesLines) {
+      Set-SavedLine $longName $line
+      Assert-OpensAt $long $longName $line -Reachable
+    }
+  }
+  Pass "a long note of images opens at its saved line and keeps it, $ImagesRounds rounds of $($LongImagesLines.Count) lines"
+
+  # The whole way with real keys. It opens at the top, and each opening starts with no image loaded.
+  Set-SavedLine $name 1
+  $app = Start-App @("`"$note`"")
+  try {
+    $window = Wait-AppWindow $app
+    Wait-Tabs 1 { param($t) $t[0].status -eq 'ok' } | Out-Null
+    Start-Sleep -Milliseconds $ImagesSettleMs
+    [void][SmokeInput]::SetForegroundWindow($window)
+    Start-Sleep -Milliseconds $SecondProcessMs
+    if (-not (Send-Keys $window ([byte[]]@($VK_NEXT)))) {
+      'SKIP  the app is not in front, so a real scroll through a note of images was not checked'
+      return
+    }
+    Start-Sleep -Milliseconds $SaveSettleMs
+    $tab = (Get-Tabs)[0]
+    $line = $tab.position.line
+    Assert-That ($line -gt 1) 'a key takes the screen from where the reader was sent, and scrolls the text'
+    Assert-That ($tab.screenLine -eq $line) "after a real scroll the position is what is on screen: $line, $($tab.screenLine)"
+    Wait-State { (Get-SavedPosition $name).line -eq $line } "a scroll is saved after it ends, line $line"
+  } finally {
+    Stop-App $app
+  }
+  foreach ($round in 1..$ImagesFlowRounds) { Assert-OpensAt $note $name $line -Reachable }
+  Pass "open, scroll, close, then $ImagesFlowRounds times open and close through a note of images: the same point, line $line"
 }
 
 function Get-WindowBox([IntPtr]$Window) {
@@ -630,6 +744,7 @@ try {
   Test-DeletedFile
   Test-Position
   Test-CollapsedSections
+  Test-PositionWithImages
   Test-WindowPlacement
   Test-CorruptState
   'smoke: all checks passed'

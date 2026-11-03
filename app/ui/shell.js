@@ -302,6 +302,7 @@ async function dumpTabs(out) {
       notice,
       firstPageRendered: status === STATUS_OK,
       position,
+      screenLine: reader?.screenLine?.() ?? null,
       text: roots.map(({ root }) => root.textContent).join('\n'),
     };
   }));

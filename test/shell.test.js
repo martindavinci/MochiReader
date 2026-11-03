@@ -120,6 +120,11 @@ async function startShell(openDocument, { pending = [], positions = {}, recents 
     document,
     CSS: { escape: (text) => text },
     requestAnimationFrame: (callback) => setTimeout(callback),
+    ResizeObserver: class {
+      observe() {}
+
+      disconnect() {}
+    },
   });
   run += 1;
   await import(`../app/ui/shell.js?run=${run}`);
@@ -257,6 +262,37 @@ test('a file with a saved position opens at that block', async () => {
   await shell.openPaths([PATH_A]);
   assert.equal(shell.scrolled.length, 1);
   assert.equal(shell.scrolled[0].getAttribute('data-sourcepos'), '5:1-5:9');
+});
+
+// With no layout in linkedom every block counts as above the fold, so what is on screen is the last block: not line 5.
+test('closing a tab that nobody scrolled keeps the saved line, whatever is on screen', async () => {
+  const shell = await startShell(async (path) => longDoc(path), { positions: { [keyOf(PATH_A)]: atLine(5) } });
+  await shell.openPaths([PATH_A]);
+  shell.document.querySelector('.tab-close').dispatchEvent(new shell.window.Event('click'));
+  await shell.settled();
+  assert.deepEqual(shell.state.saved, [{ key: keyOf(PATH_A), position: atLine(5) }]);
+});
+
+test('a scroll that nobody asked for keeps the saved line, whatever is on screen', async () => {
+  const shell = await startShell(async (path) => longDoc(path), { positions: { [keyOf(PATH_A)]: atLine(5) } });
+  await shell.openPaths([PATH_A]);
+  shell.panes()[0].dispatchEvent(new shell.window.Event('scroll'));
+  await new Promise((resolve) => {
+    setTimeout(resolve, SAVE_WAIT_MS);
+  });
+  assert.deepEqual(shell.state.saved, [{ key: keyOf(PATH_A), position: atLine(5) }]);
+});
+
+test('a key scrolling a tab makes what is on screen the position again', async () => {
+  const shell = await startShell(async (path) => longDoc(path), { positions: { [keyOf(PATH_A)]: atLine(5) } });
+  await shell.openPaths([PATH_A]);
+  const [pane] = shell.panes();
+  pane.dispatchEvent(new shell.window.Event('keydown'));
+  pane.dispatchEvent(new shell.window.Event('scroll'));
+  await new Promise((resolve) => {
+    setTimeout(resolve, SAVE_WAIT_MS);
+  });
+  assert.deepEqual(shell.state.saved, [{ key: keyOf(PATH_A), position: atLine(9) }]);
 });
 
 test('a saved line past the end of a file that shrank goes to the nearest block', async () => {
@@ -567,4 +603,20 @@ test('the report of the tabs says where each one is', async () => {
   await shell.openPaths([PATH_A]);
   await shell.emit('shell-command', { action: 'dump-tabs', out: 'x' });
   assert.deepEqual(shell.state.dump[0].position, atLine(1));
+  assert.equal(shell.state.dump[0].screenLine, 1);
+});
+
+test('the report of the tabs tells what is on screen apart from the position', async () => {
+  const shell = await startShell(async (path) => longDoc(path), { positions: { [keyOf(PATH_A)]: atLine(5) } });
+  await shell.openPaths([PATH_A]);
+  await shell.emit('shell-command', { action: 'dump-tabs', out: 'x' });
+  assert.deepEqual(shell.state.dump[0].position, atLine(5));
+  assert.equal(shell.state.dump[0].screenLine, 9);
+});
+
+test('the report of a tab with no reader has no line on screen', async () => {
+  const shell = await startShell(failure('not_found'));
+  await shell.openPaths([PATH_A]);
+  await shell.emit('shell-command', { action: 'dump-tabs', out: 'x' });
+  assert.equal(shell.state.dump[0].screenLine, null);
 });

@@ -3,6 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseHTML } from 'linkedom';
 import { openMarkdown, LARGE_DOC_CHARS } from '../app/readers/markdown.js';
+import { SAVE_DEBOUNCE_MS } from '../app/core/position.js';
 
 const HTML = [
   '<h1 data-sourcepos="1:1-1:6">Titolo</h1>',
@@ -15,6 +16,23 @@ const HEADINGS = [{ level: 1, text: 'Titolo', line: 1 }];
 
 // linkedom has no layout, so the geometry is given here: each block is this tall, in document order.
 const BLOCK_HEIGHT = 100;
+
+// Nor has it a ResizeObserver: here the test says when the layout changed.
+const observers = new Set();
+globalThis.ResizeObserver = class {
+  constructor(callback) {
+    this.callback = callback;
+  }
+
+  observe() {
+    observers.add(this);
+  }
+
+  disconnect() {
+    observers.delete(this);
+  }
+};
+const layoutChanged = () => [...observers].forEach((observer) => observer.callback([]));
 
 function setup({ html = HTML, lang = 'it', headings = HEADINGS, scrollTop = 0 } = {}) {
   const { document } = parseHTML('<!doctype html><html><body><main id="pane"></main></body></html>');
@@ -298,4 +316,135 @@ test('a large document with closed details leaves them out of its position and o
   assert.equal(reader.position().line, 1);
   await reader.goTo({ kind: 'md', line: 5, sentence: 0 });
   assert.deepEqual(scrolledLines(), [8]);
+});
+
+// A note of images and captions with a real page around it: a scroll stops at the end of the text, as in a browser,
+// and an image takes up no room until it has loaded.
+const SCREEN_HEIGHT = 500;
+const IMAGE_HEIGHT = 400;
+const CAPTION_HEIGHT = 50;
+const ILLUSTRATED = Array.from({ length: 6 }, (_, at) => {
+  const line = at * 4 + 1;
+  return `<p data-sourcepos="${line}:1-${line}:9"><img src="x.png"></p>`
+    + `<p data-sourcepos="${line + 2}:1-${line + 2}:9">Didascalia ${at + 1}</p>`;
+}).join('');
+const LAST_CAPTION_LINE = 23;
+const INPUTS = ['wheel', 'keydown', 'pointerdown'];
+
+function setupIllustrated() {
+  observers.clear();
+  const { document, host, reader, blocks } = setup({ html: ILLUSTRATED, headings: [] });
+  let imageHeight = 0;
+  const heightOf = (block) => (block.querySelector('img') ? imageHeight : CAPTION_HEIGHT);
+  const topOf = (block) => {
+    let top = 0;
+    for (const other of blocks) {
+      if (other === block) return top;
+      top += heightOf(other);
+    }
+    return top;
+  };
+  const moveTo = (scrollTop) => {
+    const end = Math.max(0, topOf(blocks.at(-1)) + heightOf(blocks.at(-1)) - SCREEN_HEIGHT);
+    host.scrollTop = Math.min(scrollTop, end);
+  };
+  blocks.forEach((block) => {
+    block.getBoundingClientRect = () => ({ top: topOf(block) - host.scrollTop });
+    block.scrollIntoView = () => moveTo(topOf(block));
+  });
+  const imagesLoaded = () => {
+    imageHeight = IMAGE_HEIGHT;
+    layoutChanged();
+  };
+  const fire = (type) => host.dispatchEvent(new document.defaultView.Event(type));
+  return { host, reader, imagesLoaded, moveTo, fire };
+}
+
+const IMAGE_LINE = 13;
+const CAPTION_LINE = 15;
+
+test('a block gone to before the images loaded is at the top of the screen once they have', async () => {
+  const { reader, imagesLoaded } = setupIllustrated();
+  await reader.goTo({ kind: 'md', line: CAPTION_LINE, sentence: 0 });
+  assert.notEqual(reader.screenLine(), CAPTION_LINE, 'the page is still too short to reach it');
+  imagesLoaded();
+  assert.equal(reader.screenLine(), CAPTION_LINE);
+});
+
+test('the position stays where goTo went while the images load, whatever is on screen', async () => {
+  const { reader } = setupIllustrated();
+  await reader.goTo({ kind: 'md', line: CAPTION_LINE, sentence: 0 });
+  assert.notEqual(reader.screenLine(), CAPTION_LINE);
+  assert.deepEqual(reader.position(), { kind: 'md', line: CAPTION_LINE, sentence: 0 });
+});
+
+test('a scroll that nobody asked for does not move the position away from where goTo went', async () => {
+  const { reader, fire } = setupIllustrated();
+  const moves = [];
+  reader.onMove((position) => moves.push(position.line));
+  await reader.goTo({ kind: 'md', line: IMAGE_LINE, sentence: 0 });
+  fire('scroll');
+  await new Promise((resolve) => {
+    setTimeout(resolve, SAVE_DEBOUNCE_MS * 2);
+  });
+  assert.deepEqual(moves, [IMAGE_LINE]);
+});
+
+test('a block too close to the end to reach the top keeps its line, and the screen shows the end', async () => {
+  const { reader, imagesLoaded } = setupIllustrated();
+  await reader.goTo({ kind: 'md', line: LAST_CAPTION_LINE, sentence: 0 });
+  imagesLoaded();
+  assert.notEqual(reader.screenLine(), LAST_CAPTION_LINE);
+  assert.equal(reader.position().line, LAST_CAPTION_LINE);
+});
+
+test('the excerpt comes from the block goTo went to, like the position', async () => {
+  const { reader } = setupIllustrated();
+  await reader.goTo({ kind: 'md', line: CAPTION_LINE, sentence: 0 });
+  assert.equal(reader.excerpt(), 'Didascalia 4');
+});
+
+for (const input of INPUTS) {
+  test(`${input} gives the screen back to the reader`, async () => {
+    const { host, reader, imagesLoaded, moveTo, fire } = setupIllustrated();
+    await reader.goTo({ kind: 'md', line: CAPTION_LINE, sentence: 0 });
+    imagesLoaded();
+    fire(input);
+    moveTo(0);
+    assert.equal(reader.position().line, 1, 'the position is on screen again');
+    imagesLoaded();
+    assert.equal(host.scrollTop, 0, 'a later change of layout does not pull the screen back');
+    assert.equal(observers.size, 0);
+  });
+}
+
+test('going somewhere else leaves the previous block behind', async () => {
+  const { reader, imagesLoaded } = setupIllustrated();
+  await reader.goTo({ kind: 'md', line: CAPTION_LINE, sentence: 0 });
+  await reader.goTo({ kind: 'md', line: IMAGE_LINE, sentence: 0 });
+  assert.equal(observers.size, 1);
+  imagesLoaded();
+  assert.equal(reader.screenLine(), IMAGE_LINE);
+});
+
+test('a reader that was never sent anywhere watches no layout and reports what is on screen', () => {
+  const { host, reader, imagesLoaded, moveTo } = setupIllustrated();
+  assert.equal(observers.size, 0);
+  imagesLoaded();
+  moveTo(IMAGE_HEIGHT);
+  assert.equal(host.scrollTop, IMAGE_HEIGHT);
+  assert.equal(reader.position().line, 3);
+});
+
+test('closing the tab stops watching the layout, also for a goTo still waiting for the text', async () => {
+  const { reader } = setupIllustrated();
+  await reader.goTo({ kind: 'md', line: CAPTION_LINE, sentence: 0 });
+  reader.destroy();
+  assert.equal(observers.size, 0);
+
+  const large = setup({ html: longList() });
+  const going = large.reader.goTo({ kind: 'md', line: LIST_LINES, sentence: 0 });
+  large.reader.destroy();
+  await going;
+  assert.equal(observers.size, 0);
 });

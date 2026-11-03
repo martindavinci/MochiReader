@@ -22,6 +22,8 @@ const EXCERPT_CHARS = 160;
 // goTo puts a block at the top, but the scroll offset is rounded to a whole device pixel, so the block can land up
 // to half a pixel lower. Without this margin it would not count as the top block, and each save would move back one.
 const FOLD_MARGIN_PX = 1;
+// What the reader does to move on from where goTo put them. Not `scroll`: the page also scrolls when its layout changes.
+const MOVE_INPUTS = ['wheel', 'keydown', 'pointerdown'];
 
 const nextTurn = () => new Promise((resolve) => {
   setTimeout(resolve);
@@ -102,10 +104,31 @@ export function openMarkdown(doc, host) {
     return null;
   };
 
-  const position = () => {
-    const block = topBlock();
-    return { kind: 'md', line: block ? lineOf(block) : NO_LINE, sentence: FIRST_SENTENCE };
+  const lineOrNone = (block) => (block ? lineOf(block) : NO_LINE);
+
+  // Where goTo went stays the position until the reader moves away. Images load after the text and push it down, and
+  // a block near the end cannot reach the top at all: what is on screen says nothing about the point being held.
+  let held = null;
+  let heldLayout = null;
+
+  const letGo = () => {
+    held = null;
+    heldLayout?.disconnect();
+    heldLayout = null;
+    MOVE_INPUTS.forEach((type) => host.removeEventListener(type, letGo));
   };
+
+  const hold = (block) => {
+    letGo();
+    held = block;
+    heldLayout = new ResizeObserver(() => block.scrollIntoView({ block: 'start' }));
+    heldLayout.observe(article);
+    MOVE_INPUTS.forEach((type) => host.addEventListener(type, letGo, { passive: true }));
+  };
+
+  const currentBlock = () => held ?? topBlock();
+
+  const position = () => ({ kind: 'md', line: lineOrNone(currentBlock()), sentence: FIRST_SENTENCE });
 
   const notifyMove = debounce(() => {
     const at = position();
@@ -121,11 +144,16 @@ export function openMarkdown(doc, host) {
       target: { kind: 'md', line, sentence: FIRST_SENTENCE },
     })),
     position,
+    // Not in the contract: only the report of the tabs asks, to check the screen and not what the reader says.
+    screenLine: () => lineOrNone(topBlock()),
     goTo: async (target) => {
       await filled;
+      if (destroyed) return;
       const all = blocks();
       const index = nearestBlock(all.map(lineOf), target.line);
-      if (index >= 0) all[index].scrollIntoView({ block: 'start' });
+      if (index < 0) return;
+      all[index].scrollIntoView({ block: 'start' });
+      hold(all[index]);
     },
     speechRoots: async () => {
       await filled;
@@ -135,9 +163,10 @@ export function openMarkdown(doc, host) {
     onInput: (callback) => article.addEventListener('click', callback),
     setStyle: () => {},
     nextSpeechSection: async () => false,
-    excerpt: () => (topBlock()?.textContent ?? '').trim().slice(0, EXCERPT_CHARS),
+    excerpt: () => (currentBlock()?.textContent ?? '').trim().slice(0, EXCERPT_CHARS),
     destroy: () => {
       destroyed = true;
+      letGo();
       notifyMove.cancel();
       host.removeEventListener('scroll', notifyMove);
       article.remove();
