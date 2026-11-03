@@ -6,6 +6,7 @@
 param([switch]$NoBuild, [int]$BurstRounds = 3, [string[]]$Only)
 $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot\app-process.ps1"
+. "$PSScriptRoot\smoke-net-log.ps1"
 
 $BurstFiles = 5
 $DumpRetryMs = 500
@@ -1406,7 +1407,8 @@ $AllTests = @(
   'Test-EpubChangesOnDisk',
   'Test-EpubKeys',
   'Test-FixedLayoutEpub',
-  'Test-CorruptState'
+  'Test-CorruptState',
+  'Test-NetLogStaysLocal'
 )
 foreach ($name in $Only) {
   if ($AllTests -notcontains $name) { throw "no test named $name" }
