@@ -35,15 +35,41 @@ $LargeFileWatchS = 20
 $LargeFileMaxAnswerMs = 1000
 $AnswerPollMs = 2
 
+# A note long enough to scroll, with one paragraph every two lines.
+$LongNoteParagraphs = 400
+$LongNoteLinesPerParagraph = 2
+$ShortNoteParagraphs = 20
+# The line of a paragraph well inside the note, at the top of the screen when the note opens there.
+$SavedLine = 401
+$VK_NEXT = 0x22
+$PageDownPresses = 5
+# SAVE_DEBOUNCE_MS of position.js and some room.
+$SaveSettleMs = 1000
+$FocusSettleMs = 500
+$StateWaitS = 10
+$PlacedX = 140
+$PlacedY = 90
+$PlacedWidth = 760
+$PlacedHeight = 540
+$SW_MAXIMIZE = 3
+$SW_RESTORE = 9
+$SWP_NOZORDER = 4
+
 Add-Type @'
 using System;
 using System.Runtime.InteropServices;
 public static class SmokeInput {
+  [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left, Top, Right, Bottom; }
   [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
   [DllImport("user32.dll")] public static extern void keybd_event(byte k, byte s, uint f, UIntPtr e);
+  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out Rect r);
+  [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int w, int t, uint flags);
+  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
+  [DllImport("user32.dll")] public static extern bool IsZoomed(IntPtr h);
 }
 '@
+Add-Type -AssemblyName System.Windows.Forms
 
 function Pass([string]$Message) { "PASS  $Message" }
 
@@ -286,11 +312,236 @@ function Test-BrowserKeysKeepTheSession {
   }
 }
 
+function Write-Note([string]$Path, [string]$Text) {
+  [System.IO.File]::WriteAllText($Path, $Text, (New-Object System.Text.UTF8Encoding $false))
+}
+
+function New-LongText([string]$Word, [int]$Paragraphs) {
+  (1..$Paragraphs | ForEach-Object { "$Word numero $_.`n" }) -join "`n"
+}
+
+function Get-StateFile { Join-Path $StateDir 'mochi.json' }
+
+function Get-State { [System.IO.File]::ReadAllText((Get-StateFile), [System.Text.Encoding]::UTF8) | ConvertFrom-Json }
+
+function Get-SavedPosition([string]$Name) {
+  $state = Get-State
+  $property = $state.positions.PSObject.Properties | Where-Object { $_.Name -like "*\$Name" }
+  if ($property) { $property.Value }
+}
+
+function Wait-State([scriptblock]$Done, [string]$What) {
+  $limit = (Get-Date).AddSeconds($StateWaitS)
+  while (-not (& $Done)) {
+    if ((Get-Date) -gt $limit) { throw "FAIL  $What" }
+    Start-Sleep -Milliseconds $AppPollMs
+  }
+}
+
+# Moves the focus to another window and back, as the reader does when returning to the app. Windows lets a program
+# take the foreground only under some conditions, so the answer says whether it really happened.
+function Invoke-FocusReturn([IntPtr]$Window) {
+  $other = New-Object System.Windows.Forms.Form
+  try {
+    $other.ShowInTaskbar = $false
+    $other.Show()
+    $other.Activate()
+    [System.Windows.Forms.Application]::DoEvents()
+    Start-Sleep -Milliseconds $FocusSettleMs
+    if ([SmokeInput]::GetForegroundWindow() -ne $other.Handle) { return $false }
+    if (-not [SmokeInput]::SetForegroundWindow($Window)) { return $false }
+    Start-Sleep -Milliseconds $FocusSettleMs
+    [SmokeInput]::GetForegroundWindow() -eq $Window
+  } finally {
+    $other.Close()
+    $other.Dispose()
+  }
+}
+
+function Test-DeletedFile {
+  Wait-AppGone
+  $note = New-Note 'da cancellare.md' 'Testo che resta visibile.'
+  $app = Start-App @("`"$note`"")
+  try {
+    $window = Wait-AppWindow $app
+    Wait-Tabs 1 { param($t) $t[0].status -eq 'ok' } | Out-Null
+    Remove-Item $note
+    if (Invoke-FocusReturn $window) {
+      $tabs = Wait-Tabs 1 { param($t) $t[0].notice.Length -gt 0 }
+      Pass 'the window coming back to the front notices a deleted file'
+    } else {
+      'SKIP  Windows did not let the focus move, so the window coming back to the front was not checked'
+      Start-Second "`"$note`""
+      $tabs = Wait-Tabs 1 { param($t) $t[0].notice.Length -gt 0 }
+    }
+    Assert-That ($tabs[0].status -eq 'ok') 'a deleted file keeps its tab as it was'
+    Assert-That ($tabs[0].text.Contains('Testo che resta visibile.')) 'the text of a deleted file stays'
+    Assert-That (-not $app.HasExited) 'the app is still running'
+    Pass 'a deleted file keeps its text and gets a message'
+  } finally {
+    Stop-App $app
+  }
+
+  $app = Start-App @("`"$note`"")
+  try {
+    Wait-AppWindow $app | Out-Null
+    $tabs = Wait-Tabs 1 { param($t) $t[0].status -ne 'loading' }
+    Assert-That ($tabs[0].status -eq 'missing') "a deleted file is reported as missing, not $($tabs[0].status)"
+    Assert-That ($tabs[0].notice.Length -gt 0) 'a deleted file opened again gets a message in its tab'
+    Pass 'a deleted file opened again gets a message in its tab'
+  } finally {
+    Stop-App $app
+  }
+
+  $app = Start-App @()
+  try {
+    Wait-AppWindow $app | Out-Null
+    Wait-State {
+      $recent = @((Get-State).recents) | Where-Object { $_.path -eq $note }
+      $recent -and -not $recent.exists
+    } 'a deleted file stays in the recents, marked as missing'
+    Pass 'a deleted file stays in the recents, marked as missing'
+  } finally {
+    Stop-App $app
+  }
+}
+
+function Test-Position {
+  Wait-AppGone
+  $name = 'lunga posizione.md'
+  $note = Join-Path $Work $name
+  Write-Note $note (New-LongText 'Paragrafo' $LongNoteParagraphs)
+
+  $app = Start-App @("`"$note`"")
+  try {
+    Wait-AppWindow $app | Out-Null
+    Wait-Tabs 1 { param($t) $t[0].status -eq 'ok' } | Out-Null
+  } finally {
+    Stop-App $app
+  }
+  $saved = Get-SavedPosition $name
+  Assert-That ($null -ne $saved) 'closing the app saves the position of its tabs'
+  Assert-That ($saved.line -eq 1) "a note never scrolled is saved at its start, not at line $($saved.line)"
+  Pass 'closing the app saves the position of its tabs'
+
+  # Written here so that this part does not depend on Windows letting real keys through.
+  $state = Get-State
+  $state.positions.PSObject.Properties | Where-Object { $_.Name -like "*\$name" } | ForEach-Object { $_.Value.line = $SavedLine }
+  [System.IO.File]::WriteAllText((Get-StateFile), ($state | ConvertTo-Json -Depth 10), (New-Object System.Text.UTF8Encoding $false))
+
+  $app = Start-App @("`"$note`"")
+  try {
+    $window = Wait-AppWindow $app
+    Wait-Tabs 1 { param($t) $t[0].status -eq 'ok' -and $t[0].position.line -eq $SavedLine } | Out-Null
+    Pass "a file opens at its saved position, line $SavedLine"
+
+    Write-Note $note (New-LongText 'Cambiato' $LongNoteParagraphs)
+    Start-Second "`"$note`""
+    $tabs = Wait-Tabs 1 { param($t) $t[0].text.Contains('Cambiato numero 1.') }
+    Assert-That ($tabs[0].position.line -eq $SavedLine) "a file read again stays at line $SavedLine, not $($tabs[0].position.line)"
+    Pass 'a file changed on disk is read again and keeps the position'
+
+    Write-Note $note (New-LongText 'Breve' $ShortNoteParagraphs)
+    Start-Second "`"$note`""
+    $tabs = Wait-Tabs 1 { param($t) $t[0].text.Contains('Breve numero 1.') }
+    Assert-That ($tabs[0].status -eq 'ok' -and $tabs[0].position.line -gt 0) 'a file that shrank has a position'
+    Assert-That ($tabs[0].position.line -lt $SavedLine) 'a file that shrank moves to a block it still has'
+    Pass "a file that shrank goes to the nearest block, line $($tabs[0].position.line)"
+
+    Write-Note $note (New-LongText 'Paragrafo' $LongNoteParagraphs)
+    Start-Second "`"$note`""
+    Wait-Tabs 1 { param($t) $t[0].text.Contains('Paragrafo numero 1.') } | Out-Null
+
+    [void][SmokeInput]::SetForegroundWindow($window)
+    Start-Sleep -Milliseconds $SecondProcessMs
+    $sent = $true
+    $before = (Get-Tabs)[0].position.line
+    foreach ($press in 1..$PageDownPresses) { $sent = $sent -and (Send-Keys $window ([byte[]]@($VK_NEXT))) }
+    if ($sent) {
+      Start-Sleep -Milliseconds $SaveSettleMs
+      $line = (Get-Tabs)[0].position.line
+      Assert-That ($line -gt $before) "the keys scroll the text: line $before, then $line"
+      Wait-State { (Get-SavedPosition $name).line -eq $line } "a scroll is saved after it ends, line $line"
+      Pass "a scroll is saved after it ends, line $line"
+      Stop-App $app
+      $app = Start-App @("`"$note`"")
+      Wait-AppWindow $app | Out-Null
+      Wait-Tabs 1 { param($t) $t[0].status -eq 'ok' -and $t[0].position.line -eq $line } | Out-Null
+      Pass 'open, scroll, close, open again: the same point'
+    } else {
+      'SKIP  the app is not in front, so a real scroll was not checked'
+    }
+  } finally {
+    Stop-App $app
+  }
+}
+
+function Get-WindowBox([IntPtr]$Window) {
+  $box = New-Object SmokeInput+Rect
+  [void][SmokeInput]::GetWindowRect($Window, [ref]$box)
+  '{0},{1},{2},{3}' -f $box.Left, $box.Top, ($box.Right - $box.Left), ($box.Bottom - $box.Top)
+}
+
+function Test-WindowPlacement {
+  Wait-AppGone
+  $wanted = '{0},{1},{2},{3}' -f $PlacedX, $PlacedY, $PlacedWidth, $PlacedHeight
+  $app = Start-App @()
+  try {
+    $window = Wait-AppWindow $app
+    [void][SmokeInput]::SetWindowPos($window, [IntPtr]::Zero, $PlacedX, $PlacedY, $PlacedWidth, $PlacedHeight, $SWP_NOZORDER)
+  } finally {
+    Stop-App $app
+  }
+  $app = Start-App @()
+  try {
+    $window = Wait-AppWindow $app
+    $box = Get-WindowBox $window
+    Assert-That ($box -eq $wanted) "the window comes back at $wanted, not $box"
+    Pass 'the window remembers its position and size'
+    [void][SmokeInput]::ShowWindow($window, $SW_MAXIMIZE)
+  } finally {
+    Stop-App $app
+  }
+  $app = Start-App @()
+  try {
+    $window = Wait-AppWindow $app
+    Assert-That ([SmokeInput]::IsZoomed($window)) 'a maximized window comes back maximized'
+    [void][SmokeInput]::ShowWindow($window, $SW_RESTORE)
+    $box = Get-WindowBox $window
+    Assert-That ($box -eq $wanted) "a maximized window restores to $wanted, not $box"
+    Pass 'a maximized window comes back maximized and restores to its size'
+  } finally {
+    Stop-App $app
+  }
+}
+
+function Test-CorruptState {
+  Wait-AppGone
+  $broken = '{ this is not the state'
+  [System.IO.File]::WriteAllText((Get-StateFile), $broken)
+  $note = New-Note 'dopo lo stato rotto.md' 'Si apre lo stesso.'
+  $app = Start-App @("`"$note`"")
+  try {
+    Wait-AppWindow $app | Out-Null
+    Wait-Tabs 1 { param($t) $t[0].status -eq 'ok' } | Out-Null
+    $kept = @(Get-ChildItem $StateDir -Filter 'mochi.json.bad-*' | Where-Object { [System.IO.File]::ReadAllText($_.FullName) -eq $broken })
+    Assert-That ($kept.Count -eq 1) 'a broken state file is kept aside'
+    Wait-State { @((Get-State).recents).Count -eq 1 } 'the state starts again after a broken file'
+    Pass 'a broken state file is kept aside and the app starts empty'
+  } finally {
+    Stop-App $app
+  }
+}
+
 Assert-AppNotRunning
 if (-not $NoBuild) { Build-App @('--features', 'smoke') }
 $AppExe = Join-Path $AppTarget 'debug\mochireader.exe'
 $Work = Join-Path ([System.IO.Path]::GetTempPath()) "mochi-smoke-$PID"
 New-Item -ItemType Directory $Work | Out-Null
+# The state of the smoke build stays here, away from the recents and positions of the person running it.
+$StateDir = Join-Path $Work 'state'
+New-Item -ItemType Directory $StateDir | Out-Null
+$env:MOCHIREADER_STATE_DIR = $StateDir
 try {
   Test-EmptyStart
   Test-Burst
@@ -299,6 +550,10 @@ try {
   Test-FailedTabRetries
   Test-LargeFile
   Test-BrowserKeysKeepTheSession
+  Test-DeletedFile
+  Test-Position
+  Test-WindowPlacement
+  Test-CorruptState
   'smoke: all checks passed'
 } finally {
   Get-AppMainProcesses | Stop-Process -Force -ErrorAction SilentlyContinue

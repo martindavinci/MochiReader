@@ -10,11 +10,16 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 pub const OPEN_TIMEOUT: Duration = Duration::from_secs(10);
 // A document nested deeply enough to overflow a default thread stack must not take the app down.
 const OPEN_STACK_BYTES: usize = 64 * 1024 * 1024;
+const MARKDOWN_KEY_PREFIX: &str = "md:";
+const VERBATIM_UNC: &str = "\\\\?\\UNC\\";
+const VERBATIM: &str = "\\\\?\\";
+const UNC_START: &str = "\\\\";
+const MS_PER_SECOND: f64 = 1000.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -29,6 +34,11 @@ pub struct OpenedDoc {
     pub path: String,
     pub name: String,
     pub kind: DocKind,
+    /// What the position of this file is saved under. A book gets its own in the page, from its metadata.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
+    /// When the file was last changed, in Unix milliseconds, if the drive said.
+    pub modified_ms: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rendered: Option<Rendered>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -76,8 +86,31 @@ pub fn read_file(path: &Path) -> io::Result<Vec<u8>> {
     fs::read(path)
 }
 
+pub fn stat_file(path: &Path) -> io::Result<SystemTime> {
+    fs::metadata(path)?.modified()
+}
+
+fn unix_ms(time: SystemTime) -> f64 {
+    time.duration_since(UNIX_EPOCH)
+        .map_or(0.0, |since| since.as_secs_f64() * MS_PER_SECOND)
+}
+
+/// The key of a Markdown file: any spelling of its path gives the same one, and a moved file starts over.
+fn markdown_key(file: &Path) -> String {
+    let real = fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
+    let real = real.to_string_lossy();
+    let plain = match (real.strip_prefix(VERBATIM_UNC), real.strip_prefix(VERBATIM)) {
+        (Some(unc), _) => format!("{UNC_START}{unc}"),
+        (None, Some(local)) => local.to_string(),
+        (None, None) => real.into_owned(),
+    };
+    format!("{MARKDOWN_KEY_PREFIX}{}", plain.to_lowercase())
+}
+
 fn load(path: &str, read: impl FnOnce(&Path) -> io::Result<Vec<u8>>) -> LoadResult {
     let file = Path::new(path);
+    // Before the read: a change in between then shows up as a change at the next check, and is not lost.
+    let modified_ms = stat_file(file).ok().map(unix_ms);
     let folder = file
         .parent()
         .filter(|folder| !folder.as_os_str().is_empty());
@@ -86,7 +119,7 @@ fn load(path: &str, read: impl FnOnce(&Path) -> io::Result<Vec<u8>>) -> LoadResu
         || path.to_string(),
         |name| name.to_string_lossy().into_owned(),
     );
-    let (kind, rendered, url) = if is_markdown(file) {
+    let (kind, key, rendered, url) = if is_markdown(file) {
         let source = decode_text(&read(file)?);
         let vault = find_vault(file);
         roots.extend(vault.iter().map(|vault| vault.root.clone()));
@@ -95,18 +128,21 @@ fn load(path: &str, read: impl FnOnce(&Path) -> io::Result<Vec<u8>>) -> LoadResu
             vault: vault.as_ref(),
         };
         let rendered = render_markdown(&source, &ctx);
-        (DocKind::Markdown, Some(rendered), None)
+        let key = markdown_key(file);
+        (DocKind::Markdown, Some(key), Some(rendered), None)
     } else {
         if !fs::metadata(file)?.is_file() {
             return Err(OpenErrorCode::Unreadable.into());
         }
-        (DocKind::Epub, None, Some(file_url(file)))
+        (DocKind::Epub, None, None, Some(file_url(file)))
     };
     Ok(Loaded {
         doc: OpenedDoc {
             path: path.to_string(),
             name,
             kind,
+            key,
+            modified_ms,
             rendered,
             file_url: url,
         },
@@ -156,6 +192,24 @@ pub fn open_with(
     wait(&spawn_load(path, read), timeout)
 }
 
+/// When `path` was last changed, in Unix milliseconds, or the reason no one can say.
+pub fn modified_with(
+    path: &str,
+    stat: impl FnOnce(&Path) -> io::Result<SystemTime> + Send + 'static,
+    timeout: Duration,
+) -> Result<f64, OpenError> {
+    let (sender, receiver) = mpsc::channel();
+    let path = path.to_string();
+    thread::spawn(move || {
+        let _ = sender.send(stat(Path::new(&path)));
+    });
+    match receiver.recv_timeout(timeout) {
+        Ok(answer) => Ok(unix_ms(answer?)),
+        Err(RecvTimeoutError::Timeout) => Err(OpenErrorCode::Timeout.into()),
+        Err(RecvTimeoutError::Disconnected) => Err(OpenErrorCode::Unreadable.into()),
+    }
+}
+
 /// The documents of the app: the roots they open, and the file being read before the page asks for it.
 #[derive(Default)]
 pub struct Docs {
@@ -193,9 +247,9 @@ impl Docs {
 
 /// Waits for an opening on the blocking pool. A command's own thread is one of few async workers, as many
 /// as the processor has cores: files waiting on a hung drive would take them all and hold up healthy ones.
-pub async fn off_the_workers(
-    job: impl FnOnce() -> Result<OpenedDoc, OpenError> + Send + 'static,
-) -> Result<OpenedDoc, OpenError> {
+pub async fn off_the_workers<T: Send + 'static>(
+    job: impl FnOnce() -> Result<T, OpenError> + Send + 'static,
+) -> Result<T, OpenError> {
     tauri::async_runtime::spawn_blocking(job)
         .await
         .unwrap_or_else(|_| Err(OpenErrorCode::Unreadable.into()))
@@ -301,7 +355,7 @@ mod tests {
         let runtime_workers = thread::available_parallelism().map_or(1, |count| count.get());
         let hung: Vec<_> = (0..runtime_workers * HUNG_PER_WORKER)
             .map(|_| {
-                tauri::async_runtime::spawn(off_the_workers(|| {
+                tauri::async_runtime::spawn(off_the_workers::<()>(|| {
                     thread::sleep(HUNG_FOR);
                     Err(OpenErrorCode::Timeout.into())
                 }))
@@ -309,8 +363,9 @@ mod tests {
             .collect();
         thread::sleep(LET_THE_HUNG_START);
         let started = Instant::now();
-        let healthy =
-            tauri::async_runtime::spawn(off_the_workers(|| Err(OpenErrorCode::NotFound.into())));
+        let healthy = tauri::async_runtime::spawn(off_the_workers::<()>(|| {
+            Err(OpenErrorCode::NotFound.into())
+        }));
         let answer = tauri::async_runtime::block_on(healthy).unwrap();
         let waited = started.elapsed();
         assert_eq!(answer.unwrap_err().code, OpenErrorCode::NotFound);
@@ -319,6 +374,62 @@ mod tests {
             let answer = tauri::async_runtime::block_on(job).unwrap();
             assert_eq!(answer.unwrap_err().code, OpenErrorCode::Timeout);
         }
+    }
+
+    #[test]
+    fn a_markdown_key_is_the_canonical_path_in_lower_case() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("Nota È.md");
+        fs::write(&path, "x").unwrap();
+        let key = open(&path).unwrap().key.unwrap();
+        assert!(key.starts_with(MARKDOWN_KEY_PREFIX), "{key}");
+        assert!(key.ends_with("\\nota è.md"), "{key}");
+        assert!(!key.contains("\\\\?\\"), "{key}");
+        assert_eq!(key, key.to_lowercase());
+
+        let other_spelling = dir.path().join(".").join("NOTA È.md");
+        assert_eq!(open(&other_spelling).unwrap().key.unwrap(), key);
+    }
+
+    #[test]
+    fn a_book_gets_its_key_elsewhere() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.epub");
+        fs::write(&path, b"zip").unwrap();
+        assert_eq!(open(&path).unwrap().key, None);
+    }
+
+    #[test]
+    fn an_opened_file_says_when_it_was_last_changed() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in ["a.md", "a.epub"] {
+            let path = dir.path().join(name);
+            fs::write(&path, "x").unwrap();
+            let doc = open(&path).unwrap();
+            let name = path.to_string_lossy();
+            let modified = modified_with(&name, stat_file, OPEN_TIMEOUT).unwrap();
+            assert_eq!(doc.modified_ms, Some(modified), "{name}");
+        }
+    }
+
+    #[test]
+    fn the_date_of_a_missing_file_is_not_found() {
+        let dir = tempfile::tempdir().unwrap();
+        let name = dir.path().join("no.md");
+        let error = modified_with(&name.to_string_lossy(), stat_file, OPEN_TIMEOUT).unwrap_err();
+        assert_eq!(error.code, OpenErrorCode::NotFound);
+    }
+
+    #[test]
+    fn the_date_of_a_file_on_a_hung_drive_times_out() {
+        let blocked = |_: &Path| -> io::Result<SystemTime> {
+            thread::sleep(BLOCKED_FOR);
+            Ok(SystemTime::now())
+        };
+        let started = Instant::now();
+        let error = modified_with("Y:\\a.md", blocked, SHORT_TIMEOUT).unwrap_err();
+        assert_eq!(error.code, OpenErrorCode::Timeout);
+        assert!(started.elapsed() < BLOCKED_FOR);
     }
 
     #[test]

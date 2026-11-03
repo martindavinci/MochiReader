@@ -104,6 +104,67 @@ body {
   color: var(--muted);
 }
 
+/* It stays in sight however far down the text is, and the text below stays readable. */
+.file-notice {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin: 0;
+  padding: 0.4rem 1.5rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 14px;
+  text-align: center;
+}
+
+/* First screen: how to open a file, then the recent ones. */
+.home-hint { margin: 0; }
+
+.recents-title {
+  margin: 1.8rem 0 0.5rem;
+  color: var(--fg);
+  font-size: 1em;
+  font-weight: 600;
+}
+
+.recents, .recents-empty { margin: 0; }
+.recents { padding: 0; list-style: none; }
+
+.recent {
+  display: flex;
+  margin: 0;
+  border-radius: 5px;
+}
+
+.recent:hover { background: var(--surface); }
+
+.recent button {
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.recent-open {
+  flex: 1;
+  min-width: 0;
+  padding: 0.3rem 0.6rem;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recent-name { color: var(--fg); }
+.recent-folder, .recent-missing { margin-left: 0.8em; color: var(--muted); font-size: 13px; }
+.recent-remove { flex: none; padding: 0 0.7rem; color: var(--muted); }
+.recent-remove:hover { color: var(--fg); }
+
+/* A file that is gone stays listed, in grey, and the name is struck so it does not rest on colour alone. */
+.recent.missing .recent-name { color: var(--muted); text-decoration: line-through; }
+
 #toast {
   position: fixed;
   bottom: 1.5rem;

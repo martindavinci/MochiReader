@@ -1,16 +1,20 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! The Windows calls the app needs and Tauri does not offer.
+use crate::state::WindowPlacement;
 use std::ffi::c_void;
 use std::mem::size_of;
 use webview2_com::Microsoft::Web::WebView2::Win32::{
     ICoreWebView2Controller, ICoreWebView2Settings3,
 };
 use windows::core::{w, Interface, BOOL, HSTRING};
-use windows::Win32::Foundation::{CloseHandle, HANDLE, HWND};
+use windows::Win32::Foundation::{CloseHandle, HANDLE, HWND, RECT};
 use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_TRANSITIONS_FORCEDISABLED};
 use windows::Win32::System::Threading::{CreateMutexW, ReleaseMutex, WaitForSingleObject};
 use windows::Win32::UI::Shell::ShellExecuteW;
-use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+use windows::Win32::UI::WindowsAndMessaging::{
+    GetWindowPlacement, SetWindowPlacement, SW_HIDE, SW_SHOWMAXIMIZED, SW_SHOWNORMAL,
+    WINDOWPLACEMENT, WPF_RESTORETOMAXIMIZED,
+};
 
 // ShellExecuteW answers with a value above this when it succeeds.
 const SHELL_EXECUTE_LAST_ERROR: isize = 32;
@@ -28,6 +32,45 @@ pub fn disable_open_animation(hwnd: HWND) -> windows::core::Result<()> {
             size_of::<BOOL>() as u32,
         )
     }
+}
+
+/// Where the window goes when it is neither maximized nor minimized, and whether it is maximized now.
+/// Windows keeps this however the window is showing, which the Tauri calls do not offer.
+pub fn window_placement(hwnd: HWND) -> Option<WindowPlacement> {
+    let mut placement = WINDOWPLACEMENT {
+        length: size_of::<WINDOWPLACEMENT>() as u32,
+        ..Default::default()
+    };
+    unsafe { GetWindowPlacement(hwnd, &raw mut placement) }.ok()?;
+    let rect = placement.rcNormalPosition;
+    let restores_maximized = placement.flags.0 & WPF_RESTORETOMAXIMIZED.0 != 0;
+    Some(WindowPlacement {
+        x: rect.left,
+        y: rect.top,
+        width: rect.right - rect.left,
+        height: rect.bottom - rect.top,
+        maximized: placement.showCmd == SW_SHOWMAXIMIZED.0 as u32 || restores_maximized,
+    })
+}
+
+/// Puts a window that is still hidden back where it was, and leaves it hidden. Windows itself moves it onto the
+/// screen if it would land off every monitor, as after a monitor was unplugged.
+pub fn set_window_placement(hwnd: HWND, placed: WindowPlacement) {
+    if placed.width <= 0 || placed.height <= 0 {
+        return;
+    }
+    let placement = WINDOWPLACEMENT {
+        length: size_of::<WINDOWPLACEMENT>() as u32,
+        showCmd: SW_HIDE.0 as u32,
+        rcNormalPosition: RECT {
+            left: placed.x,
+            top: placed.y,
+            right: placed.x + placed.width,
+            bottom: placed.y + placed.height,
+        },
+        ..Default::default()
+    };
+    let _ = unsafe { SetWindowPlacement(hwnd, &raw const placement) };
 }
 
 /// Turns off what WebView2 does as a browser: Ctrl+R or F5 would reload the page and lose every tab, and the

@@ -7,12 +7,14 @@ pub mod obsidian;
 pub mod protocol;
 mod raw_html;
 pub mod render;
+pub mod state;
 pub mod timing;
 pub mod vault;
 
 use docs::{Docs, OpenError, OpenedDoc, PendingPaths};
 use launch::{Launch, MeasureOpen};
-use serde_json::json;
+use serde_json::{json, Value};
+use state::{AppState, Recent, Store};
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::Path;
@@ -20,12 +22,18 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
 use tauri::webview::NewWindowResponse;
-use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow, WebviewWindowBuilder, WindowEvent};
 
 const MAIN_WINDOW: &str = "main";
 const PROTOCOL: &str = "mochi";
 const OPEN_PATHS_EVENT: &str = "open-paths";
 const SHELL_COMMAND_EVENT: &str = "shell-command";
+const CLOSING_EVENT: &str = "app-closing";
+// The page saves what it has when the app closes, but a page that does not answer must not keep the window open.
+const CLOSE_SAVE_DEADLINE: Duration = Duration::from_millis(1500);
+// Only in the smoke build: the state of a test run stays out of the reader's own.
+#[cfg(feature = "smoke")]
+const SMOKE_STATE_DIR: &str = "MOCHIREADER_STATE_DIR";
 const EXTERNAL_SCHEMES: [&str; 3] = ["http", "https", "mailto"];
 const SCHEME_END: char = ':';
 // If the page never reports its first frame, the window still has to appear.
@@ -39,15 +47,113 @@ struct Session {
     measure_file: Option<String>,
     painted: AtomicBool,
     measure_open: Mutex<Option<MeasureOpen>>,
+    closing: AtomicBool,
+    closed: AtomicBool,
 }
 
 fn main_window(app: &AppHandle) -> Option<WebviewWindow> {
     app.get_webview_window(MAIN_WINDOW)
 }
 
+fn show_main_window(app: &AppHandle) -> Option<WebviewWindow> {
+    let window = main_window(app)?;
+    if app
+        .state::<Store>()
+        .window()
+        .is_some_and(|placed| placed.maximized)
+    {
+        let _ = window.maximize();
+    }
+    let _ = window.show();
+    Some(window)
+}
+
+fn finish_closing(app: &AppHandle) {
+    if app.state::<Session>().closed.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    app.state::<Store>().persist();
+    if let Some(window) = main_window(app) {
+        let _ = window.destroy();
+    }
+}
+
+/// Keeps the window until the page has saved the position of its tabs, or until the time for that runs out.
+fn on_close_requested(window: &tauri::Window) {
+    let app = window.app_handle().clone();
+    if app.state::<Session>().closing.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    if let Some(placement) = window.hwnd().ok().and_then(native::window_placement) {
+        app.state::<Store>().set_window(placement);
+    }
+    let _ = app.emit(CLOSING_EVENT, ());
+    std::thread::spawn(move || {
+        std::thread::sleep(CLOSE_SAVE_DEADLINE);
+        finish_closing(&app);
+    });
+}
+
 #[tauri::command]
 async fn open_document(path: String, app: AppHandle) -> Result<OpenedDoc, OpenError> {
     docs::off_the_workers(move || app.state::<Docs>().open(&path)).await
+}
+
+/// When the file of a tab last changed. A file that is gone or a drive that does not answer comes back as an error.
+#[tauri::command]
+async fn file_modified(path: String) -> Result<f64, OpenError> {
+    docs::off_the_workers(move || docs::modified_with(&path, docs::stat_file, docs::OPEN_TIMEOUT))
+        .await
+}
+
+#[tauri::command(async)]
+fn state_get(store: State<'_, Store>) -> AppState {
+    store.snapshot()
+}
+
+#[tauri::command(async)]
+fn state_touch_recent(path: String, kind: String, title: String, store: State<'_, Store>) {
+    store.touch_recent(&path, &kind, &title, timing::now_unix_ms());
+}
+
+#[tauri::command(async)]
+fn state_remove_recent(path: String, store: State<'_, Store>) {
+    store.remove_recent(&path);
+}
+
+/// Separate from `state_get`, which has to answer at once: this one asks the drives.
+#[tauri::command]
+async fn state_check_recents(app: AppHandle) -> Vec<Recent> {
+    let check = move || {
+        app.state::<Store>().check_recents(
+            |path| Path::new(path).try_exists().ok(),
+            state::RECENTS_CHECK_TIMEOUT,
+        )
+    };
+    tauri::async_runtime::spawn_blocking(check)
+        .await
+        .unwrap_or_default()
+}
+
+#[tauri::command(async)]
+fn state_save_position(key: String, position: Value, store: State<'_, Store>) {
+    store.save_position(&key, position);
+}
+
+#[tauri::command(async)]
+fn state_get_position(key: String, store: State<'_, Store>) -> Option<Value> {
+    store.position(&key)
+}
+
+#[tauri::command(async)]
+fn state_set_option(name: String, value: Value, store: State<'_, Store>) {
+    store.set_option(&name, value);
+}
+
+/// The page has saved what it had: the window can go.
+#[tauri::command(async)]
+fn close_ready(app: AppHandle) {
+    finish_closing(&app);
 }
 
 #[tauri::command]
@@ -75,8 +181,7 @@ fn open_external(url: String) -> Result<(), String> {
 /// `ms`: when the page saw its first frame, in Unix milliseconds.
 #[tauri::command]
 fn first_paint(ms: f64, app: AppHandle, session: State<'_, Session>) {
-    if let Some(window) = main_window(&app) {
-        let _ = window.show();
+    if let Some(window) = show_main_window(&app) {
         let _ = window.set_focus();
     }
     session.painted.store(true, Ordering::SeqCst);
@@ -156,6 +261,9 @@ fn create_window(app: &mut tauri::App) -> tauri::Result<()> {
         .build()?;
     if let Ok(hwnd) = window.hwnd() {
         let _ = native::disable_open_animation(hwnd);
+        if let Some(placed) = app.state::<Store>().window() {
+            native::set_window_placement(hwnd, placed);
+        }
     }
     window.with_webview(|webview| {
         let _ = native::disable_browser_features(&webview.controller());
@@ -164,12 +272,18 @@ fn create_window(app: &mut tauri::App) -> tauri::Result<()> {
     std::thread::spawn(move || {
         std::thread::sleep(FIRST_PAINT_DEADLINE);
         if !handle.state::<Session>().painted.load(Ordering::SeqCst) {
-            if let Some(window) = main_window(&handle) {
-                let _ = window.show();
-            }
+            show_main_window(&handle);
         }
     });
     Ok(())
+}
+
+fn state_folder(app: &tauri::App) -> tauri::Result<std::path::PathBuf> {
+    #[cfg(feature = "smoke")]
+    if let Some(folder) = std::env::var_os(SMOKE_STATE_DIR) {
+        return Ok(folder.into());
+    }
+    app.path().app_data_dir()
 }
 
 pub fn run() {
@@ -193,6 +307,8 @@ pub fn run() {
         measure_file: first_file.clone().filter(|_| launch.measure),
         painted: AtomicBool::new(false),
         measure_open: Mutex::new(None),
+        closing: AtomicBool::new(false),
+        closed: AtomicBool::new(false),
     };
 
     let app = tauri::Builder::default()
@@ -214,10 +330,28 @@ pub fn run() {
             open_external,
             first_paint,
             measure_open_done,
+            file_modified,
+            state_get,
+            state_touch_recent,
+            state_remove_recent,
+            state_check_recents,
+            state_save_position,
+            state_get_position,
+            state_set_option,
+            close_ready,
             #[cfg(feature = "smoke")]
             smoke_write_dump,
         ])
-        .setup(|app| Ok(create_window(app)?))
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                on_close_requested(window);
+            }
+        })
+        .setup(|app| {
+            app.manage(Store::load(&state_folder(app)?, timing::now_unix_ms()));
+            Ok(create_window(app)?)
+        })
         .build(tauri::generate_context!())
         .expect("the app could not start");
     drop(gate);
