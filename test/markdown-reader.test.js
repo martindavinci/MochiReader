@@ -102,6 +102,21 @@ test('going to a line that no longer exists goes to the nearest block', async ()
   assert.deepEqual(scrolled, [blocks[3]]);
 });
 
+// The app takes the excerpt as JSON, and half a character there fails the whole call that saves the bookmark.
+const EXCERPT_LIMIT = 160;
+const emojiAfter = (letters) => '<p data-sourcepos="1:1-1:9">' + 'a'.repeat(letters) + '\u{1F389} resto del paragrafo.</p>';
+
+test('the excerpt never ends with half a character', () => {
+  const excerpt = setup({ html: emojiAfter(EXCERPT_LIMIT - 1) }).reader.excerpt();
+  assert.equal(excerpt, 'a'.repeat(EXCERPT_LIMIT - 1));
+  assert.ok(excerpt.isWellFormed());
+});
+
+test('the excerpt keeps a whole character that fits, and stops at its limit', () => {
+  assert.equal(setup({ html: emojiAfter(EXCERPT_LIMIT - 2) }).reader.excerpt(), 'a'.repeat(EXCERPT_LIMIT - 2) + '\u{1F389}');
+  assert.equal(setup({ html: emojiAfter(EXCERPT_LIMIT) }).reader.excerpt(), 'a'.repeat(EXCERPT_LIMIT));
+});
+
 test('an empty document has a position and an empty excerpt', async () => {
   const { reader } = setup({ html: '', headings: [] });
   assert.deepEqual(reader.position(), { kind: 'md', line: 0, sentence: 0 });
@@ -489,6 +504,61 @@ test('moving by block lands on items, not on the list that holds them', async ()
   await reader.moveBlock(-1);
   await reader.moveBlock(-1);
   assert.equal(line(reader), 1);
+});
+
+// As comrak writes them: the text of an item in a tight list sits directly in the li, next to its sublist.
+const SUBLISTS = [
+  '<h2 data-sourcepos="1:1-1:8">Lista</h2>\n',
+  '<ul data-sourcepos="3:1-7:12">\n<li data-sourcepos="3:1-5:12">Genitore A\n',
+  '<ul data-sourcepos="4:3-5:12">\n',
+  '<li data-sourcepos="4:3-4:12">Figlio A1</li>\n',
+  '<li data-sourcepos="5:3-5:12">Figlio A2</li>\n',
+  '</ul>\n</li>\n',
+  '<li data-sourcepos="6:1-7:12"><strong>Genitore</strong> B\n',
+  '<ul data-sourcepos="7:3-7:12">\n<li data-sourcepos="7:3-7:12">Figlio B1</li>\n</ul>\n</li>\n</ul>\n',
+  '<p data-sourcepos="9:1-9:4">Fine</p>\n',
+].join('');
+
+const walk = async (reader, delta, presses) => {
+  const lines = [];
+  for (let press = 0; press < presses; press += 1) {
+    await reader.moveBlock(delta);
+    lines.push(line(reader));
+  }
+  return lines;
+};
+
+test('moving by block stops on an item that has a sublist, in both directions', async () => {
+  const { reader } = setup({ html: SUBLISTS });
+  assert.deepEqual(await walk(reader, 1, 6), [3, 4, 5, 6, 7, 9]);
+  assert.deepEqual(await walk(reader, -1, 6), [7, 6, 5, 4, 3, 1]);
+});
+
+test('moving by block to an item with a sublist puts the item itself at the top', async () => {
+  const { reader, scrolled } = setup({ html: SUBLISTS });
+  await reader.moveBlock(1);
+  assert.equal(scrolled.at(-1).localName, 'li');
+  assert.ok(scrolled.at(-1).textContent.startsWith('Genitore A'));
+});
+
+test('moving by block stops on the paragraph of an item that has one, not on the item around it', async () => {
+  const html = '<ul data-sourcepos="1:1-3:9"><li data-sourcepos="1:1-3:9"><p data-sourcepos="1:3-1:9">Sciolta</p>'
+    + '<ul data-sourcepos="3:3-3:9"><li data-sourcepos="3:3-3:9">Figlio</li></ul></li></ul>'
+    + '<p data-sourcepos="5:1-5:4">Fine</p>';
+  const { reader, scrolled } = setup({ html });
+  assert.deepEqual(await walk(reader, 1, 2), [3, 5]);
+  assert.deepEqual(await walk(reader, -1, 2), [3, 1]);
+  assert.equal(scrolled.at(-1).localName, 'p');
+});
+
+test('moving by block goes to the inner item when two items start on one line', async () => {
+  const html = '<ul data-sourcepos="1:1-2:5"><li data-sourcepos="1:1-1:5"><ul data-sourcepos="1:3-1:5">'
+    + '<li data-sourcepos="1:3-1:5">Uno</li></ul></li><li data-sourcepos="2:1-2:5">Due</li></ul>';
+  const { reader, scrolled } = setup({ html });
+  await reader.moveBlock(1);
+  await reader.moveBlock(-1);
+  assert.equal(line(reader), 1);
+  assert.equal(scrolled.at(-1).getAttribute('data-sourcepos'), '1:3-1:5');
 });
 
 test('moving by block skips what a closed details hides', async () => {

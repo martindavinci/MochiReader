@@ -20,6 +20,8 @@ const HEADING_SELECTOR = 'h1, h2, h3, h4, h5, h6';
 const FIRST_SENTENCE = 0;
 const NO_LINE = 0;
 const EXCERPT_CHARS = 160;
+// The first half of a character the cut went through. The excerpt goes to the app as JSON, which refuses it.
+const CUT_CHARACTER = /[\uD800-\uDBFF]$/;
 // goTo puts a block at the top, but the scroll offset is rounded to a whole device pixel, so the block can land up
 // to half a pixel lower. Without this margin it would not count as the top block, and each save would move back one.
 const FOLD_MARGIN_PX = 1;
@@ -150,8 +152,12 @@ export function openMarkdown(doc, host) {
     if (target) moveTo(target);
   };
 
-  // A list starts on the line of its first item: only what has no block inside is a place to land on.
-  const leafBlocks = () => blocks().filter((block) => !block.querySelector('[data-sourcepos]'));
+  // A list starts on the line of its first item, and an item on the line of its paragraph: neither is a place to land
+  // on. An item with a sublist has its own line before the first block inside it, and that is one.
+  const landingBlocks = () => blocks().filter((block) => {
+    const inner = block.querySelector('[data-sourcepos]');
+    return !inner || lineOf(inner) > lineOf(block);
+  });
   const headingBlocks = () => blocks().filter((block) => block.matches(HEADING_SELECTOR));
 
   const position = () => ({ kind: 'md', line: lineOrNone(currentBlock()), sentence: FIRST_SENTENCE });
@@ -188,8 +194,8 @@ export function openMarkdown(doc, host) {
     onInput: (callback) => article.addEventListener('click', callback),
     setStyle: () => {},
     nextSpeechSection: async () => false,
-    excerpt: () => (currentBlock()?.textContent ?? '').trim().slice(0, EXCERPT_CHARS),
-    moveBlock: (delta) => step(leafBlocks, delta),
+    excerpt: () => (currentBlock()?.textContent ?? '').trim().slice(0, EXCERPT_CHARS).replace(CUT_CHARACTER, ''),
+    moveBlock: (delta) => step(landingBlocks, delta),
     moveSection: (delta) => step(headingBlocks, delta),
     destroy: () => {
       destroyed = true;
