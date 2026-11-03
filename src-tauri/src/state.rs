@@ -283,6 +283,28 @@ impl Store {
         self.persist();
     }
 
+    pub fn options(&self) -> Map<String, Value> {
+        self.state().options.clone()
+    }
+
+    /// Adds the bookmark, or takes away the one with its key and position. `true` means it was added.
+    pub fn toggle_bookmark(&self, bookmark: Bookmark) -> bool {
+        let added = {
+            let mut state = self.state();
+            let before = state.bookmarks.len();
+            state
+                .bookmarks
+                .retain(|kept| kept.key != bookmark.key || kept.position != bookmark.position);
+            let added = state.bookmarks.len() == before;
+            if added {
+                state.bookmarks.push(bookmark);
+            }
+            added
+        };
+        self.persist();
+        added
+    }
+
     pub fn window(&self) -> Option<WindowPlacement> {
         self.state().window
     }
@@ -578,6 +600,75 @@ mod tests {
             store_in(dir.path()).snapshot().options["theme"],
             json!("dark")
         );
+    }
+
+    fn bookmark(key: &str, line: u32) -> Bookmark {
+        Bookmark {
+            key: key.to_string(),
+            path: r"C:\x\a.md".to_string(),
+            title: "a.md".to_string(),
+            position: json!({ "kind": "md", "line": line, "sentence": 0 }),
+            excerpt: "Brano".to_string(),
+            created_at: NOW,
+        }
+    }
+
+    #[test]
+    fn a_bookmark_is_added_and_the_same_one_taken_away() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_in(dir.path());
+        assert!(store.toggle_bookmark(bookmark("k", 3)));
+        assert_eq!(store.snapshot().bookmarks, vec![bookmark("k", 3)]);
+        assert!(!store.toggle_bookmark(bookmark("k", 3)));
+        assert!(store.snapshot().bookmarks.is_empty());
+    }
+
+    #[test]
+    fn bookmarks_match_on_key_and_position_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_in(dir.path());
+        assert!(store.toggle_bookmark(bookmark("k", 3)));
+        assert!(store.toggle_bookmark(bookmark("k", 5)));
+        assert!(store.toggle_bookmark(bookmark("other", 3)));
+        assert_eq!(store.snapshot().bookmarks.len(), 3);
+
+        let mut later = bookmark("k", 3);
+        later.created_at = LATER;
+        later.excerpt = "Il file è cambiato".to_string();
+        later.path = r"C:\y\a.md".to_string();
+        assert!(!store.toggle_bookmark(later));
+        assert_eq!(
+            store.snapshot().bookmarks,
+            vec![bookmark("k", 5), bookmark("other", 3)]
+        );
+    }
+
+    #[test]
+    fn bookmarks_are_kept_after_a_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        store_in(dir.path()).toggle_bookmark(bookmark("k", 3));
+        assert_eq!(
+            store_in(dir.path()).snapshot().bookmarks,
+            vec![bookmark("k", 3)]
+        );
+    }
+
+    #[test]
+    fn a_bookmark_is_written_as_the_interface_describes_it() {
+        let written = serde_json::to_value(bookmark("k", 3)).unwrap();
+        assert_eq!(written["createdAt"], json!(NOW));
+        let read: Bookmark = serde_json::from_value(written).unwrap();
+        assert_eq!(read, bookmark("k", 3));
+    }
+
+    #[test]
+    fn the_options_come_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_in(dir.path());
+        store.set_option("theme", json!("dark"));
+        store.save_position("k", json!(1));
+        assert_eq!(store.options()["theme"], json!("dark"));
+        assert_eq!(store.options().len(), 1);
     }
 
     #[test]

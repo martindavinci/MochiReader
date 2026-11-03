@@ -4,6 +4,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { parseHTML } from 'linkedom';
+import en from '../app/lang/en.js';
+import it from '../app/lang/it.js';
 
 const PATH_A = 'C:/x/a.md';
 const PATH_B = 'C:/x/b.md';
@@ -38,7 +40,9 @@ const atLine = (line) => ({ kind: 'md', line, sentence: 0 });
 let run = 0;
 
 /** Starts a fresh copy of the real shell on the real page, with a fake Tauri around it. */
-async function startShell(openDocument, { pending = [], positions = {}, recents = [], fileModified } = {}) {
+async function startShell(openDocument, {
+  pending = [], positions = {}, recents = [], fileModified, bookmarks = [], options = {}, picked = null,
+} = {}) {
   const { window, document, HTMLElement } = parseHTML(INDEX_HTML);
   const focused = [];
   HTMLElement.prototype.focus = function focus() {
@@ -64,17 +68,37 @@ async function startShell(openDocument, { pending = [], positions = {}, recents 
     closed: 0,
     dump: null,
     fileModified: fileModified ?? (async () => CHANGED_AT),
+    bookmarks,
+    options,
+    optionWrites: [],
+    dialogs: [],
+    picked,
+    themeAtFirstPaint: undefined,
   };
   const commands = {
     take_pending_paths: () => pending,
-    first_paint: () => painted(),
+    first_paint: () => {
+      state.themeAtFirstPaint = document.documentElement.getAttribute('data-theme');
+      painted();
+    },
     open_document: ({ path }) => {
       calls.push(path);
       return openDocument(path);
     },
     state_get: () => {
       state.asked.push('state_get');
-      return { recents: state.recents };
+      return { recents: state.recents, bookmarks: state.bookmarks };
+    },
+    state_get_options: () => state.options,
+    state_set_option: ({ name, value }) => {
+      state.optionWrites.push([name, value]);
+      state.options[name] = value;
+    },
+    state_toggle_bookmark: ({ bookmark }) => {
+      const same = (kept) => kept.key === bookmark.key && JSON.stringify(kept.position) === JSON.stringify(bookmark.position);
+      const added = !state.bookmarks.some(same);
+      state.bookmarks = added ? [...state.bookmarks, bookmark] : state.bookmarks.filter((kept) => !same(kept));
+      return added;
     },
     state_check_recents: () => state.checked ?? state.recents,
     state_touch_recent: (args) => {
@@ -114,6 +138,12 @@ async function startShell(openDocument, { pending = [], positions = {}, recents 
       }),
     },
     webview: { getCurrentWebview: () => ({ onDragDropEvent: () => {} }) },
+    dialog: {
+      open: async (dialogOptions) => {
+        state.dialogs.push(dialogOptions);
+        return state.picked;
+      },
+    },
   };
   Object.assign(globalThis, {
     window,
@@ -152,6 +182,22 @@ async function startShell(openDocument, { pending = [], positions = {}, recents 
     panes: () => [...document.querySelectorAll('section.pane:not(#home)')],
     openPaths: async (paths) => {
       listeners.get('open-paths')({ payload: paths });
+      await settled();
+    },
+    panel: () => document.getElementById('panel'),
+    toast: () => document.getElementById('toast'),
+    press: async (key, { ctrl = false, shift = false, alt = false, repeat = false, target = document.body } = {}) => {
+      const event = new window.Event('keydown', { bubbles: true, cancelable: true });
+      Object.assign(event, { key, ctrlKey: ctrl, shiftKey: shift, altKey: alt, repeat });
+      event.stopPropagation = () => {
+        event.stopped = true;
+      };
+      target.dispatchEvent(event);
+      await settled();
+      return event;
+    },
+    click: async (element) => {
+      element.dispatchEvent(new window.Event('click'));
       await settled();
     },
     clickTab: async (index) => {
@@ -534,6 +580,7 @@ test('a tab that failed to open is not checked', async () => {
 });
 
 const RECENT_A = { path: PATH_A, kind: 'markdown', title: 'a.md', openedAt: 1, exists: true };
+const RECENT_B = { path: PATH_B, kind: 'markdown', title: 'b.md', openedAt: 2, exists: true };
 
 test('without a file the first screen shows the recents', async () => {
   const shell = await startShell(failure('not_found'), { recents: [RECENT_A] });
@@ -619,4 +666,372 @@ test('the report of a tab with no reader has no line on screen', async () => {
   await shell.openPaths([PATH_A]);
   await shell.emit('shell-command', { action: 'dump-tabs', out: 'x' });
   assert.equal(shell.state.dump[0].screenLine, null);
+});
+
+const CTRL = { ctrl: true };
+const headedDoc = (path) => ({
+  ...markdownDoc(path, 'Testo'),
+  rendered: {
+    html: '<h1 data-sourcepos="1:1-1:5">Uno</h1><p data-sourcepos="3:1-3:5">Testo</p><h2 data-sourcepos="5:1-5:5">Due</h2>',
+    lang: null,
+    headings: [{ level: 1, text: 'Uno', line: 1 }, { level: 2, text: 'Due', line: 5 }],
+  },
+});
+const bookmarkOf = (path, line) => ({
+  key: keyOf(path),
+  path,
+  title: path.split('/').at(-1),
+  position: atLine(line),
+  excerpt: `Brano ${line}`,
+  createdAt: line,
+});
+
+test('no panel is visible until one is asked for', async () => {
+  const shell = await startShell(async (path) => headedDoc(path), { pending: [PATH_A] });
+  await shell.settled();
+  assert.equal(shell.panel().hidden, true);
+});
+
+test('ctrl+t lists the headings, and a click goes there and closes the panel', async () => {
+  const shell = await startShell(async (path) => headedDoc(path), { pending: [PATH_A] });
+  await shell.settled();
+  await shell.press('t', CTRL);
+  assert.equal(shell.panel().hidden, false);
+  const items = [...shell.panel().querySelectorAll('.toc-entry')];
+  assert.deepEqual(items.map((item) => item.textContent), ['Uno', 'Due']);
+  await shell.click(items[1]);
+  assert.equal(shell.panel().hidden, true);
+  assert.equal(shell.scrolled.at(-1).getAttribute('data-sourcepos'), '5:1-5:5');
+  assert.ok(shell.focused.at(-1) === shell.panes()[0]);
+});
+
+test('escape closes a panel and gives the focus back to the text', async () => {
+  const shell = await startShell(async (path) => headedDoc(path), { pending: [PATH_A] });
+  await shell.settled();
+  await shell.press('t', CTRL);
+  await shell.press('Escape');
+  assert.equal(shell.panel().hidden, true);
+  assert.equal(shell.panel().children.length, 0);
+  assert.ok(shell.focused.at(-1) === shell.panes()[0]);
+});
+
+test('the same shortcut closes its panel and another one replaces it', async () => {
+  const shell = await startShell(async (path) => headedDoc(path), { pending: [PATH_A] });
+  await shell.settled();
+  await shell.press('t', CTRL);
+  await shell.press('b', CTRL);
+  assert.equal(shell.panel().querySelector('.toc-entry'), null);
+  assert.equal(shell.panel().hidden, false);
+  await shell.press('b', CTRL);
+  assert.equal(shell.panel().hidden, true);
+});
+
+test('the contents with no document open say there are none', async () => {
+  const shell = await startShell(failure('not_found'));
+  await shell.press('t', CTRL);
+  assert.equal(shell.panel().hidden, false);
+  assert.equal(shell.panel().querySelector('.toc-entry'), null);
+  assert.ok(shell.panel().textContent.length > 0);
+});
+
+test('changing tab closes a panel that spoke of the other one', async () => {
+  const shell = await startShell(async (path) => headedDoc(path), { pending: [PATH_A, PATH_B] });
+  await shell.settled();
+  await shell.press('t', CTRL);
+  await shell.press('Tab', CTRL);
+  assert.equal(shell.panel().hidden, true);
+});
+
+test('ctrl+d adds a bookmark at the current point and says so, and again takes it away', async () => {
+  const shell = await startShell(async (path) => markdownDoc(path, 'Il brano'), { pending: [PATH_A] });
+  await shell.settled();
+  await shell.press('d', CTRL);
+  assert.equal(shell.state.bookmarks.length, 1);
+  const [bookmark] = shell.state.bookmarks;
+  assert.equal(bookmark.key, keyOf(PATH_A));
+  assert.equal(bookmark.path, PATH_A);
+  assert.equal(bookmark.title, PATH_A);
+  assert.deepEqual(bookmark.position, atLine(1));
+  assert.equal(bookmark.excerpt, 'Il brano');
+  assert.ok(bookmark.createdAt > 0);
+  const added = shell.toast().textContent;
+  assert.equal(shell.toast().hidden, false);
+
+  await shell.press('d', CTRL);
+  assert.deepEqual(shell.state.bookmarks, []);
+  assert.notEqual(shell.toast().textContent, added);
+});
+
+test('ctrl+d with no text does nothing', async () => {
+  const shell = await startShell(failure('not_found'), { pending: [PATH_A] });
+  await shell.settled();
+  await shell.press('d', CTRL);
+  assert.deepEqual(shell.state.bookmarks, []);
+  assert.equal(shell.toast().hidden, true);
+});
+
+test('holding ctrl+d or ctrl+w down acts once', async () => {
+  const shell = await startShell(async (path) => markdownDoc(path, 'Testo'), { pending: [PATH_A, PATH_B] });
+  await shell.settled();
+  await shell.press('d', CTRL);
+  const repeated = await shell.press('d', { ...CTRL, repeat: true });
+  assert.equal(repeated.defaultPrevented, true);
+  assert.equal(shell.state.bookmarks.length, 1);
+  await shell.press('w', CTRL);
+  await shell.press('w', { ...CTRL, repeat: true });
+  assert.equal(shell.panes().length, 1);
+});
+
+test('ctrl+b groups the bookmarks by file, and a click goes to the point', async () => {
+  const bookmarks = [bookmarkOf(PATH_A, 5), bookmarkOf(PATH_B, 1), bookmarkOf(PATH_A, 9)];
+  const shell = await startShell(async (path) => longDoc(path), { bookmarks });
+  await shell.press('b', CTRL);
+  assert.deepEqual(
+    [...shell.panel().querySelectorAll('.bookmark-file')].map((file) => file.textContent),
+    ['a.md', 'b.md'],
+  );
+  assert.equal(shell.panel().querySelectorAll('.bookmark').length, 3);
+  await shell.click(shell.panel().querySelector('.bookmark-open'));
+  assert.equal(shell.panel().hidden, true);
+  assert.deepEqual(shell.calls, [PATH_A]);
+  assert.equal(shell.scrolled.at(-1).getAttribute('data-sourcepos'), '5:1-5:9');
+});
+
+test('a bookmark in a file already open goes there without reading it again', async () => {
+  const shell = await startShell(async (path) => longDoc(path), { pending: [PATH_A], bookmarks: [bookmarkOf(PATH_A, 9)] });
+  await shell.settled();
+  await shell.press('b', CTRL);
+  await shell.click(shell.panel().querySelector('.bookmark-open'));
+  assert.deepEqual(shell.calls, [PATH_A]);
+  assert.equal(shell.scrolled.at(-1).getAttribute('data-sourcepos'), '9:1-9:9');
+});
+
+test('a bookmark in a file still opening goes there once it has opened', async () => {
+  let finish;
+  const shell = await startShell(() => new Promise((resolve) => {
+    finish = resolve;
+  }), { pending: [PATH_A], bookmarks: [bookmarkOf(PATH_A, 9)] });
+  await shell.settled();
+  await shell.press('b', CTRL);
+  await shell.click(shell.panel().querySelector('.bookmark-open'));
+  finish(longDoc(PATH_A));
+  await shell.settled();
+  assert.equal(shell.scrolled.at(-1).getAttribute('data-sourcepos'), '9:1-9:9');
+});
+
+test('a bookmark in a missing file gets a message, no tab, and the panel to take it away', async () => {
+  const shell = await startShell(failure('not_found'), { bookmarks: [bookmarkOf(PATH_A, 5)] });
+  await shell.press('b', CTRL);
+  await shell.click(shell.panel().querySelector('.bookmark-open'));
+  assert.equal(shell.toast().hidden, false);
+  assert.ok(shell.toast().textContent.includes('a.md'));
+  assert.equal(shell.panes().length, 0);
+  assert.equal(shell.panel().hidden, false);
+  await shell.click(shell.panel().querySelector('.bookmark-remove'));
+  assert.deepEqual(shell.state.bookmarks, []);
+  assert.equal(shell.panel().querySelector('.bookmark'), null);
+});
+
+test('a bookmark on a drive that does not answer keeps the message of its tab', async () => {
+  const shell = await startShell(failure('timeout'), { bookmarks: [bookmarkOf(PATH_A, 5)] });
+  await shell.press('b', CTRL);
+  await shell.click(shell.panel().querySelector('.bookmark-open'));
+  assert.equal(shell.panes().length, 1);
+  assert.ok(shell.panes()[0].querySelector('.notice'));
+  assert.equal(shell.panel().hidden, true);
+});
+
+test('adding a bookmark with the panel open shows it there', async () => {
+  const shell = await startShell(async (path) => markdownDoc(path, 'Testo'), { pending: [PATH_A] });
+  await shell.settled();
+  await shell.press('b', CTRL);
+  assert.equal(shell.panel().querySelector('.bookmark'), null);
+  await shell.press('d', CTRL);
+  assert.ok(shell.panel().querySelector('.bookmark'));
+});
+
+test('ctrl+r lists the recents over the text, and a click opens one', async () => {
+  const shell = await startShell(async (path) => markdownDoc(path, 'Testo'), { pending: [PATH_A], recents: [RECENT_B] });
+  await shell.settled();
+  await shell.press('r', CTRL);
+  assert.equal(shell.panel().querySelector('.recent-name').textContent, 'b.md');
+  assert.equal(shell.panel().querySelector('.home-hint'), null);
+  await shell.click(shell.panel().querySelector('.recent-open'));
+  assert.equal(shell.panel().hidden, true);
+  assert.deepEqual(shell.calls, [PATH_A, PATH_B]);
+});
+
+test('the recents panel marks what a check of the drives finds missing, and can take it away', async () => {
+  const shell = await startShell(async (path) => markdownDoc(path, 'Testo'), { pending: [PATH_A], recents: [RECENT_B] });
+  await shell.settled();
+  shell.state.checked = [{ ...RECENT_B, exists: false }];
+  await shell.press('r', CTRL);
+  assert.ok(shell.panel().querySelector('.recent.missing'));
+  await shell.click(shell.panel().querySelector('.recent-remove'));
+  assert.deepEqual(shell.state.recents, []);
+  assert.equal(shell.panel().hidden, false);
+  assert.equal(shell.panel().querySelector('.recent'), null);
+});
+
+test('ctrl+comma opens the options, with their saved values', async () => {
+  const shell = await startShell(async (path) => markdownDoc(path, 'Testo'), { options: { theme: 'dark' } });
+  await shell.press(',', CTRL);
+  const theme = shell.panel().querySelector('select[name="theme"]');
+  assert.equal(theme.querySelector('option[selected]').getAttribute('value'), 'dark');
+});
+
+const changeOption = async (shell, name, value) => {
+  const select = shell.panel().querySelector(`select[name="${name}"]`);
+  // linkedom reads the value of a list from this attribute, and offers no other way to set it.
+  select.querySelectorAll('option').forEach((option) => option.toggleAttribute('selected', option.getAttribute('value') === value));
+  select.dispatchEvent(new shell.window.Event('change'));
+  await shell.settled();
+};
+
+test('a theme chosen in the options applies at once and is saved', async () => {
+  const shell = await startShell(async (path) => markdownDoc(path, 'Testo'));
+  await shell.press(',', CTRL);
+  await changeOption(shell, 'theme', 'dark');
+  assert.equal(shell.document.documentElement.getAttribute('data-theme'), 'dark');
+  assert.deepEqual(shell.state.optionWrites, [['theme', 'dark']]);
+});
+
+test('saved options apply before the first frame', async () => {
+  const shell = await startShell(async (path) => markdownDoc(path, 'Testo'), { options: { theme: 'dark', language: 'it' } });
+  assert.equal(shell.state.themeAtFirstPaint, 'dark');
+  assert.equal(shell.document.querySelector('#home .recents-title').textContent, it['recents.title']);
+});
+
+test('the language of the options changes the panel, the tabs and the first screen', async () => {
+  const shell = await startShell(async (path) => markdownDoc(path, 'Testo'), { options: { language: 'it' } });
+  await shell.press(',', CTRL);
+  assert.ok(shell.panel().textContent.includes(it['options.title']));
+  await changeOption(shell, 'language', 'en');
+  assert.ok(shell.panel().textContent.includes(en['options.title']));
+  assert.equal(shell.document.querySelector('#home .recents-title').textContent, en['recents.title']);
+  assert.ok(shell.focused.at(-1) === shell.panel().querySelector('select[name="language"]'));
+});
+
+test('ctrl plus and minus change the text, keep the place in every tab and are saved', async () => {
+  const shell = await startShell(async (path) => longDoc(path), {
+    pending: [PATH_A, PATH_B],
+    positions: { [keyOf(PATH_A)]: atLine(9), [keyOf(PATH_B)]: atLine(5) },
+  });
+  await shell.settled();
+  const before = shell.scrolled.length;
+  await shell.press('+', CTRL);
+  const root = shell.document.documentElement;
+  const bigger = root.style.getPropertyValue('--text-size');
+  assert.equal(shell.state.optionWrites[0][0], 'textSize');
+  assert.equal(`${shell.state.optionWrites[0][1]}px`, bigger);
+  assert.deepEqual(shell.scrolled.slice(before).map((block) => block.getAttribute('data-sourcepos')), ['9:1-9:9', '5:1-5:9']);
+  await shell.press('-', CTRL);
+  assert.notEqual(root.style.getPropertyValue('--text-size'), bigger);
+});
+
+test('at the end of the sizes ctrl plus saves nothing', async () => {
+  const shell = await startShell(async (path) => markdownDoc(path, 'Testo'), { options: { textSize: 32 } });
+  const event = await shell.press('+', CTRL);
+  assert.equal(event.defaultPrevented, true);
+  assert.deepEqual(shell.state.optionWrites, []);
+});
+
+test('ctrl plus with the options open shows the new size there', async () => {
+  const shell = await startShell(async (path) => markdownDoc(path, 'Testo'), { options: { textSize: 17 } });
+  await shell.press(',', CTRL);
+  await shell.press('+', CTRL);
+  const size = shell.panel().querySelector('select[name="textSize"] option[selected]');
+  assert.equal(size.getAttribute('value'), String(shell.state.options.textSize));
+});
+
+test('ctrl+o asks for Markdown and EPUB files and opens each chosen one', async () => {
+  const shell = await startShell(async (path) => markdownDoc(path, 'Testo'), { picked: [PATH_A, PATH_B] });
+  await shell.press('o', CTRL);
+  await shell.settled();
+  assert.equal(shell.state.dialogs.length, 1);
+  assert.equal(shell.state.dialogs[0].multiple, true);
+  assert.deepEqual(shell.state.dialogs[0].filters[0].extensions, ['md', 'markdown', 'epub']);
+  assert.deepEqual(shell.calls, [PATH_A, PATH_B]);
+});
+
+test('a cancelled file dialog opens nothing', async () => {
+  const shell = await startShell(async (path) => markdownDoc(path, 'Testo'), { picked: null });
+  await shell.press('o', CTRL);
+  await shell.settled();
+  assert.deepEqual(shell.calls, []);
+  assert.equal(shell.panes().length, 0);
+});
+
+test('ctrl+w closes the active tab, and with none it does nothing', async () => {
+  const shell = await startShell(async (path) => markdownDoc(path, 'Testo'), { pending: [PATH_A, PATH_B] });
+  await shell.settled();
+  await shell.press('w', CTRL);
+  await shell.press('w', CTRL);
+  assert.equal(shell.panes().length, 0);
+  await shell.press('w', CTRL);
+  assert.equal(shell.panes().length, 0);
+});
+
+test('ctrl+tab goes to the next tab and wraps', async () => {
+  const shell = await startShell(async (path) => markdownDoc(path, 'Testo'), { pending: [PATH_A, PATH_B] });
+  await shell.settled();
+  const active = () => shell.panes().findIndex((pane) => pane.classList.contains('active'));
+  assert.equal(active(), 1);
+  await shell.press('Tab', CTRL);
+  assert.equal(active(), 0);
+  await shell.press('Tab', CTRL);
+  assert.equal(active(), 1);
+});
+
+test('shift and ctrl arrows move through the text', async () => {
+  const shell = await startShell(async (path) => headedDoc(path), { pending: [PATH_A], positions: { [keyOf(PATH_A)]: atLine(1) } });
+  await shell.settled();
+  await shell.press('ArrowRight', { shift: true });
+  assert.equal(shell.scrolled.at(-1).getAttribute('data-sourcepos'), '3:1-3:5');
+  await shell.press('ArrowRight', CTRL);
+  assert.equal(shell.scrolled.at(-1).getAttribute('data-sourcepos'), '5:1-5:5');
+  await shell.press('ArrowLeft', { shift: true, repeat: true });
+  assert.equal(shell.scrolled.at(-1).getAttribute('data-sourcepos'), '3:1-3:5');
+});
+
+test('a shortcut keeps the key from the browser, and from the reader, which would take it for moving on', async () => {
+  const shell = await startShell(async (path) => markdownDoc(path, 'Testo'), { pending: [PATH_A] });
+  await shell.settled();
+  for (const [key, mods] of [['F5', {}], ['s', { ctrl: true, shift: true }], ['r', CTRL], ['Escape', {}], ['ArrowLeft', { shift: true }]]) {
+    const event = await shell.press(key, mods);
+    assert.equal(event.defaultPrevented, true, key);
+    assert.equal(event.stopped, true, key);
+  }
+});
+
+test('space, with nothing reading, is left to the page, which scrolls the text', async () => {
+  const shell = await startShell(async (path) => markdownDoc(path, 'Testo'), { pending: [PATH_A] });
+  await shell.settled();
+  assert.equal((await shell.press(' ')).defaultPrevented, false);
+});
+
+test('keys that are not shortcuts are left alone', async () => {
+  const shell = await startShell(async (path) => markdownDoc(path, 'Testo'), { pending: [PATH_A] });
+  await shell.settled();
+  for (const key of ['x', 'ArrowDown', 'PageDown', 'ArrowRight']) {
+    assert.equal((await shell.press(key)).defaultPrevented, false, key);
+  }
+});
+
+test('a focused control keeps the keys it answers to', async () => {
+  const shell = await startShell(async (path) => markdownDoc(path, 'Testo'), { recents: [RECENT_A] });
+  await shell.settled();
+  const button = shell.document.querySelector('.recent-open');
+  for (const key of [' ', '+', '-', 'ArrowLeft']) {
+    assert.equal((await shell.press(key, { target: button })).defaultPrevented, false, key);
+  }
+  assert.equal((await shell.press('F5', { target: button })).defaultPrevented, true);
+  assert.equal((await shell.press('+', { ...CTRL, target: button })).defaultPrevented, true);
+});
+
+test('escape in a list of the options still closes the panel', async () => {
+  const shell = await startShell(async (path) => markdownDoc(path, 'Testo'));
+  await shell.press(',', CTRL);
+  await shell.press('Escape', { target: shell.panel().querySelector('select') });
+  assert.equal(shell.panel().hidden, true);
 });

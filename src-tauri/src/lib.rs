@@ -13,8 +13,8 @@ pub mod vault;
 
 use docs::{Docs, OpenError, OpenedDoc, PendingPaths};
 use launch::{Launch, MeasureOpen};
-use serde_json::{json, Value};
-use state::{AppState, Recent, Store};
+use serde_json::{json, Map, Value};
+use state::{AppState, Bookmark, Recent, Store};
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::Path;
@@ -148,6 +148,17 @@ fn state_get_position(key: String, store: State<'_, Store>) -> Option<Value> {
 #[tauri::command(async)]
 fn state_set_option(name: String, value: Value, store: State<'_, Store>) {
     store.set_option(&name, value);
+}
+
+/// Separate from `state_get`, because the page needs them before its first frame, whatever else the state has grown to.
+#[tauri::command(async)]
+fn state_get_options(store: State<'_, Store>) -> Map<String, Value> {
+    store.options()
+}
+
+#[tauri::command(async)]
+fn state_toggle_bookmark(bookmark: Bookmark, store: State<'_, Store>) -> bool {
+    store.toggle_bookmark(bookmark)
 }
 
 /// The page has saved what it had: the window can go.
@@ -314,6 +325,7 @@ pub fn run() {
     let app = tauri::Builder::default()
         // Must stay the first plugin: a second instance exits inside it.
         .plugin(tauri_plugin_single_instance::init(on_second_instance))
+        .plugin(tauri_plugin_dialog::init())
         .manage(docs)
         .manage(pending)
         .manage(session)
@@ -338,6 +350,8 @@ pub fn run() {
             state_save_position,
             state_get_position,
             state_set_option,
+            state_get_options,
+            state_toggle_bookmark,
             close_ready,
             #[cfg(feature = "smoke")]
             smoke_write_dump,

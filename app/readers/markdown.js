@@ -16,6 +16,7 @@ const HEIGHT_DECIMALS = 1;
 // Read from the page and not from the layout, so that this stays cheap and works in a tab that is not in front.
 const HIDDEN_BY_DETAILS = 'details:not([open]) > :not(summary)';
 const BLOCK_SELECTOR = `[data-sourcepos]:not(${HIDDEN_BY_DETAILS}, ${HIDDEN_BY_DETAILS} *)`;
+const HEADING_SELECTOR = 'h1, h2, h3, h4, h5, h6';
 const FIRST_SENTENCE = 0;
 const NO_LINE = 0;
 const EXCERPT_CHARS = 160;
@@ -24,6 +25,8 @@ const EXCERPT_CHARS = 160;
 const FOLD_MARGIN_PX = 1;
 // What the reader does to move on from where goTo put them. Not `scroll`: the page also scrolls when its layout changes.
 const MOVE_INPUTS = ['wheel', 'keydown', 'pointerdown'];
+// Pressed on its own on the way to a shortcut, which is no reason to leave a point: Ctrl+D saves that very point.
+const MODIFIER_KEYS = new Set(['Control', 'Shift', 'Alt', 'AltGraph', 'Meta']);
 
 const nextTurn = () => new Promise((resolve) => {
   setTimeout(resolve);
@@ -115,7 +118,11 @@ export function openMarkdown(doc, host) {
     held = null;
     heldLayout?.disconnect();
     heldLayout = null;
-    MOVE_INPUTS.forEach((type) => host.removeEventListener(type, letGo));
+    MOVE_INPUTS.forEach((type) => host.removeEventListener(type, onMoveInput));
+  };
+
+  const onMoveInput = ({ key }) => {
+    if (!MODIFIER_KEYS.has(key)) letGo();
   };
 
   const hold = (block) => {
@@ -123,10 +130,29 @@ export function openMarkdown(doc, host) {
     held = block;
     heldLayout = new ResizeObserver(() => block.scrollIntoView({ block: 'start' }));
     heldLayout.observe(article);
-    MOVE_INPUTS.forEach((type) => host.addEventListener(type, letGo, { passive: true }));
+    MOVE_INPUTS.forEach((type) => host.addEventListener(type, onMoveInput, { passive: true }));
   };
 
   const currentBlock = () => held ?? topBlock();
+
+  const moveTo = (block) => {
+    block.scrollIntoView({ block: 'start' });
+    hold(block);
+  };
+
+  /** To the first of `candidates` past the current line in the direction of `delta`, if there is one. */
+  const step = async (candidates, delta) => {
+    await filled;
+    if (destroyed) return;
+    const line = lineOrNone(currentBlock());
+    const all = candidates();
+    const target = delta > 0 ? all.find((block) => lineOf(block) > line) : all.findLast((block) => lineOf(block) < line);
+    if (target) moveTo(target);
+  };
+
+  // A list starts on the line of its first item: only what has no block inside is a place to land on.
+  const leafBlocks = () => blocks().filter((block) => !block.querySelector('[data-sourcepos]'));
+  const headingBlocks = () => blocks().filter((block) => block.matches(HEADING_SELECTOR));
 
   const position = () => ({ kind: 'md', line: lineOrNone(currentBlock()), sentence: FIRST_SENTENCE });
 
@@ -152,8 +178,7 @@ export function openMarkdown(doc, host) {
       const all = blocks();
       const index = nearestBlock(all.map(lineOf), target.line);
       if (index < 0) return;
-      all[index].scrollIntoView({ block: 'start' });
-      hold(all[index]);
+      moveTo(all[index]);
     },
     speechRoots: async () => {
       await filled;
@@ -164,6 +189,8 @@ export function openMarkdown(doc, host) {
     setStyle: () => {},
     nextSpeechSection: async () => false,
     excerpt: () => (currentBlock()?.textContent ?? '').trim().slice(0, EXCERPT_CHARS),
+    moveBlock: (delta) => step(leafBlocks, delta),
+    moveSection: (delta) => step(headingBlocks, delta),
     destroy: () => {
       destroyed = true;
       letGo();

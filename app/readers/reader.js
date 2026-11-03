@@ -18,6 +18,8 @@
  * @property {() => Promise<boolean>} nextSpeechSection Moves to the next section to read; `false` means the end of
  *   reading. Markdown: always `false`.
  * @property {() => string} excerpt Short passage at the current point.
+ * @property {(delta: 1|-1) => Promise<void>} [moveBlock] To the next or previous item or paragraph, if the format has them.
+ * @property {(delta: 1|-1) => Promise<void>} [moveSection] To the next or previous section, if the format has them.
  * @property {() => void} destroy
  */
 

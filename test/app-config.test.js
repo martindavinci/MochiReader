@@ -53,3 +53,23 @@ test('the page may set its title', () => {
   assert.deepEqual(capability.windows, ['main']);
   assert.ok(capability.permissions.includes('core:window:allow-set-title'));
 });
+
+test('the page may ask for the file dialog, and for no other dialog', () => {
+  const { permissions } = JSON.parse(read('src-tauri/capabilities/default.json'));
+  assert.deepEqual(permissions.filter((permission) => permission.startsWith('dialog:')), ['dialog:allow-open']);
+});
+
+test('the page has a place for panels, closed until asked for', () => {
+  assert.match(read('app/index.html'), /<aside id="panel"[^>]* hidden/);
+});
+
+test('a chosen theme overrides the one of Windows', () => {
+  const css = read('app/css/app.css');
+  assert.match(css, /:root\[data-theme="light"\] \{ color-scheme: light; \}/);
+  assert.match(css, /:root\[data-theme="dark"\] \{ color-scheme: dark; \}/);
+  assert.match(css, /--bg: light-dark\(/);
+});
+
+test('the text size only reaches the text', () => {
+  assert.match(/\narticle \{[^}]*\}/.exec(read('app/css/app.css'))[0], /font-size: var\(--text-size/);
+});

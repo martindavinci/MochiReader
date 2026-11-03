@@ -73,3 +73,12 @@ test('drawing again replaces the list', () => {
   assert.equal(host.querySelectorAll('.recent').length, 0);
   assert.equal(host.querySelectorAll('h1').length, 1);
 });
+
+test('with no hint it shows only the list, as in the panel over a file', () => {
+  const { document } = parseHTML('<!doctype html><html><body><aside id="panel"></aside></body></html>');
+  const host = document.getElementById('panel');
+  const { hint, ...labels } = LABELS;
+  renderRecents(host, [], { labels, onOpen: () => {}, onRemove: () => {} });
+  assert.equal(host.querySelector('.home-hint'), null);
+  assert.ok(host.textContent.includes('Recent'));
+});

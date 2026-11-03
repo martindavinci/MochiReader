@@ -448,3 +448,121 @@ test('closing the tab stops watching the layout, also for a goTo still waiting f
   await going;
   assert.equal(observers.size, 0);
 });
+
+const line = (reader) => reader.position().line;
+
+const NESTED = [
+  '<ul data-sourcepos="1:1-2:5"><li data-sourcepos="1:1-1:5"><p data-sourcepos="1:3-1:5">Uno</p></li>',
+  '<li data-sourcepos="2:1-2:5">Due</li></ul>',
+  '<p data-sourcepos="4:1-4:5">Tre</p>',
+].join('');
+
+test('moving by block goes one block on and one block back', async () => {
+  const { reader, blocks, scrolled } = setup();
+  await reader.moveBlock(1);
+  assert.ok(scrolled.at(-1) === blocks[1]);
+  assert.equal(line(reader), 3);
+  await reader.moveBlock(1);
+  assert.equal(line(reader), 5);
+  await reader.moveBlock(-1);
+  assert.ok(scrolled.at(-1) === blocks[1]);
+  assert.equal(line(reader), 3);
+});
+
+test('moving by block stops at the first and at the last', async () => {
+  const { reader, scrolled } = setup();
+  await reader.moveBlock(-1);
+  assert.deepEqual(scrolled, []);
+  await reader.goTo({ kind: 'md', line: 9, sentence: 0 });
+  const before = scrolled.length;
+  await reader.moveBlock(1);
+  assert.equal(scrolled.length, before);
+  assert.equal(line(reader), 9);
+});
+
+test('moving by block lands on items, not on the list that holds them', async () => {
+  const { reader } = setup({ html: NESTED });
+  await reader.moveBlock(1);
+  assert.equal(line(reader), 2);
+  await reader.moveBlock(1);
+  assert.equal(line(reader), 4);
+  await reader.moveBlock(-1);
+  await reader.moveBlock(-1);
+  assert.equal(line(reader), 1);
+});
+
+test('moving by block skips what a closed details hides', async () => {
+  const html = '<p data-sourcepos="1:1-1:5">Uno</p>'
+    + '<details><summary>Altro</summary><p data-sourcepos="3:1-3:5">Nascosto</p></details>'
+    + '<p data-sourcepos="5:1-5:5">Tre</p>';
+  const { reader } = setup({ html });
+  await reader.moveBlock(1);
+  assert.equal(line(reader), 5);
+});
+
+const SECTIONS = [
+  '<h1 data-sourcepos="1:1-1:5">Uno</h1>',
+  '<p data-sourcepos="3:1-3:5">Testo</p>',
+  '<h2 data-sourcepos="5:1-5:5">Due</h2>',
+  '<p data-sourcepos="7:1-7:5">Testo</p>',
+  '<details><summary>Altro</summary><h2 data-sourcepos="9:1-9:5">Nascosto</h2></details>',
+  '<h2 data-sourcepos="11:1-11:5">Tre</h2>',
+].join('');
+
+test('moving by section goes from heading to heading', async () => {
+  const { reader } = setup({ html: SECTIONS });
+  await reader.moveSection(1);
+  assert.equal(line(reader), 5);
+  await reader.moveSection(1);
+  assert.equal(line(reader), 11);
+  await reader.moveSection(-1);
+  assert.equal(line(reader), 5);
+});
+
+test('moving back from inside a section goes to its own heading', async () => {
+  const { reader } = setup({ html: SECTIONS });
+  await reader.goTo({ kind: 'md', line: 7, sentence: 0 });
+  await reader.moveSection(-1);
+  assert.equal(line(reader), 5);
+});
+
+test('moving by section stops where there are no more headings', async () => {
+  const { reader, scrolled } = setup({ html: SECTIONS });
+  await reader.moveSection(-1);
+  assert.deepEqual(scrolled, []);
+  await reader.goTo({ kind: 'md', line: 11, sentence: 0 });
+  await reader.moveSection(1);
+  assert.equal(line(reader), 11);
+});
+
+test('a move holds the place like goTo, until the reader moves on', async () => {
+  const { reader, host, document } = setup({ scrollTop: 0 });
+  await reader.moveBlock(1);
+  assert.equal(line(reader), 3);
+  host.dispatchEvent(new document.defaultView.Event('wheel'));
+  assert.equal(line(reader), 1);
+});
+
+test('a move after the reader is gone does nothing', async () => {
+  const { reader, scrolled } = setup();
+  reader.destroy();
+  await reader.moveBlock(1);
+  await reader.moveSection(1);
+  assert.deepEqual(scrolled, []);
+});
+
+test('a modifier pressed on the way to a shortcut keeps the place, and a key that moves lets it go', async () => {
+  const { reader, host, document } = setup({ scrollTop: 0 });
+  await reader.goTo({ kind: 'md', line: 5, sentence: 0 });
+  const press = (key) => {
+    const event = new document.defaultView.Event('keydown');
+    event.key = key;
+    host.dispatchEvent(event);
+  };
+  for (const key of ['Control', 'Shift', 'Alt', 'AltGraph', 'Meta']) {
+    press(key);
+    assert.equal(line(reader), 5, key);
+  }
+  press('PageDown');
+  assert.equal(line(reader), 1);
+});

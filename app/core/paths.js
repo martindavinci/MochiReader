@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 const SEPARATORS = /[\\/]/;
-const OPENABLE = /\.(md|markdown|epub)$/i;
+/** What the app opens. */
+export const OPENABLE_EXTENSIONS = ['md', 'markdown', 'epub'];
+const OPENABLE = new RegExp(`\\.(${OPENABLE_EXTENSIONS.join('|')})$`, 'i');
 
 /** @param {string} path */
 export function fileName(path) {
