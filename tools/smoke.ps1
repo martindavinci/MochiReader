@@ -27,6 +27,14 @@ $ReloadKeys = @(@($VK_CONTROL, $VK_R), @($VK_F5), @($VK_CONTROL, $VK_SHIFT, $VK_
 $KeyUp = 2
 $ReloadSettleMs = 1500
 
+# One long list, the shape that used to stop the page. 5 MB and not 10, because this is the debug build: its render
+# of 10 MB takes longer than OPEN_TIMEOUT. In one go the page stops here for about 2 s.
+$LargeFileEntry = "- Voce con **testo** e [link](https://e.org/x) ok`n"
+$LargeFileEntries = 100000
+$LargeFileWatchS = 20
+$LargeFileMaxAnswerMs = 1000
+$AnswerPollMs = 2
+
 Add-Type @'
 using System;
 using System.Runtime.InteropServices;
@@ -203,6 +211,47 @@ function Test-FailedTabRetries {
   }
 }
 
+function Get-WindowTitle([IntPtr]$Window) {
+  $title = New-Object System.Text.StringBuilder 260
+  [void][AppWindows]::GetWindowText($Window, $title, 260)
+  $title.ToString()
+}
+
+function Test-LargeFile {
+  Wait-AppGone
+  $large = Join-Path $Work 'lunga.md'
+  [System.IO.File]::WriteAllText($large, ($LargeFileEntry * $LargeFileEntries), (New-Object System.Text.UTF8Encoding $false))
+  $names = 'uno.md', 'due.md'
+  $notes = @($names | ForEach-Object { New-Note $_ "Testo di $_." })
+  $app = Start-App @("`"$large`"")
+  try {
+    $window = Wait-AppWindow $app
+    # The page sets the title, so the title following a request shows that the page is free to answer.
+    $slowest = 0
+    $turn = 0
+    $clock = [System.Diagnostics.Stopwatch]::StartNew()
+    while ($clock.Elapsed.TotalSeconds -lt $LargeFileWatchS) {
+      $index = $turn % $names.Count
+      $turn++
+      $asked = $clock.ElapsedMilliseconds
+      Start-Second "`"$($notes[$index])`""
+      while ((Get-WindowTitle $window) -ne $names[$index]) {
+        Assert-That ($clock.ElapsedMilliseconds - $asked -lt $LargeFileWatchS * 1000) 'the page answers while a large file opens'
+        Start-Sleep -Milliseconds $AnswerPollMs
+      }
+      $slowest = [math]::Max($slowest, $clock.ElapsedMilliseconds - $asked)
+    }
+    Assert-That ($slowest -lt $LargeFileMaxAnswerMs) "the page answers while a large file opens: the slowest took $slowest ms"
+    $tabs = Wait-Tabs 3 { param($t) @($t | Where-Object { $_.status -eq 'ok' }).Count -eq 3 }
+    $text = ($tabs | Where-Object { $_.path -eq $large }).text
+    $entries = ([regex]::Matches($text, 'Voce con testo e link ok')).Count
+    Assert-That ($entries -eq $LargeFileEntries) "every entry of a large file is on the page, found $entries"
+    Pass "the page answers while a large file opens, the slowest in $slowest ms, and all of it arrives"
+  } finally {
+    Stop-App $app
+  }
+}
+
 function Send-Keys([IntPtr]$Window, [byte[]]$Keys) {
   # Real keys go to whatever is in front, so they are only sent to the app.
   if ([SmokeInput]::GetForegroundWindow() -ne $Window) { return $false }
@@ -248,6 +297,7 @@ try {
   Test-RunningApp
   Test-UnreachableFile
   Test-FailedTabRetries
+  Test-LargeFile
   Test-BrowserKeysKeepTheSession
   'smoke: all checks passed'
 } finally {

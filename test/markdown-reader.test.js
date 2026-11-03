@@ -111,3 +111,90 @@ test('destroy takes the text away', () => {
   reader.destroy();
   assert.equal(host.querySelector('article'), null);
 });
+
+const LIST_LINES = 3000;
+const ALL_ITEMS = LIST_LINES + 1;
+const sourcepos = (line) => `${line}:1-${line}:40`;
+
+function longList() {
+  const lines = Array.from({ length: LIST_LINES }, (_, index) => (
+    `<li data-sourcepos="${sourcepos(index + 1)}">Voce ${index + 1} con <strong>testo</strong> da leggere</li>\n`
+  ));
+  return `<ul data-sourcepos="1:1-${LIST_LINES}:40">\n${lines.join('')}<li>${'x'.repeat(LARGE_DOC_CHARS)}</li></ul>\n`;
+}
+
+test('a small document goes in whole, with nothing around it', () => {
+  const article = setup().host.querySelector('article');
+  assert.ok(!article.querySelector('.part'));
+  assert.equal(article.firstElementChild.localName, 'h1');
+});
+
+test('a large document shows its start at once and leaves the rest for later turns of the page', async () => {
+  const { host, reader } = setup({ html: longList() });
+  const atOnce = host.querySelectorAll('li').length;
+  assert.ok(atOnce > 0, 'the start is there as soon as the reader is');
+  assert.ok(atOnce < ALL_ITEMS, 'one long list must not go in all at once');
+  await reader.speechRoots();
+  assert.equal(host.querySelectorAll('li').length, ALL_ITEMS);
+});
+
+test('every part of a large document sits directly in the text and has an expected height', async () => {
+  const { host, reader } = setup({ html: longList() });
+  await reader.speechRoots();
+  const article = host.querySelector('article');
+  assert.ok(article.children.length > 1);
+  for (const part of article.children) {
+    assert.equal(part.className, 'part');
+    assert.match(part.getAttribute('style'), /contain-intrinsic-size:\s*auto [\d.]+em/);
+  }
+});
+
+test('the speech roots of a large document hold all of it', async () => {
+  const { reader } = setup({ html: longList() });
+  const [{ root }] = await reader.speechRoots();
+  assert.equal(root.querySelectorAll('li').length, ALL_ITEMS);
+});
+
+test('going to a line of a large document waits for that line', async () => {
+  const { document, host, reader } = setup({ html: longList() });
+  const scrolled = [];
+  document.defaultView.HTMLElement.prototype.scrollIntoView = function scrollIntoView() {
+    scrolled.push(this.getAttribute('data-sourcepos'));
+  };
+  const line = LIST_LINES - 1;
+  assert.ok(!host.querySelector(`[data-sourcepos="${sourcepos(line)}"]`), 'not there yet');
+  await reader.goTo({ kind: 'md', line, sentence: 0 });
+  assert.deepEqual(scrolled, [sourcepos(line)]);
+});
+
+test('closing the tab of a large document stops filling it', async () => {
+  const { host, reader } = setup({ html: longList() });
+  const article = host.querySelector('article');
+  reader.destroy();
+  const atClose = article.querySelectorAll('li').length;
+  assert.ok(atClose < ALL_ITEMS);
+  await reader.speechRoots();
+  await reader.goTo({ kind: 'md', line: 1, sentence: 0 });
+  assert.equal(article.querySelectorAll('li').length, atClose);
+});
+
+// Off screen, a part keeps its expected height while its blocks are laid out at their real ones, past its end.
+test('the position of a large document only compares blocks within the part at the top of the screen', async () => {
+  const { host, reader } = setup({ html: longList() });
+  await reader.speechRoots();
+  const parts = [...host.querySelector('article').children];
+  assert.ok(parts.length > 1);
+  const expectedHeight = 1000;
+  const realBlockHeight = 100;
+  const lines = [];
+  parts.forEach((part, at) => {
+    part.getBoundingClientRect = () => ({ top: at * expectedHeight - host.scrollTop });
+    [...part.querySelectorAll('li[data-sourcepos]')].forEach((block, index) => {
+      block.getBoundingClientRect = () => ({ top: at * expectedHeight + index * realBlockHeight - host.scrollTop });
+      if (at === 1 && index === 2) lines.push(Number.parseInt(block.getAttribute('data-sourcepos'), 10));
+    });
+    part.querySelector('ul').getBoundingClientRect = () => ({ top: at * expectedHeight - host.scrollTop });
+  });
+  host.scrollTop = expectedHeight + 2 * realBlockHeight;
+  assert.equal(reader.position().line, lines[0]);
+});

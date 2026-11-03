@@ -125,13 +125,21 @@ article {
   overflow-wrap: break-word;
 }
 
-article.large > * {
+/* A part clips what leaves its box, so it spans the padding of the text: list numbers stand out to the left. */
+article.large > .part {
+  margin-inline: -1.5rem;
+  padding-inline: 1.5rem;
   content-visibility: auto;
   contain-intrinsic-size: auto 4em;
 }
 
+/* A block cut in two parts reads as one: no gap at the cut, no second marker, and the columns of a table stay in line. */
+article.large > .part:has(> [data-continued]) { margin-top: -1em; }
+li[data-continued] { list-style: none; }
+table[data-split], table[data-continued] { display: table; width: 100%; table-layout: fixed; }
+
 h1, h2, h3, h4, h5, h6 { margin: 1.6em 0 0.5em; line-height: 1.25; }
-article > :first-child { margin-top: 0; }
+article > :first-child, article > .part:first-child > :first-child { margin-top: 0; }
 h1 { font-size: 1.7em; }
 h2 { font-size: 1.35em; }
 h3 { font-size: 1.15em; }
