@@ -39,6 +39,21 @@ test('the recents are listed in the order given, with their title and their fold
   assert.ok(!host.textContent.includes('None yet'));
 });
 
+test('a title that is not the name of the file comes with the name, so two volumes of one series differ', () => {
+  const volume = (name) => ({ ...recent(`C:\\books\\${name}`), kind: 'epub', title: 'Shadow Slave' });
+  const { host } = draw([volume('slave-vol1.epub'), volume('slave-vol2.epub')]);
+  const items = [...host.querySelectorAll('.recent')];
+  assert.deepEqual(items.map((item) => item.querySelector('.recent-file').textContent), ['slave-vol1.epub', 'slave-vol2.epub']);
+  assert.equal(items[0].querySelector('.recent-name').textContent, 'Shadow Slave');
+  assert.equal(items[0].querySelector('.recent-folder').textContent, 'C:\\books');
+  assert.notEqual(items[0].textContent, items[1].textContent);
+});
+
+test('a title that is the name of the file does not say it twice', () => {
+  const { host } = draw([recent('C:\\x\\a.md')]);
+  assert.equal(host.querySelector('.recent-file'), null);
+});
+
 test('a file that exists opens, and has no command to take it away', () => {
   const { host, opened, click } = draw([recent('C:\\x\\a.md')]);
   assert.ok(!host.querySelector('.recent').classList.contains('missing'));

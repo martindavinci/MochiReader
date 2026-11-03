@@ -189,7 +189,7 @@ foliate-view {
 }
 
 .recent-name { color: var(--fg); }
-.recent-folder, .recent-missing { margin-left: 0.8em; color: var(--muted); font-size: 13px; }
+.recent-file, .recent-folder, .recent-missing { margin-left: 0.8em; color: var(--muted); font-size: 13px; }
 .recent-remove { flex: none; padding: 0 0.7rem; color: var(--muted); }
 .recent-remove:hover { color: var(--fg); }
 
@@ -242,6 +242,7 @@ foliate-view {
 .toc-entry:hover, .bookmark:hover { background: var(--surface); }
 .bookmark-group + .bookmark-group { margin-top: 0.8rem; }
 .bookmark-file { margin: 0 0 0.2rem; color: var(--muted); font-size: 13px; font-weight: 600; }
+.bookmark-file-name { margin-left: 0.8em; font-weight: 400; }
 .bookmark { display: flex; border-radius: 5px; }
 .bookmark-open { display: flex; flex: 1; gap: 0.8em; min-width: 0; padding: 0.25rem 0.6rem; text-align: left; }
 .bookmark-excerpt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

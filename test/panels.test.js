@@ -71,6 +71,15 @@ test('each bookmark shows its passage and date under its file', () => {
   assert.equal(groups[1].querySelector('.bookmark-date').textContent, 'day 2');
 });
 
+test('two volumes of one title are told apart by the name of their file', () => {
+  const volume = (key, name) => ({ ...mark(key, 'Shadow Slave', 1), path: `C:\\books\\${name}` });
+  const { host } = drawBookmarks([volume('k1', 'slave-vol1.epub'), volume('k2', 'slave-vol2.epub')]);
+  const [first, second] = host.querySelectorAll('.bookmark-file');
+  assert.ok(first.textContent.includes('Shadow Slave'));
+  assert.equal(first.querySelector('.bookmark-file-name').textContent, 'slave-vol1.epub');
+  assert.equal(second.querySelector('.bookmark-file-name').textContent, 'slave-vol2.epub');
+});
+
 test('a bookmark with no passage, as on an image, still has something to click', () => {
   const { host } = drawBookmarks([mark('k1', 'a.md', 1, '')]);
   assert.equal(host.querySelector('.bookmark-excerpt').textContent, 'a.md');

@@ -4,6 +4,17 @@ import { fileName } from '../core/paths.js';
 const REMOVE_MARK = '×';
 
 /**
+ * A book goes by the title it declares, and the volumes of a series can all declare the same one.
+ * @param {string} title
+ * @param {string} path
+ * @returns {string[]} The name of the file, unless that is what the title says already.
+ */
+export function fileBesideTitle(title, path) {
+  const name = fileName(path);
+  return name === title ? [] : [name];
+}
+
+/**
  * Draws the recent files again, under how to open a file if there is a `hint`.
  * @param {HTMLElement} host
  * @param {{path: string, title: string, exists: boolean}[]} recents The newest first.
@@ -24,7 +35,11 @@ export function renderRecents(host, recents, { labels, onOpen, onRemove }) {
     open.setAttribute('title', path);
     open.addEventListener('click', () => onOpen(path));
     const folder = path.slice(0, -fileName(path).length - 1);
-    open.append(element('span', 'recent-name', title), element('span', 'recent-folder', folder));
+    open.append(
+      element('span', 'recent-name', title),
+      ...fileBesideTitle(title, path).map((name) => element('span', 'recent-file', name)),
+      element('span', 'recent-folder', folder),
+    );
 
     const row = element('li', exists ? 'recent' : 'recent missing');
     row.append(open);

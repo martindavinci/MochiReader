@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import { fileBesideTitle } from './recents.js';
 
 const REMOVE_MARK = '×';
 const FIRST_CONTROL = 'button, select';
@@ -128,6 +129,7 @@ export function renderBookmarks(host, bookmarks, { labels, dateOf, onOpen, onRem
   const group = ({ path, title, bookmarks: inGroup }) => {
     const file = element('h2', 'bookmark-file', title);
     file.setAttribute('title', path);
+    file.append(...fileBesideTitle(title, path).map((name) => element('span', 'bookmark-file-name', name)));
     const list = element('ul', 'panel-list');
     list.append(...inGroup.map(item));
     const section = element('section', 'bookmark-group');
