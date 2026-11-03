@@ -273,6 +273,7 @@ function adoptBook(doc, entry, reader) {
   reader.onMove((position) => savePosition(entry, position));
   entry.status = STATUS_OK;
   entry.restored = true;
+  invoke('state_move_bookmarks', { key: entry.key, path: entry.path });
   followSystemTheme();
   if (activeEntry() === entry && !panels.current()) focusText();
 }
@@ -485,9 +486,12 @@ async function drawRecentsPanel(row) {
   });
 }
 
-async function openBookmark({ path, position, title }) {
+/** The file a bookmark names is only the last one its book was seen in: the book can be open from another. */
+const pathOfOpenDocument = (key) => [...entries.values()].find((entry) => entry.reader && entry.key === key)?.path;
+
+async function openBookmark({ key, path, position, title }) {
   closePanel();
-  const id = await openPath(path);
+  const id = await openPath(pathOfOpenDocument(key) ?? path);
   const entry = entries.get(id);
   if (entry?.status === STATUS_MISSING) {
     closeTab(id);

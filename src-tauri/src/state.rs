@@ -305,6 +305,20 @@ impl Store {
         added
     }
 
+    /// A book is known by its key wherever its file is: its bookmarks go to the file it was last opened from.
+    pub fn move_bookmarks(&self, key: &str, path: &str) {
+        let mut changed = false;
+        for bookmark in &mut self.state().bookmarks {
+            if bookmark.key == key && bookmark.path != path {
+                bookmark.path = path.to_string();
+                changed = true;
+            }
+        }
+        if changed {
+            self.persist();
+        }
+    }
+
     pub fn window(&self) -> Option<WindowPlacement> {
         self.state().window
     }
@@ -641,6 +655,35 @@ mod tests {
             store.snapshot().bookmarks,
             vec![bookmark("k", 5), bookmark("other", 3)]
         );
+    }
+
+    #[test]
+    fn the_bookmarks_of_a_book_follow_it_to_its_new_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_in(dir.path());
+        store.toggle_bookmark(bookmark("k", 3));
+        store.toggle_bookmark(bookmark("k", 5));
+        store.toggle_bookmark(bookmark("other", 3));
+
+        store.move_bookmarks("k", r"D:\y\dopo.epub");
+
+        let paths: Vec<_> = state_on_disk(dir.path())
+            .bookmarks
+            .into_iter()
+            .map(|bookmark| bookmark.path)
+            .collect();
+        assert_eq!(paths, [r"D:\y\dopo.epub", r"D:\y\dopo.epub", r"C:\x\a.md"]);
+    }
+
+    #[test]
+    fn bookmarks_already_on_the_file_write_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_in(dir.path());
+        store.toggle_bookmark(bookmark("k", 3));
+        fs::remove_file(dir.path().join(STATE_FILE)).unwrap();
+        store.move_bookmarks("k", r"C:\x\a.md");
+        store.move_bookmarks("nothing here", r"D:\y\dopo.epub");
+        assert_eq!(files_in(dir.path()), Vec::<String>::new());
     }
 
     #[test]

@@ -36,12 +36,14 @@ const brokenBook = async () => {
 
 let run = 0;
 
-async function startBookShell() {
+async function startBookShell({ bookmarks = [] } = {}) {
   const { window, document, HTMLElement } = parseHTML(INDEX_HTML);
   HTMLElement.prototype.focus = function focus() {};
   const realCreate = document.createElement.bind(document);
   const views = [];
-  const state = { modified: FIRST_MTIME, saved: [], dump: null, onFocus: () => {}, holdFirstPage: null };
+  const state = {
+    modified: FIRST_MTIME, saved: [], dump: null, onFocus: () => {}, holdFirstPage: null, bookmarks, moved: [], opened: [],
+  };
   document.createElement = (tag) => {
     const element = realCreate(tag);
     if (tag !== 'foliate-view') return element;
@@ -76,17 +78,21 @@ async function startBookShell() {
     first_paint: () => painted(),
     take_pending_paths: () => [PATH_BOOK],
     state_get_options: () => ({ language: 'en' }),
-    state_get: () => ({ recents: [], bookmarks: [] }),
+    state_get: () => ({ recents: [], bookmarks: state.bookmarks }),
+    state_move_bookmarks: (args) => state.moved.push(args),
     state_check_recents: () => [],
     state_get_position: () => null,
     state_save_position: (args) => state.saved.push(args),
-    open_document: ({ path }) => ({
-      path,
-      name: 'b.epub',
-      kind: 'epub',
-      fileUrl: 'http://mochi.localhost/file/x',
-      modifiedMs: state.modified,
-    }),
+    open_document: ({ path }) => {
+      state.opened.push(path);
+      return {
+        path,
+        name: 'b.epub',
+        kind: 'epub',
+        fileUrl: 'http://mochi.localhost/file/x',
+        modifiedMs: state.modified,
+      };
+    },
     file_modified: () => state.modified,
     smoke_write_dump: ({ json }) => {
       state.dump = JSON.parse(json);
@@ -140,6 +146,8 @@ async function startBookShell() {
   await until(() => views[0]?.lastLocation, 'the book did not open');
   return {
     pane,
+    document,
+    window,
     views,
     state,
     until,
@@ -275,4 +283,35 @@ test('a message about the file leaves the place to foliate too', async () => {
 
 test('the book waiting for its page has the room of the real one, and cannot be seen', () => {
   assert.match(APP_CSS, /\.book-stage\.waiting \{[^}]*position: absolute;[^}]*inset: 0;[^}]*visibility: hidden;/);
+});
+
+const KEY_OF_BOOK = 'epub:id|T|1';
+const PATH_BEFORE = 'C:/x/prima.epub';
+const movedBookmark = {
+  key: KEY_OF_BOOK,
+  path: PATH_BEFORE,
+  title: 'T',
+  position: { kind: 'epub', cfi: SAVED_CFI, sentence: 0 },
+  excerpt: 'Brano',
+  createdAt: 1,
+};
+
+test('a book open from a new file takes its bookmarks along', async () => {
+  const shell = await startBookShell();
+  await shell.until(() => shell.state.moved.length > 0, 'the bookmarks stayed behind');
+  assert.deepEqual(shell.state.moved, [{ key: KEY_OF_BOOK, path: PATH_BOOK }]);
+});
+
+test('a bookmark goes to its book where it is open, whichever file the bookmark last saw', async () => {
+  const shell = await startBookShell({ bookmarks: [movedBookmark] });
+  const [view] = shell.views;
+  shell.press('b', true);
+  await shell.until(() => shell.document.querySelector('.bookmark-open'), 'no bookmark in the panel');
+  shell.document.querySelector('.bookmark-open').dispatchEvent(new shell.window.Event('click'));
+  await shell.until(() => view.goes.length > 0, 'the book did not move');
+
+  assert.deepEqual(view.goes, [SAVED_CFI]);
+  assert.deepEqual(shell.state.opened, [PATH_BOOK]);
+  assert.equal(shell.document.getElementById('toast').hidden, true);
+  assert.equal(shell.document.getElementById('panel').hidden, true);
 });

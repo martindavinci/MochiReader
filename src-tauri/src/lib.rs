@@ -169,6 +169,11 @@ fn state_toggle_bookmark(bookmark: Bookmark, store: State<'_, Store>) -> bool {
     store.toggle_bookmark(bookmark)
 }
 
+#[tauri::command(async)]
+fn state_move_bookmarks(key: String, path: String, store: State<'_, Store>) {
+    store.move_bookmarks(&key, &path);
+}
+
 /// The page has saved what it had: the window can go.
 #[tauri::command(async)]
 fn close_ready(app: AppHandle) {
@@ -379,6 +384,7 @@ pub fn run() {
             state_set_option,
             state_get_options,
             state_toggle_bookmark,
+            state_move_bookmarks,
             close_ready,
             #[cfg(feature = "smoke")]
             smoke_write_dump,

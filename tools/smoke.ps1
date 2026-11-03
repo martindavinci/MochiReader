@@ -991,6 +991,13 @@ function Set-SavedCfi([string]$Key, [string]$Cfi) {
   [System.IO.File]::WriteAllText((Get-StateFile), ($state | ConvertTo-Json -Depth 10), (New-Object System.Text.UTF8Encoding $false))
 }
 
+function Set-Bookmark([string]$Key, [string]$Path, [string]$Cfi) {
+  $state = Get-State
+  $position = [pscustomobject]@{ kind = 'epub'; cfi = $Cfi; sentence = 0 }
+  $state.bookmarks = @([pscustomobject]@{ key = $Key; path = $Path; title = 'Bookmarked'; position = $position; excerpt = ''; createdAt = 1 })
+  [System.IO.File]::WriteAllText((Get-StateFile), ($state | ConvertTo-Json -Depth 10), (New-Object System.Text.UTF8Encoding $false))
+}
+
 function Test-EpubPosition {
   Wait-AppGone
   $book = Copy-Fixture 'plain.epub'
@@ -1014,6 +1021,7 @@ function Test-EpubPosition {
   $moved = Join-Path $Work 'spostato'
   New-Item -ItemType Directory $moved | Out-Null
   $elsewhere = Join-Path $moved 'un altro nome.epub'
+  Set-Bookmark $PlainKey $book $PlainSecondChapterCfi
   Move-Item $book $elsewhere
   $app = Start-App @("`"$elsewhere`"")
   try {
@@ -1022,6 +1030,8 @@ function Test-EpubPosition {
     Assert-That ($tab.key -eq $PlainKey) "a moved book keeps its key, not $($tab.key)"
     Assert-That ($tab.text.Contains($PlainSecondChapter)) "a moved book opens at its saved place, not at: $($tab.text)"
     Pass 'a book moved and renamed opens at its saved place'
+    Wait-State { @((Get-State).bookmarks | Where-Object { $_.path -eq $elsewhere }).Count -eq 1 } 'the bookmark of a moved book follows it to its new file'
+    Pass 'the bookmark of a moved book follows it to its new file'
   } finally {
     Stop-App $app
   }
