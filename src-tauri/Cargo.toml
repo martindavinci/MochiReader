@@ -4,7 +4,7 @@ name = "mochireader"
 version = "0.1.0"
 description = "A Windows reader for Markdown and EPUB files"
 edition = "2021"
-rust-version = "1.89"
+rust-version = "1.90"
 license = "GPL-3.0-or-later"
 
 [lib]
