@@ -175,6 +175,12 @@ function showToast(message) {
   }, TOAST_MS);
 }
 
+/**
+ * foliate holds the place of a book through a change of layout, by what is on the page. Sending it to the start of the
+ * page instead gives that up: the page has reflowed and starts earlier, and each change loses a little more.
+ */
+const holdsItsPlace = ({ kind }) => kind === KIND_EPUB;
+
 /** A message above text that stays readable. An empty one takes it away. */
 function setFileNotice(entry, message) {
   if ((entry.fileNotice?.textContent ?? '') === message) return;
@@ -182,7 +188,7 @@ function setFileNotice(entry, message) {
   entry.fileNotice?.remove();
   entry.fileNotice = null;
   if (!message) return;
-  const place = entry.reader?.position();
+  const place = holdsItsPlace(entry) ? null : entry.reader?.position();
   entry.fileNotice = document.createElement('p');
   entry.fileNotice.className = 'file-notice';
   entry.fileNotice.setAttribute('role', 'status');
@@ -530,7 +536,7 @@ function useOptions(next) {
 /** The text changes length with its size: each tab stays where it was reading. */
 function setTextSize(size) {
   const places = [...entries.values()]
-    .filter(({ reader, restored }) => reader && restored)
+    .filter((entry) => entry.reader && entry.restored && !holdsItsPlace(entry))
     .map(({ reader }) => ({ reader, place: reader.position() }));
   useOptions({ ...options, textSize: size });
   places.forEach(({ reader, place }) => reader.goTo(place));

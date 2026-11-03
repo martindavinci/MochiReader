@@ -48,7 +48,9 @@ async function startBookShell() {
     views.push(element);
     return Object.assign(element, {
       inits: [],
-      renderer: { setAttribute() {}, setStyles() {}, getContents: () => [] },
+      goes: [],
+      styles: [],
+      renderer: { setAttribute() {}, setStyles: (css) => element.styles.push(css), getContents: () => [] },
       open: async (book) => {
         element.book = book;
       },
@@ -57,7 +59,9 @@ async function startBookShell() {
         await state.holdFirstPage;
         element.lastLocation = { cfi: lastLocation ?? SAVED_CFI, range: null };
       },
-      goTo: async () => {},
+      goTo: async (target) => {
+        element.goes.push(target);
+      },
       close: () => {
         element.closed = true;
         element.lastLocation = null;
@@ -140,6 +144,11 @@ async function startBookShell() {
     state,
     until,
     focusWindow: () => state.onFocus({ payload: true }),
+    press: (key, ctrlKey = false) => {
+      const event = new window.Event('keydown', { bubbles: true, cancelable: true });
+      Object.assign(event, { key, ctrlKey, shiftKey: false, altKey: false });
+      document.body.dispatchEvent(event);
+    },
     shownViews: () => [...pane().querySelectorAll('foliate-view')],
     closeTab: () => {
       const event = new window.Event('keydown', { bubbles: true, cancelable: true });
@@ -243,6 +252,25 @@ test('a tab closed while its book reloads leaves nothing open', async () => {
   release();
   await shell.until(() => shell.views[1].closed, 'the new book stayed open');
   assert.ok(shell.views[0].closed);
+});
+
+test('a change of text size leaves the place to foliate, which holds it through the reflow', async () => {
+  const shell = await startBookShell();
+  const [view] = shell.views;
+  await shell.until(() => view.styles.length > 0, 'the book got no style');
+  const styled = view.styles.length;
+  shell.press('+', true);
+  shell.press('-', true);
+  await shell.until(() => view.styles.length === styled + 2, 'the size did not reach the book');
+  assert.deepEqual(view.goes, [], 'going to the start of the page would give up the place, a little more each time');
+});
+
+test('a message about the file leaves the place to foliate too', async () => {
+  const shell = await startBookShell();
+  const [view] = shell.views;
+  changeFile(shell, SECOND_MTIME, brokenBook);
+  await noticeShown(shell);
+  assert.deepEqual(view.goes, []);
 });
 
 test('the book waiting for its page has the room of the real one, and cannot be seen', () => {
