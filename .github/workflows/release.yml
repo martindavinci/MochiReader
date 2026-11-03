@@ -38,6 +38,8 @@ jobs:
       - name: Rust tests
         working-directory: src-tauri
         run: cargo test
+      - name: Licenses
+        run: node tools/licenses.mjs --check
       # A tag run reads only caches saved on main or on that same tag, so a manual
       # run on main is what spares later tags from compiling tauri-cli again.
       - name: Cache tauri-cli
