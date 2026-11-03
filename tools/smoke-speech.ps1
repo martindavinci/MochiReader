@@ -41,7 +41,7 @@ function Set-SpeechFast {
 
 function New-SpeechNote([string]$Name, [int]$Paragraphs = 30) {
   $path = Join-Path $Work $Name
-  $text = (1..$Paragraphs | ForEach-Object { "Questa è la frase numero $_ del testo. Questa è la sua seconda frase.`n" }) -join "`n"
+  $text = (1..$Paragraphs | ForEach-Object { "Questa $([char]0xE8) la frase numero $_ del testo. Questa $([char]0xE8) la sua seconda frase.`n" }) -join "`n"
   Write-Note $path "---`nlang: it`n---`n# Titolo della nota`n`n$text"
   $path
 }
