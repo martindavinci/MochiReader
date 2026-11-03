@@ -21,6 +21,12 @@ test('the installer puts the licenses on disk, where they can be read without th
   assert.deepEqual(conf.bundle.resources, { '../app/licenses.txt': 'licenses.txt' });
 });
 
+test('the installer works for one user, fetches WebView2 when missing and offers to open both formats', () => {
+  assert.equal(conf.bundle.windows.nsis.installMode, 'currentUser');
+  assert.deepEqual(conf.bundle.windows.webviewInstallMode, { type: 'downloadBootstrapper' });
+  assert.deepEqual(conf.bundle.fileAssociations.flatMap(({ ext }) => ext), ['md', 'markdown', 'epub']);
+});
+
 test('the CSP blocks everything the app does not use', () => {
   assert.equal(
     conf.app.security.csp,

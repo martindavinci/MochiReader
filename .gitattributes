@@ -1,2 +1,4 @@
-*.sh text eol=lf
+# Every checkout has the line endings the tests were written against, also on Windows.
+* text=auto eol=lf
 *.epub binary
+*.ico binary

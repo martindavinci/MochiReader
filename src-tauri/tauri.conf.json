@@ -26,6 +26,28 @@
     "active": true,
     "targets": ["nsis"],
     "icon": ["icons/icon.ico"],
-    "resources": { "../app/licenses.txt": "licenses.txt" }
+    "publisher": "Martin DaVinci",
+    "shortDescription": "Read Markdown and EPUB files, or have them read aloud",
+    "resources": { "../app/licenses.txt": "licenses.txt" },
+    "fileAssociations": [
+      {
+        "ext": ["md", "markdown"],
+        "name": "MochiReader.Markdown",
+        "description": "Markdown document",
+        "mimeType": "text/markdown",
+        "role": "Viewer"
+      },
+      {
+        "ext": ["epub"],
+        "name": "MochiReader.Epub",
+        "description": "EPUB book",
+        "mimeType": "application/epub+zip",
+        "role": "Viewer"
+      }
+    ],
+    "windows": {
+      "webviewInstallMode": { "type": "downloadBootstrapper" },
+      "nsis": { "installMode": "currentUser" }
+    }
   }
 }
