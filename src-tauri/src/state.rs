@@ -283,6 +283,14 @@ impl Store {
         self.persist();
     }
 
+    /// `lang` is a language without a region: the last voice chosen for it is the one it gets next.
+    pub fn set_voice(&self, lang: &str, voice_id: &str) {
+        self.state()
+            .voices
+            .insert(lang.to_string(), voice_id.to_string());
+        self.persist();
+    }
+
     pub fn options(&self) -> Map<String, Value> {
         self.state().options.clone()
     }
@@ -604,6 +612,19 @@ mod tests {
         fs::remove_file(dir.path().join(STATE_FILE)).unwrap();
         store.save_position("k", at);
         assert_eq!(files_in(dir.path()), Vec::<String>::new());
+    }
+
+    #[test]
+    fn the_voice_of_a_language_is_kept_and_replaced() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_in(dir.path());
+        store.set_voice("it", "elsa");
+        store.set_voice("en", "zira");
+        store.set_voice("it", "cosimo");
+        let voices = state_on_disk(dir.path()).voices;
+        assert_eq!(voices.get("it").map(String::as_str), Some("cosimo"));
+        assert_eq!(voices.get("en").map(String::as_str), Some("zira"));
+        assert_eq!(voices.len(), 2);
     }
 
     #[test]

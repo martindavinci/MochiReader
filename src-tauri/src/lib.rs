@@ -38,6 +38,9 @@ const SMOKE_STATE_DIR: &str = "MOCHIREADER_STATE_DIR";
 // The file that proves a book reached the app. Its presence fails the smoke test.
 #[cfg(feature = "smoke")]
 const SMOKE_CANARY_FILE: &str = "canary";
+// Only in the smoke build: the flags of the browser in place of those of tauri.conf.json, for tools/listen-test.ps1.
+#[cfg(feature = "smoke")]
+const SMOKE_BROWSER_ARGS: &str = "MOCHIREADER_BROWSER_ARGS";
 const EXTERNAL_SCHEMES: [&str; 3] = ["http", "https", "mailto"];
 const SCHEME_END: char = ':';
 // If the page never reports its first frame, the window still has to appear.
@@ -159,6 +162,11 @@ fn state_set_option(name: String, value: Value, store: State<'_, Store>) {
     store.set_option(&name, value);
 }
 
+#[tauri::command(async)]
+fn state_set_voice(lang: String, voice_id: String, store: State<'_, Store>) {
+    store.set_voice(&lang, &voice_id);
+}
+
 /// Separate from `state_get`, because the page needs them before its first frame, whatever else the state has grown to.
 #[tauri::command(async)]
 fn state_get_options(store: State<'_, Store>) -> Map<String, Value> {
@@ -263,6 +271,18 @@ fn smoke_write_dump(out: String, json: String) -> Result<(), String> {
     write_dump(Path::new(&out), &json).map_err(|error| error.to_string())
 }
 
+/// One line of what a test run of the reading heard. Written as it comes, so a run that ends early keeps what it had.
+#[cfg(feature = "smoke")]
+#[tauri::command(async)]
+fn smoke_speech_log(out: String, line: String) -> Result<(), String> {
+    OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(out)
+        .and_then(|mut file| writeln!(file, "{line}"))
+        .map_err(|error| error.to_string())
+}
+
 /// What the scripts of a test book try to call. The CSP must keep them from ever getting here.
 #[cfg(feature = "smoke")]
 #[tauri::command(async)]
@@ -286,6 +306,24 @@ fn on_second_instance(app: &AppHandle, argv: Vec<String>, cwd: String) {
     if let Some(panel) = launch.show_panel {
         if cfg!(feature = "smoke") {
             let command = json!({ "action": "show-panel", "panel": panel });
+            let _ = app.emit(SHELL_COMMAND_EVENT, command);
+        }
+        return;
+    }
+    if launch.speech_test_volume.is_some() || launch.speech_test_log.is_some() {
+        if cfg!(feature = "smoke") {
+            let command = json!({
+                "action": "speech-test",
+                "volume": launch.speech_test_volume,
+                "log": launch.speech_test_log,
+            });
+            let _ = app.emit(SHELL_COMMAND_EVENT, command);
+        }
+        return;
+    }
+    if let Some(speech) = launch.speech {
+        if cfg!(feature = "smoke") {
+            let command = json!({ "action": "speech", "command": speech });
             let _ = app.emit(SHELL_COMMAND_EVENT, command);
         }
         return;
@@ -315,7 +353,13 @@ fn create_window(app: &mut tauri::App) -> tauri::Result<()> {
         .first()
         .cloned()
         .expect("tauri.conf.json declares the window");
-    let window = WebviewWindowBuilder::from_config(app.handle(), &config)?
+    let builder = WebviewWindowBuilder::from_config(app.handle(), &config)?;
+    #[cfg(feature = "smoke")]
+    let builder = match std::env::var(SMOKE_BROWSER_ARGS) {
+        Ok(flags) => builder.additional_browser_args(&flags),
+        Err(_) => builder,
+    };
+    let window = builder
         .on_navigation(|url| url.origin().ascii_serialization() == protocol::APP_ORIGIN)
         .on_new_window(|_, _| NewWindowResponse::Deny)
         .build()?;
@@ -401,6 +445,7 @@ pub fn run() {
             state_get_position,
             state_set_option,
             state_get_options,
+            state_set_voice,
             state_toggle_bookmark,
             state_move_bookmarks,
             close_ready,
@@ -409,6 +454,8 @@ pub fn run() {
             smoke_write_dump,
             #[cfg(feature = "smoke")]
             smoke_canary,
+            #[cfg(feature = "smoke")]
+            smoke_speech_log,
         ])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {

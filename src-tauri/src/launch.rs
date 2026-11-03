@@ -8,6 +8,9 @@ const MEASURE_T0: &str = "--t0";
 const MEASURE_OUT: &str = "--measure-out";
 const DUMP_TABS: &str = "--dump-tabs";
 const SHOW_PANEL: &str = "--show-panel";
+const SPEECH: &str = "--speech";
+const SPEECH_TEST_VOLUME: &str = "--speech-test-volume";
+const SPEECH_TEST_LOG: &str = "--speech-test-log";
 const OPTION_MARK: &str = "--";
 
 /// A run of `measure.ps1 -Warm`: what to open, when it was launched as a FILETIME, and where the time goes.
@@ -26,6 +29,12 @@ pub struct Launch {
     pub measure_open: Option<MeasureOpen>,
     pub dump_tabs: Option<String>,
     pub show_panel: Option<String>,
+    /// Only the smoke build listens: what to do to the reading, as a key would.
+    pub speech: Option<String>,
+    /// Only the smoke build listens: how loud a test run speaks.
+    pub speech_test_volume: Option<String>,
+    /// Only the smoke build listens: where a test run logs its sentences.
+    pub speech_test_log: Option<String>,
 }
 
 impl Launch {
@@ -46,6 +55,9 @@ impl Launch {
                 MEASURE_OUT => open_out = args.next(),
                 DUMP_TABS => launch.dump_tabs = args.next(),
                 SHOW_PANEL => launch.show_panel = args.next(),
+                SPEECH => launch.speech = args.next(),
+                SPEECH_TEST_VOLUME => launch.speech_test_volume = args.next(),
+                SPEECH_TEST_LOG => launch.speech_test_log = args.next(),
                 option if option.starts_with(OPTION_MARK) => {}
                 _ => launch.paths.push(absolute(arg)),
             }
@@ -136,6 +148,26 @@ mod tests {
         let launch = parse(&["--show-panel", "licenses"]);
         assert!(launch.paths.is_empty());
         assert_eq!(launch.show_panel.as_deref(), Some("licenses"));
+    }
+
+    #[test]
+    fn speech_takes_the_command_to_run() {
+        let launch = parse(&["--speech", "speech.start"]);
+        assert!(launch.paths.is_empty());
+        assert_eq!(launch.speech.as_deref(), Some("speech.start"));
+    }
+
+    #[test]
+    fn the_test_settings_of_speech_take_their_values() {
+        let launch = parse(&[
+            "--speech-test-volume",
+            "0.05",
+            "--speech-test-log",
+            "C:\\l.jsonl",
+        ]);
+        assert!(launch.paths.is_empty());
+        assert_eq!(launch.speech_test_volume.as_deref(), Some("0.05"));
+        assert_eq!(launch.speech_test_log.as_deref(), Some("C:\\l.jsonl"));
     }
 
     #[test]
