@@ -7,6 +7,7 @@ param([switch]$NoBuild, [int]$BurstRounds = 3, [string[]]$Only)
 $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot\app-process.ps1"
 . "$PSScriptRoot\smoke-net-log.ps1"
+. "$PSScriptRoot\smoke-speech.ps1"
 
 $BurstFiles = 5
 $DumpRetryMs = 500
@@ -1048,13 +1049,27 @@ function Test-EpubDamagedChapters {
 }
 
 # The scrolling view: a scroll after going to a place has to count like any other, or closing loses it.
+function Set-EpubView([string]$View) {
+  $state = Get-State
+  $state.options | Add-Member -NotePropertyName 'epubView' -NotePropertyValue $View -Force
+  [System.IO.File]::WriteAllText((Get-StateFile), ($state | ConvertTo-Json -Depth 10), (New-Object System.Text.UTF8Encoding $false))
+}
+
 function Test-EpubScrollPosition {
   Wait-AppGone
   $book = Copy-Fixture 'long-chapters.epub'
   Open-ToSavePosition $book
-  $state = Get-State
-  $state.options | Add-Member -NotePropertyName 'epubView' -NotePropertyValue 'scrolled' -Force
-  [System.IO.File]::WriteAllText((Get-StateFile), ($state | ConvertTo-Json -Depth 10), (New-Object System.Text.UTF8Encoding $false))
+  Set-EpubView 'scrolled'
+  try {
+    Invoke-EpubScrollChecks $book
+  } finally {
+    Wait-AppGone
+    # The tests after this one click on a short page, which here would be short of the middle of the window.
+    Set-EpubView 'paginated'
+  }
+}
+
+function Invoke-EpubScrollChecks([string]$book) {
   $app = Start-App @("`"$book`"")
   try {
     $window = Wait-AppWindow $app
@@ -1471,7 +1486,22 @@ $AllTests = @(
   'Test-FixedLayoutEpub',
   'Test-CorruptState',
   'Test-LicensesPanel',
-  'Test-NetLogStaysLocal'
+  'Test-NetLogStaysLocal',
+  'Test-SpeechMarkdown',
+  'Test-SpeechEnd',
+  'Test-SpeechVoiceGone',
+  'Test-SpeechNothingOrNoVoice',
+  'Test-SpeechTwoTabs',
+  'Test-SpeechVoiceOptions',
+  'Test-SpeechBook',
+  'Test-SpeechBookPages',
+  'Test-SpeechFixedLayout',
+  'Test-SpeechKeys',
+  'Test-SpeechClick',
+  'Test-SpeechCloseWhileReading',
+  'Test-SpeechFileChanges',
+  'Test-SpeechMenu',
+  'Test-SpeechWheel'
 )
 foreach ($name in $Only) {
   if ($AllTests -notcontains $name) { throw "no test named $name" }
