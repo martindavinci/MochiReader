@@ -79,6 +79,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           TAG: ${{ github.ref_name }}
-        run: >
-          gh release create "$TAG" dist/*
-          --draft --title "MochiReader $TAG" --generate-notes
+        # The artifact keeps the folders of the bundle (nsis/, portable/): only the files go to the release.
+        run: |
+          mapfile -t files < <(find dist -type f)
+          gh release create "$TAG" "${files[@]}" --draft --title "MochiReader $TAG" --generate-notes
