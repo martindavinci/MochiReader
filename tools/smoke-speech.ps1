@@ -225,7 +225,7 @@ function Test-SpeechVoiceOptions {
     Wait-AppWindow $app | Out-Null
     Wait-Tabs 1 { param($t) $t[0].status -eq 'ok' } | Out-Null
     Start-Second '--show-panel options'
-    $tab = Wait-Speech { param($t) $t.panelText -match 'Microsoft' } 'the options list the voices of Windows'
+    $tab = Wait-Speech { param($t) $t.panelText -match 'Elsa|Cosimo|Mark|Zira|David' } 'the options list the voices of Windows'
     Assert-That ($tab.panelText -match 'Elsa|Cosimo') "the Italian voices are offered: $($tab.panelText)"
     Pass 'the options offer a voice for each language'
   } finally {

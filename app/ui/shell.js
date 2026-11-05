@@ -1154,6 +1154,7 @@ async function dumpTabs(out) {
       panel: panels.current(),
       licensesText: panels.current() === PANEL_LICENSES ? panelHost.textContent : null,
       focused: document.activeElement?.localName ?? null,
+      focusedText: document.activeElement?.textContent ?? '',
       position,
       screenLine: reader?.screenLine?.() ?? null,
       text: roots.map(({ root }) => root.textContent).join('\n'),

@@ -124,7 +124,7 @@ $VK_TAB = 0x09
 $VK_RETURN = 0x0D
 $VK_OEM_COMMA = 0xBC
 # More than the controls of the options panel before its button.
-$MaxTabsToLicenses = 12
+$MaxTabsToLicenses = 30
 $VK_OEM_PLUS = 0xBB
 $MOUSEEVENTF_LEFTDOWN = 2
 $MOUSEEVENTF_LEFTUP = 4
@@ -349,7 +349,7 @@ function Test-LargeFile {
       Assert-That ($second.WaitForExit($AppWaitS * 1000)) 'a second process passes on its file and ends'
       $second.Dispose()
       $asked = $clock.ElapsedMilliseconds
-      while ((Get-WindowTitle $window) -ne $names[$index]) {
+      while (-not (Get-WindowTitle $window).StartsWith($names[$index])) {
         Assert-That ($clock.ElapsedMilliseconds - $asked -lt $LargeFileWatchS * 1000) 'the page answers while a large file opens'
         Start-Sleep -Milliseconds $AnswerPollMs
       }
@@ -612,7 +612,8 @@ function Test-Position {
 
     Write-Note $note (New-LongText 'Cambiato' $LongNoteParagraphs)
     Start-Second "`"$note`""
-    $tabs = Wait-Tabs 1 { param($t) $t[0].text.Contains('Cambiato numero 1.') }
+    # The text arrives a moment before the place does: what counts is that the place comes back, and stays.
+    $tabs = Wait-Tabs 1 { param($t) $t[0].text.Contains('Cambiato numero 1.') -and $t[0].screenLine -eq $SavedLine }
     Assert-That ($tabs[0].screenLine -eq $SavedLine) "a file read again stays at line $SavedLine, not $($tabs[0].screenLine)"
     Pass 'a file changed on disk is read again and keeps the position'
 
@@ -1433,7 +1434,8 @@ function Test-LicensesPanel {
     if (-not (Assert-KeysDo $window @($VK_ESCAPE) { param($t) -not $t.panel } 'esc closes the licenses')) { $notInFront; return }
     if (-not (Assert-KeysDo $window @($VK_CONTROL, $VK_OEM_COMMA) { param($t) $t.panel -eq 'options' } 'ctrl+comma opens the options')) { $notInFront; return }
     $tabs = 0
-    while ((@(Get-Tabs)[0]).focused -ne 'button') {
+    # The panel has other buttons before it: its close button and the text size.
+    while ((@(Get-Tabs)[0]).focused -ne 'button' -or (@(Get-Tabs)[0]).focusedText -notmatch 'Licen') {
       $tabs++
       Assert-That ($tabs -le $MaxTabsToLicenses) 'the options have a button for the licenses'
       if (-not (Send-Keys $window @($VK_TAB))) { $notInFront; return }
