@@ -67,7 +67,10 @@ pub fn set_caption_color(hwnd: HWND, dark: bool) {
 /// Opens the folder of a file with the file selected. Explorer takes the path as one argument of its own making.
 pub fn show_in_folder(path: &str) -> Result<(), String> {
     Command::new("explorer.exe")
-        .raw_arg(format!("/select,\"{}\"", path.trim_start_matches(VERBATIM_PREFIX)))
+        .raw_arg(format!(
+            "/select,\"{}\"",
+            path.trim_start_matches(VERBATIM_PREFIX)
+        ))
         .spawn()
         .map(drop)
         .map_err(|error| error.to_string())

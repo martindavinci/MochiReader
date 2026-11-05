@@ -252,7 +252,10 @@ fn show_in_folder(path: String) -> Result<(), String> {
 /// The title bar in the colour of the page, where Windows has such a thing. Older versions just keep their own.
 #[tauri::command]
 fn window_caption(dark: bool, app: AppHandle) {
-    if let Some(hwnd) = app.get_webview_window(MAIN_WINDOW).and_then(|window| window.hwnd().ok()) {
+    if let Some(hwnd) = app
+        .get_webview_window(MAIN_WINDOW)
+        .and_then(|window| window.hwnd().ok())
+    {
         native::set_caption_color(hwnd, dark);
     }
 }

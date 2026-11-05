@@ -200,7 +200,8 @@ impl Store {
                 .recents
                 .iter()
                 .find(|recent| same_file_key(&recent.path) == key);
-            let (chapter, chapters) = known.map_or((None, None), |recent| (recent.chapter, recent.chapters));
+            let (chapter, chapters) =
+                known.map_or((None, None), |recent| (recent.chapter, recent.chapters));
             state
                 .recents
                 .retain(|recent| same_file_key(&recent.path) != key);

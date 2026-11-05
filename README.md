@@ -1,14 +1,44 @@
-# MochiReader
+<p align="center">
+  <img src="app/assets/mochi-256.png" width="160" height="160" alt="MochiReader">
+</p>
 
-A Windows reader for Markdown and EPUB files. Double-click a file and read it, or have it read aloud with the voices already in Windows. It works offline.
+<h1 align="center">MochiReader</h1>
+
+<p align="center">A calm Windows reader for Markdown and EPUB, which can read aloud with the voices already in Windows. Entirely offline.</p>
+
+<p align="center">
+  <a href="https://github.com/martindavinci/MochiReader/actions/workflows/ci.yml"><img src="https://github.com/martindavinci/MochiReader/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/martindavinci/MochiReader/releases/latest"><img src="https://img.shields.io/github/v/release/martindavinci/MochiReader" alt="Latest release"></a>
+  <a href="https://github.com/martindavinci/MochiReader/releases"><img src="https://img.shields.io/github/downloads/martindavinci/MochiReader/total" alt="Downloads"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/martindavinci/MochiReader" alt="License: GPL-3.0-or-later"></a>
+  <img src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078D6" alt="Platform: Windows 10 | 11">
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/home.png" width="720" alt="The home page of MochiReader on first run: the mascot, an Open a file button and the keys worth knowing">
+</p>
+
+Double-click a file and read it, or have it read aloud. Nothing leaves your computer.
 
 ## Features
 
-- Opens `.md`, `.markdown` and `.epub` files in tabs, and reopens each one where you stopped.
+- Opens `.md`, `.markdown` and `.epub` files in tabs, and reopens each one where you stopped. The recent files show the chapter a book was left at.
 - Reads aloud with the Windows voices, sentence by sentence, highlighting the sentence and following it down the page. It goes on with the window minimised.
 - Skips what sounds wrong when spoken: link addresses, source citations and frontmatter.
 - Remembers the last voice used for each language.
-- Table of contents, bookmarks and recent files.
+- Books show their chapter, page and progress, with arrows to turn the page, in pages or in one long scroll.
+- Table of contents, bookmarks with undo, and recent files, each a click away beside the tabs.
+- Light and dark themes, or the one Windows uses, in English and Italian. Every action has a key, and F1 lists them.
+
+<p align="center">
+  <img src="docs/screenshots/reading-aloud.png" width="49%" alt="A Markdown note being read aloud, with the sentence highlighted and the reading bar at the bottom" valign="top">
+  &nbsp;
+  <img src="docs/screenshots/book-dark.png" width="49%" alt="An EPUB book read aloud in the dark theme, with its chapter, page and progress" valign="top">
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/options-dark.png" width="49%" alt="The Options panel in the dark theme">
+</p>
 
 ## Install
 
