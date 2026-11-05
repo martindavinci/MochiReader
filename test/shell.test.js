@@ -1156,7 +1156,15 @@ test('ctrl+comma opens the options, with their saved values', async () => {
 });
 
 const changeOption = async (shell, name, value) => {
-  shell.panel().querySelector(`input[name="${name}"][value="${value}"]`).dispatchEvent(new shell.window.Event('change'));
+  const list = shell.panel().querySelector(`select[name="${name}"]`);
+  if (list) {
+    // linkedom reads the value of a list from this attribute, and offers no other way to set it.
+    list.querySelectorAll('option').forEach((option) => option.toggleAttribute('selected', option.getAttribute('value') === value));
+    list.dispatchEvent(new shell.window.Event('change'));
+  } else {
+    shell.panel().querySelector(`input[name="${name}"][value="${value}"]`).dispatchEvent(new shell.window.Event('change'));
+  }
+  await shell.settled();
   await shell.settled();
 };
 

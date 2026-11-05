@@ -50,7 +50,7 @@ export class WebSpeechEngine {
   /** Kept until settled: an utterance nobody references can lose its events to the GC. */
   #utterance = null;
   #settle = null;
-  /** How loud a test run speaks. Nothing else ever sets it, so a reader always gets the volume of Windows. */
+  /** How loud a test run speaks, whatever the reader chose. Nothing else ever sets it. */
   volume = null;
   /** Called with 'start', 'end' or 'error:<kind>' and the text, in a test run that logs what it hears. */
   onTrace = null;
@@ -66,7 +66,7 @@ export class WebSpeechEngine {
     return this.#localVoices().map((voice) => ({ id: voice.voiceURI, name: voice.name, lang: voice.lang }));
   }
 
-  speak(text, { voiceId = null, rate = 1, lang = null } = {}) {
+  speak(text, { voiceId = null, rate = 1, volume = 1, lang = null } = {}) {
     if (this.#settle) this.stop();
 
     return new Promise((resolve) => {
@@ -88,7 +88,7 @@ export class WebSpeechEngine {
         utterance.voice = voice;
         utterance.rate = rate;
         utterance.lang = parseLangTag(lang).canonical || voice.lang;
-        if (this.volume !== null) utterance.volume = this.volume;
+        utterance.volume = this.volume ?? volume;
         const trace = this.onTrace;
         if (trace) utterance.onstart = () => trace('start', text);
         utterance.onend = () => {

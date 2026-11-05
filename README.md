@@ -28,7 +28,8 @@ Double-click a file and read it, or have it read aloud. Nothing leaves your comp
 - Remembers the last voice used for each language.
 - Books show their chapter, page and progress, with arrows to turn the page, in pages or in one long scroll.
 - Table of contents, bookmarks with undo, and recent files, each a click away beside the tabs.
-- Light and dark themes, or the one Windows uses, in English and Italian. Every action has a key, and F1 lists them.
+- Light and dark themes, or the one Windows uses. Nine languages: English, Italian, German, Spanish, French, Portuguese (Brazil), Japanese, Korean and Simplified Chinese. Every action has a key, and F1 lists them.
+- The speed and the volume of the voice from the reading bar, kept between sessions.
 
 <p align="center">
   <img src="docs/screenshots/reading-aloud.png" width="49%" alt="A Markdown note being read aloud, with the sentence highlighted and the reading bar at the bottom" valign="top">

@@ -27,6 +27,8 @@ export const RATE_LEVELS = Object.freeze([0.5, 0.6, 0.7, 0.8, 1.0, 1.3, 1.5, 1.7
 export const MIN_RATE = RATE_LEVELS[0];
 export const MAX_RATE = RATE_LEVELS.at(-1);
 const DEFAULT_RATE = 1;
+/** As loud as Windows lets it be, which is what a voice says at when nobody chose. */
+export const FULL_VOLUME = 1;
 
 /** Time granted to any sentence, on top of the time that depends on its length. */
 export const SPEAK_WATCHDOG_MS = 10000;
@@ -87,6 +89,7 @@ export class SpeechPlayer {
   #position = { block: 0, sentence: 0 };
   #state = 'idle';
   #rate = DEFAULT_RATE;
+  #volume = FULL_VOLUME;
   #voiceId = null;
   #lang = null;
   /** Bumped to cancel the reading loop in progress: a stale loop exits at its next check. */
@@ -116,6 +119,10 @@ export class SpeechPlayer {
 
   get rate() {
     return this.#rate;
+  }
+
+  get volume() {
+    return this.#volume;
   }
 
   load(blocks, at = { block: 0, sentence: 0 }) {
@@ -212,6 +219,15 @@ export class SpeechPlayer {
     const next = nearestLevel(clamp(rate, MIN_RATE, MAX_RATE));
     if (next === this.#rate) return;
     this.#rate = next;
+    this.#restartIfPlaying();
+  }
+
+  /** @param {number} volume From 0 to 1. What is not a number changes nothing; the sentence being said starts again. */
+  setVolume(volume) {
+    if (typeof volume !== 'number' || Number.isNaN(volume)) return;
+    const next = clamp(volume, 0, FULL_VOLUME);
+    if (next === this.#volume) return;
+    this.#volume = next;
     this.#restartIfPlaying();
   }
 
@@ -387,7 +403,7 @@ export class SpeechPlayer {
       timer = setTimeout(resolve, speakWatchdogMs(text, this.#rate), 'error');
     });
     this.#watchdog = timer;
-    const options = { voiceId: this.#voiceId, rate: this.#rate, lang: this.#lang };
+    const options = { voiceId: this.#voiceId, rate: this.#rate, volume: this.#volume, lang: this.#lang };
     try {
       return await Promise.race([this.#engine.speak(text, options), expired]);
     } catch {

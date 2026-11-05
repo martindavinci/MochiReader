@@ -60,8 +60,20 @@ const FIELDS = [
     label: 'options.language',
     hint: 'options.languageHint',
     group: 'options.groupLanguage',
-    // Each in its own language, so that it can be found whatever the interface speaks.
-    choices: [keyed(SYSTEM, 'options.themeSystem'), plain('it', 'Italiano'), plain('en', 'English')],
+    // Each in its own language, so that it can be found whatever the interface speaks. Too many for buttons.
+    list: true,
+    choices: [
+      keyed(SYSTEM, 'options.themeSystem'),
+      plain('en', 'English'),
+      plain('it', 'Italiano'),
+      plain('de', 'Deutsch'),
+      plain('es', 'Español'),
+      plain('fr', 'Français'),
+      plain('pt-BR', 'Português (Brasil)'),
+      plain('ja', '日本語'),
+      plain('ko', '한국어'),
+      plain('zh-CN', '中文（简体）'),
+    ],
   },
 ];
 
@@ -184,12 +196,34 @@ export function renderOptions(host, options, { onChange, onLicenses, version = '
     return box;
   };
 
+  /** A native list, for choices that do not fit on one line. */
+  const list = ({ name, choices }) => {
+    const select = make('select');
+    select.setAttribute('name', name);
+    select.setAttribute(FOCUS_KEY, name);
+    select.append(...choices.map(({ value, text }) => {
+      const option = make('option', undefined, text());
+      option.setAttribute('value', String(value));
+      if (value === options[name]) option.setAttribute('selected', '');
+      return option;
+    }));
+    select.addEventListener('change', () => {
+      onChange(name, choices.find(({ value }) => String(value) === select.value).value);
+    });
+    return select;
+  };
+
+  const control = (description) => {
+    if (description.name === TEXT_SIZE) return stepper();
+    return description.list ? list(description) : segmented(description);
+  };
+
   const field = (description) => {
     const caption = make('span', 'option-label');
     caption.append(make('span', undefined, t(description.label)));
     if (description.hint) caption.append(make('span', 'option-hint', t(description.hint)));
     const row = make('div', 'option');
-    row.append(caption, description.name === TEXT_SIZE ? stepper() : segmented(description));
+    row.append(caption, control(description));
     return row;
   };
 

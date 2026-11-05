@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.0] - 2026-11-05
+
+### Added
+
+- Seven more languages for the interface: German, Spanish, French, Portuguese (Brazil), Japanese, Korean and Simplified Chinese. Japanese, Korean and Chinese use the matching faces of Windows.
+- A volume for reading aloud, kept from one session to the next.
+- A panel over the reading bar, from the speed or the volume button, with a slider for each and the usual speeds one click away.
+
+### Changed
+
+- The language of the interface is now chosen from a list.
+
 ## [0.2.0] - 2026-11-05
 
 ### Added

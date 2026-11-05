@@ -743,14 +743,17 @@ test('a voice is told apart from the others of its language by region', () => {
   assert.equal(closestVoice([uk, us], 'it'), undefined);
 });
 
-test('an utterance speaks at full volume unless a test run turns it down', async () => {
+test('an utterance speaks at the volume asked, full by default, and a test run turns it down whatever was asked', async () => {
   const { engine, synth } = setup();
   engine.speak('Uno.', { lang: 'it' });
-  assert.equal(Object.hasOwn(synth.spoken[0], 'volume'), false);
+  assert.equal(synth.spoken[0].volume, 1);
+  engine.stop();
+  engine.speak('Due.', { lang: 'it', volume: 0.4 });
+  assert.equal(synth.spoken[1].volume, 0.4);
   engine.stop();
   engine.volume = 0.05;
-  engine.speak('Due.', { lang: 'it' });
-  assert.equal(synth.spoken[1].volume, 0.05);
+  engine.speak('Tre.', { lang: 'it', volume: 0.4 });
+  assert.equal(synth.spoken[2].volume, 0.05);
   engine.stop();
 });
 

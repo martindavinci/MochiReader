@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DEFAULT_LANG, getLang, pickLang, setLang, t } from '../app/core/i18n.js';
+import { DEFAULT_LANG, getLang, getLocale, LANGS, loadLang, pickLang, setLang, t } from '../app/core/i18n.js';
 import it from '../app/lang/it.js';
 import en from '../app/lang/en.js';
 
@@ -25,7 +25,30 @@ const REQUIRED_KEYS = [
   'lang.it', 'lang.en',
 ];
 
-test('it and en have the same keys', () => assert.deepEqual(Object.keys(it).sort(), Object.keys(en).sort()));
+const FILES = ['it', 'de', 'es', 'fr', 'pt-BR', 'ja', 'ko', 'zh-CN'];
+const tableOf = async (file) => (await import(`../app/lang/${file}.js`)).default;
+
+test('every language has the keys of English, with the same placeholders, and none empty', async () => {
+  for (const file of FILES) {
+    const table = await tableOf(file);
+    assert.deepEqual(Object.keys(table).sort(), Object.keys(en).sort(), file);
+    for (const key of Object.keys(en)) {
+      assert.deepEqual(placeholders(table[key]), placeholders(en[key]), `${file}: ${key}`);
+      assert.ok(table[key].trim().length > 0, `${file}: ${key}`);
+    }
+  }
+});
+
+test('a language loads when it is asked for, and goes by its region where the table has one', async () => {
+  assert.deepEqual(LANGS, ['en', 'it', 'de', 'es', 'fr', 'pt', 'ja', 'ko', 'zh']);
+  await loadLang('pt-PT');
+  assert.equal(getLang(), 'pt');
+  assert.equal(getLocale(), 'pt-BR');
+  assert.equal(t('home.open'), (await tableOf('pt-BR'))['home.open']);
+  await loadLang('zh-TW');
+  assert.equal(getLocale(), 'zh-CN');
+  setLang('en');
+});
 
 test('every message the spec lists has a key', () => {
   for (const key of REQUIRED_KEYS) assert.ok(key in en, key);
@@ -82,12 +105,13 @@ test('pickLang reads the base language and falls back', () => {
   assert.equal(pickLang('it-IT'), 'it');
   assert.equal(pickLang('IT'), 'it');
   assert.equal(pickLang('en-GB'), 'en');
-  assert.equal(pickLang('fr-FR'), DEFAULT_LANG);
+  assert.equal(pickLang('fr-FR'), 'fr');
+  assert.equal(pickLang('nl-NL'), DEFAULT_LANG);
   assert.equal(pickLang(undefined), DEFAULT_LANG);
 });
 
 test('setLang refuses an unknown language', () => {
   setLang('it');
-  setLang('fr');
+  setLang('nl');
   assert.equal(getLang(), DEFAULT_LANG);
 });

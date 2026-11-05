@@ -107,6 +107,34 @@ test('a press on a button leaves the focus on the text, or the arrows would stay
   assert.ok(document.getElementById('speechbar'));
 });
 
+test('speed and volume open over the bar, offer the speeds the voice has, and tell what is chosen', () => {
+  setLang('en');
+  const chosen = [];
+  const { document, window } = parseHTML(PAGE);
+  globalThis.document = document;
+  const bar = createSpeechBar({
+    onCommand: () => {},
+    onVoice: () => {},
+    onRate: (rate) => chosen.push(['rate', rate]),
+    onVolume: (volume) => chosen.push(['volume', volume]),
+  });
+  bar.show({ ...VIEW, rate: 1.5, rates: [0.5, 1, 1.5, 2, 3], volume: 0.6 });
+  const panel = document.querySelector('.speech-sound');
+  assert.equal(panel.hidden, true);
+  document.querySelector('.speech-rate').dispatchEvent(new window.Event('click'));
+  assert.equal(panel.hidden, false);
+  const presets = [...panel.querySelectorAll('.sound-presets button')];
+  assert.deepEqual(presets.map((preset) => preset.textContent), ['1×', '1.5×', '2×', '3×']);
+  assert.equal(presets[1].getAttribute('aria-pressed'), 'true');
+  assert.equal(panel.querySelector('.sound-speed').value, '2');
+  assert.equal(panel.querySelector('.sound-volume').value, '60');
+  presets[3].dispatchEvent(new window.Event('click'));
+  const volume = panel.querySelector('.sound-volume');
+  volume.value = '25';
+  volume.dispatchEvent(new window.Event('change'));
+  assert.deepEqual(chosen, [['rate', 3], ['volume', 0.25]]);
+});
+
 test('in a pause and from another tab the bar says so, and offers the way to the tab being read', () => {
   setLang('en');
   const { bar, element, commands, click } = setup();

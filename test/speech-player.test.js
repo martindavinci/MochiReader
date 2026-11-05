@@ -119,11 +119,26 @@ test('reads in order, with pauses after headings and items', async () => {
   ]);
 });
 
+test('a volume reaches the engine within its bounds and restarts the sentence, and what is no number changes nothing', async () => {
+  const h = harness([para('Uno.'), para('Due.')]);
+  h.player.play();
+  await flush();
+  h.player.setVolume(0.4);
+  await flush();
+  assert.equal(h.engine.calls.length, 2);
+  assert.deepEqual(h.engine.calls.at(-1), { text: 'Uno.', voiceId: null, rate: 1, volume: 0.4, lang: null });
+  h.player.setVolume(7);
+  assert.equal(h.player.volume, 1);
+  h.player.setVolume(Number.NaN);
+  h.player.setVolume('loud');
+  assert.equal(h.player.volume, 1);
+});
+
 test('changing the rate restarts the current sentence', async () => {
   const h = harness([para('Uno.'), para('Due.'), para('Tre.')]);
   h.player.play();
   await h.advance();
-  assert.deepEqual(h.engine.calls.at(-1), { text: 'Due.', voiceId: null, rate: 1, lang: null });
+  assert.deepEqual(h.engine.calls.at(-1), { text: 'Due.', voiceId: null, rate: 1, volume: 1, lang: null });
 
   h.player.setRate(1.5);
   await flush();
@@ -605,7 +620,7 @@ test('voice and language reach the engine, and a new voice restarts the sentence
   h.player.setLang('it');
   h.player.setVoice('elsa');
   h.player.play();
-  assert.deepEqual(h.engine.calls.at(-1), { text: 'Uno.', voiceId: 'elsa', rate: 1, lang: 'it' });
+  assert.deepEqual(h.engine.calls.at(-1), { text: 'Uno.', voiceId: 'elsa', rate: 1, volume: 1, lang: 'it' });
   h.player.setVoice('cosimo');
   await flush();
   assert.equal(h.engine.calls.length, 2);
@@ -772,7 +787,7 @@ test('changing rate or voice during a gap applies from the next sentence without
   assert.equal(h.engine.calls.length, 1, 'the gap goes on');
   wake();
   await flush();
-  assert.deepEqual(h.engine.calls.at(-1), { text: 'Due.', voiceId: 'elsa', rate: 2, lang: null });
+  assert.deepEqual(h.engine.calls.at(-1), { text: 'Due.', voiceId: 'elsa', rate: 2, volume: 1, lang: null });
 });
 
 test('load during a gap forgets the sentence that was coming', async () => {

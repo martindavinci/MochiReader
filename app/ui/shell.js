@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { getLang, setLang, t } from '../core/i18n.js';
+import { getLang, getLocale, loadLang, t } from '../core/i18n.js';
 import { resolveKey } from '../core/keys.js';
 import { linkAction } from '../core/links.js';
 import { fileName, isSupported, OPENABLE_EXTENSIONS } from '../core/paths.js';
@@ -937,8 +937,14 @@ function useOptions(next) {
   options = next;
   applyOptions(options, document.documentElement);
   if (themeChanged) followAppTheme();
-  setLang(interfaceLang(options, navigator.language));
+  document.documentElement.setAttribute('lang', getLocale());
   styleBooks();
+}
+
+/** The language of the interface comes with its table, which may take a moment the first time. */
+async function useLanguage(next) {
+  await loadLang(interfaceLang(next, navigator.language));
+  useOptions(next);
 }
 
 /** The text changes length with its size: each tab stays where it was reading. */
@@ -950,8 +956,9 @@ function setTextSize(size) {
   places.forEach(({ reader, place }) => reader.goTo(place));
 }
 
-function changeOption(name, value) {
+async function changeOption(name, value) {
   if (name === 'textSize') setTextSize(value);
+  else if (name === 'language') await useLanguage({ ...options, [name]: value });
   else useOptions({ ...options, [name]: value });
   invoke('state_set_option', { name, value });
   if (name === 'epubView') openBooks().forEach(({ reader }) => reader.setFlow(value));
@@ -1239,14 +1246,13 @@ function listenAfterFirstPaint() {
 }
 
 async function boot() {
-  setLang(navigator.language);
   document.addEventListener('keydown', onKeyDown, { capture: true });
   const [saved] = await Promise.all([
     invoke('state_get_options'),
     listen('open-paths', ({ payload }) => openPaths(payload)),
     listen('shell-command', ({ payload }) => onShellCommand(payload)),
   ]);
-  useOptions(readOptions(saved));
+  await useLanguage(readOptions(saved));
   followSystemTheme();
   paintCaption();
   const paths = await invoke('take_pending_paths');

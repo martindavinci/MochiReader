@@ -7,7 +7,7 @@ import { createHighlighter, HIGHLIGHT_NAME } from './highlight.js';
 import { detectLang, parseLangTag } from './lang.js';
 import { createMediaKeys } from './media-keys.js';
 import { lineOfPlace, placeOfLine, sentenceAt, sentenceFrom, sentenceRange } from './place.js';
-import { ERROR_ENGINE, nextRate, prevRate, SpeechPlayer } from './player.js';
+import { ERROR_ENGINE, nextRate, prevRate, RATE_LEVELS, SpeechPlayer } from './player.js';
 import { caretAt } from '../core/caret.js';
 import { createSpeechBar } from '../ui/speechbar.js';
 
@@ -16,6 +16,7 @@ const STATE_PAUSED = 'paused';
 const STATE_ENDED = 'ended';
 const STATE_IDLE = 'idle';
 const OPTION_RATE = 'speechRate';
+const OPTION_VOLUME = 'speechVolume';
 const LINK = 'a[href]';
 // Preparing the text of a very large document takes its time: the page works this long, then lets others have a turn.
 const PREPARE_SLICE_MS = 8;
@@ -110,6 +111,8 @@ class SpeechSession {
     this.#bar = makeBar({
       onCommand: (action) => this.command(action),
       onVoice: (voiceId) => this.#chooseVoice(voiceId),
+      onRate: (rate) => this.active() && this.#setRate(rate),
+      onVolume: (volume) => this.active() && this.#setVolume(volume),
     });
   }
 
@@ -240,6 +243,8 @@ class SpeechSession {
       lang: this.#lang,
       voice: this.#voiceId,
       rate: this.#player.rate,
+      rates: RATE_LEVELS,
+      volume: this.#player.volume,
       following: this.#following,
       audioPlaying: this.#media.audioPlaying(),
       highlight: highlight ? [...(highlight.ranges ?? highlight)].map(String) : [],
@@ -259,6 +264,7 @@ class SpeechSession {
     if (run !== this.#run) return;
     this.#savedVoices = { ...saved };
     this.#player.setRate(options?.[OPTION_RATE]);
+    this.#player.setVolume(options?.[OPTION_VOLUME]);
     const voices = await this.#engine.voices().catch(() => []);
     if (run !== this.#run) return;
     this.#voices = voices;
@@ -414,6 +420,12 @@ class SpeechSession {
   #setRate(rate) {
     this.#player.setRate(rate);
     this.#invoke('state_set_option', { name: OPTION_RATE, value: this.#player.rate });
+    this.#draw();
+  }
+
+  #setVolume(volume) {
+    this.#player.setVolume(volume);
+    this.#invoke('state_set_option', { name: OPTION_VOLUME, value: this.#player.volume });
     this.#draw();
   }
 

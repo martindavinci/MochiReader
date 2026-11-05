@@ -109,8 +109,9 @@ test('the panel offers what the plan lists, in order, each showing its current v
   assert.deepEqual(radioValues(host, 'theme'), ['system', 'light', 'dark']);
   assert.deepEqual(radioValues(host, 'sourceMode'), ['skip', 'name']);
   assert.deepEqual(radioValues(host, 'epubView'), ['paginated', 'scrolled']);
-  assert.deepEqual(radioValues(host, 'language'), ['system', 'it', 'en']);
-  for (const name of ['theme', 'sourceMode', 'epubView', 'language']) assert.equal(checked(host, name), options[name], name);
+  assert.deepEqual(values(host.querySelector('select[name="language"]')), ['system', 'en', 'it', 'de', 'es', 'fr', 'pt-BR', 'ja', 'ko', 'zh-CN']);
+  assert.equal(selected(host.querySelector('select[name="language"]')), 'it');
+  for (const name of ['theme', 'sourceMode', 'epubView']) assert.equal(checked(host, name), options[name], name);
   assert.equal(host.querySelector('.stepper output').textContent, '22');
 });
 
@@ -158,8 +159,8 @@ for (const [lang, table] of Object.entries({ it, en })) {
 test('a language is named in that language, whatever the interface speaks', () => {
   setLang('en');
   const { host } = draw();
-  assert.equal(host.querySelector('input[name="language"][value="it"]').parentElement.textContent, 'Italiano');
-  assert.equal(host.querySelector('input[name="language"][value="en"]').parentElement.textContent, 'English');
+  const name = (value) => host.querySelector(`select[name="language"] option[value="${value}"]`).textContent;
+  assert.deepEqual(['it', 'en', 'de', 'ja', 'zh-CN'].map(name), ['Italiano', 'English', 'Deutsch', '日本語', '中文（简体）']);
 });
 
 test('a change reports the value as the app stores it', () => {
