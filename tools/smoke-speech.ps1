@@ -92,7 +92,7 @@ function Test-SpeechMarkdown {
 
     Send-Speech 'key.PageDown'
     $tab = Wait-Speech { param($t) -not $t.speech.following } 'a scrolling key lets go of the sentence'
-    Assert-That ($tab.speechBar.Contains('Segui') -or $tab.speechBar.Contains('Follow')) "the bar offers to follow again: $($tab.speechBar)"
+    Assert-That ($tab.speechBar.Contains('frase') -or $tab.speechBar.Contains('sentence')) "the bar offers to follow again: $($tab.speechBar)"
     Send-Speech 'speech.follow'
     Wait-Speech { param($t) $t.speech.following } 'following again' | Out-Null
     Pass 'moving by hand stops the following until asked again'

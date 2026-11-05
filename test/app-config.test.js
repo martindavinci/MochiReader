@@ -92,5 +92,5 @@ test('a chosen theme overrides the one of Windows', () => {
 });
 
 test('the text size only reaches the text', () => {
-  assert.match(/\narticle \{[^}]*\}/.exec(read('app/css/app.css'))[0], /font-size: var\(--text-size/);
+  assert.match(/\narticle \{[^}]*\}/.exec(read('app/css/app.css'))[0], /font: 400 var\(--text-size/);
 });

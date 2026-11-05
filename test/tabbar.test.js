@@ -18,10 +18,30 @@ function setup(tabs, activeId = 1) {
   return { bar, calls, Event };
 }
 
-test('the bar shows only with two or more files', () => {
-  assert.equal(setup([]).bar.hidden, true);
-  assert.equal(setup(TABS.slice(0, 1)).bar.hidden, true);
-  assert.equal(setup(TABS).bar.hidden, false);
+test('the tab of the file in front is the one stop for the Tab key, and the one selected', () => {
+  const { bar } = setup(TABS, 2);
+  const names = [...bar.querySelectorAll('.tab-name')];
+  assert.deepEqual(names.map((name) => name.getAttribute('tabindex')), ['-1', '0']);
+  assert.deepEqual(names.map((name) => name.getAttribute('aria-selected')), ['false', 'true']);
+  assert.ok(names.every((name) => name.getAttribute('role') === 'tab'));
+});
+
+test('Delete closes the tab that has the focus, and the arrows go along them', () => {
+  const { bar, calls, Event } = setup(TABS);
+  const names = [...bar.querySelectorAll('.tab-name')];
+  let focused = null;
+  names[1].focus = () => {
+    focused = names[1];
+  };
+  const press = (name, key) => {
+    const event = new Event('keydown');
+    event.key = key;
+    name.dispatchEvent(event);
+  };
+  press(names[0], 'ArrowRight');
+  assert.ok(focused === names[1]);
+  press(names[1], 'Delete');
+  assert.deepEqual(calls, [['close', 2]]);
 });
 
 test('each tab shows its file name, with the active one marked', () => {

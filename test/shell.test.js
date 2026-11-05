@@ -153,12 +153,14 @@ async function startShell(openDocument, {
     window: {
       getCurrentWindow: () => ({
         setTitle: () => {},
+        setTheme: async () => {},
         onFocusChanged: async (callback) => {
           onFocus = callback;
         },
       }),
     },
     webview: { getCurrentWebview: () => ({ onDragDropEvent: () => {} }) },
+    app: { getVersion: async () => '1.2.3' },
     dialog: {
       open: async (dialogOptions) => {
         state.dialogs.push(dialogOptions);
@@ -239,14 +241,14 @@ for (const code of ['not_found', 'timeout', 'unreadable']) {
     let open = failure(code);
     const shell = await startShell((path) => open(path));
     await shell.openPaths([PATH_A]);
-    assert.ok(shell.panes()[0].querySelector('.notice'));
+    assert.ok(shell.panes()[0].querySelector('.state'));
 
     open = async (path) => markdownDoc(path, 'Ora esiste');
     await shell.openPaths([PATH_A]);
 
     assert.deepEqual(shell.calls, [PATH_A, PATH_A]);
     assert.equal(shell.panes().length, 1);
-    assert.ok(!shell.panes()[0].querySelector('.notice'));
+    assert.ok(!shell.panes()[0].querySelector('.state'));
     assert.ok(shell.panes()[0].textContent.includes('Ora esiste'));
   });
 }
@@ -260,8 +262,8 @@ test('a book that cannot be shown gets a message in its tab, and opening it agai
   // foliate cannot load outside the page, which here stands for every other way a book fails.
   const notice = async () => {
     for (let turn = 0; turn < BOOK_TURNS; turn += 1) {
-      const found = shell.panes()[0].querySelector('.notice');
-      if (found && found.textContent === en['epub.error']) return found;
+      const found = shell.panes()[0].querySelector('.state');
+      if (found?.querySelector('.state-text').textContent === en['epub.error'].replace('{name}', 'b.epub')) return found;
       await shell.settled();
     }
     return null;
@@ -286,7 +288,7 @@ test('a retry that fails again shows the new message and can be retried', async 
   open = failure('timeout');
   await shell.openPaths([PATH_A]);
   assert.notEqual(shell.panes()[0].textContent, missing);
-  assert.equal(shell.panes()[0].querySelectorAll('.notice').length, 1);
+  assert.equal(shell.panes()[0].querySelectorAll('.state').length, 1);
   open = async (path) => markdownDoc(path, 'Ora esiste');
   await shell.openPaths([PATH_A]);
   assert.ok(shell.panes()[0].textContent.includes('Ora esiste'));
@@ -521,7 +523,7 @@ test('a file deleted on disk keeps its text and gets a message, until it comes b
   assert.ok(pane.textContent.includes('Il testo'));
   const notice = pane.querySelector('.file-notice');
   assert.ok(notice?.textContent.length > 0);
-  assert.equal(pane.querySelector('.notice'), null);
+  assert.equal(pane.querySelector('.state'), null);
   assert.ok(pane.firstElementChild === notice, 'above the text');
 
   await shell.focusWindow();
@@ -555,9 +557,10 @@ test('a message that appears does not cover the point of the reader', async () =
 
 test('the message keeps one line, of a height the scroll of the pane allows for', () => {
   const notice = /(^|\n)\.file-notice \{[^}]*\}/.exec(APP_CSS)[0];
+  const words = /(^|\n)\.file-notice-text \{[^}]*\}/.exec(APP_CSS)[0];
   assert.match(notice, /height: var\(--file-notice-height\)/);
-  assert.match(notice, /white-space: nowrap/);
-  assert.match(notice, /text-overflow: ellipsis/);
+  assert.match(words, /white-space: nowrap/);
+  assert.match(words, /text-overflow: ellipsis/);
   assert.match(APP_CSS, /\.pane:has\(> \.file-notice\) \{\s*scroll-padding-top: var\(--file-notice-height\);/);
 });
 
@@ -567,7 +570,7 @@ test('a message cut by a narrow window can still be read whole', async () => {
   shell.state.fileModified = failure('not_found');
   await shell.focusWindow();
   const notice = shell.panes()[0].querySelector('.file-notice');
-  assert.equal(notice.getAttribute('title'), notice.textContent);
+  assert.equal(notice.getAttribute('title'), notice.querySelector('.file-notice-text').textContent);
 });
 
 test('a drive that does not answer the check changes nothing', async () => {
@@ -590,7 +593,7 @@ test('a file that cannot be read again keeps the text on screen', async () => {
   await shell.focusWindow();
   const [pane] = shell.panes();
   assert.ok(pane.textContent.includes('Il testo'));
-  assert.equal(pane.querySelector('.notice'), null);
+  assert.equal(pane.querySelector('.state'), null);
 
   open = async (path) => markdownDoc(path, 'Nuovo', CHANGED_AT + 1);
   await shell.focusWindow();
@@ -696,7 +699,7 @@ test('a recent opens in a tab, and one that is gone gets its message there', asy
   shell.document.querySelector('.recent-open').dispatchEvent(new shell.window.Event('click'));
   await shell.settled();
   assert.deepEqual(shell.calls, [PATH_A]);
-  assert.ok(shell.panes()[0].querySelector('.notice'));
+  assert.ok(shell.panes()[0].querySelector('.state'));
 });
 
 test('taking away a missing recent removes it from the screen', async () => {
@@ -778,7 +781,7 @@ test('ctrl+t lists the headings, and a click goes there and closes the panel', a
   await shell.press('t', CTRL);
   assert.equal(shell.panel().hidden, false);
   const items = [...shell.panel().querySelectorAll('.toc-entry')];
-  assert.deepEqual(items.map((item) => item.textContent), ['Uno', 'Due']);
+  assert.deepEqual(items.map((item) => item.querySelector('.toc-label').textContent), ['Uno', 'Due']);
   await shell.click(items[1]);
   assert.equal(shell.panel().hidden, true);
   assert.equal(shell.scrolled.at(-1).getAttribute('data-sourcepos'), '5:1-5:5');
@@ -938,7 +941,7 @@ test('a bookmark on a drive that does not answer keeps the message of its tab', 
   await shell.press('b', CTRL);
   await shell.click(shell.panel().querySelector('.bookmark-open'));
   assert.equal(shell.panes().length, 1);
-  assert.ok(shell.panes()[0].querySelector('.notice'));
+  assert.ok(shell.panes()[0].querySelector('.state'));
   assert.equal(shell.panel().hidden, true);
 });
 
@@ -1113,7 +1116,7 @@ test('a late check of the drives moves neither the recents panel nor its focus',
   });
   await shell.press('r', CTRL);
   const panel = shell.panel();
-  assert.ok(shell.focused.at(-1) === panel.querySelector('.recent-open'));
+  assert.ok(shell.focused.at(-1) === panel);
   panel.scrollTop = 300;
   shell.document.activeElement = panel.querySelectorAll('.recent-open')[1];
   answer([RECENT_A, { ...RECENT_B, exists: false }]);
@@ -1149,15 +1152,11 @@ test('the recents panel marks what a check of the drives finds missing, and can 
 test('ctrl+comma opens the options, with their saved values', async () => {
   const shell = await startShell(async (path) => markdownDoc(path, 'Testo'), { options: { theme: 'dark' } });
   await shell.press(',', CTRL);
-  const theme = shell.panel().querySelector('select[name="theme"]');
-  assert.equal(theme.querySelector('option[selected]').getAttribute('value'), 'dark');
+  assert.equal(shell.panel().querySelector('input[name="theme"][checked]').getAttribute('value'), 'dark');
 });
 
 const changeOption = async (shell, name, value) => {
-  const select = shell.panel().querySelector(`select[name="${name}"]`);
-  // linkedom reads the value of a list from this attribute, and offers no other way to set it.
-  select.querySelectorAll('option').forEach((option) => option.toggleAttribute('selected', option.getAttribute('value') === value));
-  select.dispatchEvent(new shell.window.Event('change'));
+  shell.panel().querySelector(`input[name="${name}"][value="${value}"]`).dispatchEvent(new shell.window.Event('change'));
   await shell.settled();
 };
 
@@ -1172,7 +1171,7 @@ test('a theme chosen in the options applies at once and is saved', async () => {
 test('saved options apply before the first frame', async () => {
   const shell = await startShell(async (path) => markdownDoc(path, 'Testo'), { options: { theme: 'dark', language: 'it' } });
   assert.equal(shell.state.themeAtFirstPaint, 'dark');
-  assert.equal(shell.document.querySelector('#home .recents-title').textContent, it['recents.title']);
+  assert.equal(shell.document.querySelector('#home h1').textContent, it['home.welcome']);
 });
 
 test('the language of the options changes the panel, the tabs and the first screen', async () => {
@@ -1181,8 +1180,7 @@ test('the language of the options changes the panel, the tabs and the first scre
   assert.ok(shell.panel().textContent.includes(it['options.title']));
   await changeOption(shell, 'language', 'en');
   assert.ok(shell.panel().textContent.includes(en['options.title']));
-  assert.equal(shell.document.querySelector('#home .recents-title').textContent, en['recents.title']);
-  assert.ok(shell.focused.at(-1) === shell.panel().querySelector('select[name="language"]'));
+  assert.equal(shell.document.querySelector('#home h1').textContent, en['home.welcome']);
 });
 
 test('ctrl plus and minus change the text, keep the place in every tab and are saved', async () => {
@@ -1213,8 +1211,7 @@ test('ctrl plus with the options open shows the new size there', async () => {
   const shell = await startShell(async (path) => markdownDoc(path, 'Testo'), { options: { textSize: 17 } });
   await shell.press(',', CTRL);
   await shell.press('+', CTRL);
-  const size = shell.panel().querySelector('select[name="textSize"] option[selected]');
-  assert.equal(size.getAttribute('value'), String(shell.state.options.textSize));
+  assert.equal(shell.panel().querySelector('.stepper output').textContent, String(shell.state.options.textSize));
 });
 
 test('ctrl+o asks for Markdown and EPUB files and opens each chosen one', async () => {
@@ -1305,7 +1302,7 @@ test('a focused control keeps the keys it answers to', async () => {
 test('escape in a list of the options still closes the panel', async () => {
   const shell = await startShell(async (path) => markdownDoc(path, 'Testo'));
   await shell.press(',', CTRL);
-  await shell.press('Escape', { target: shell.panel().querySelector('select') });
+  await shell.press('Escape', { target: shell.panel().querySelector('input') });
   assert.equal(shell.panel().hidden, true);
 });
 
@@ -1577,7 +1574,7 @@ test('with no voice for the language, a panel says how to add one in Windows and
   const text = shell.panel().textContent;
   assert.ok(text.includes('Add voices'));
   assert.ok(text.includes('French'));
-  assert.ok(text.includes(en['speech.hiddenVoice']));
+  assert.ok(text.includes(en['speech.hiddenVoice'].replace('{lang}', 'French')));
   await shell.pressReady('Escape');
   assert.equal(shell.panel().hidden, true);
 });

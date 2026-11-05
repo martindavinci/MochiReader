@@ -12,8 +12,18 @@ test('the style of a book names its color scheme, its text size and the highligh
   const dark = bookStyle({ theme: 'dark', textSize: 20 }, false);
   assert.match(dark, /html \{[^}]*color-scheme: dark;/);
   assert.match(dark, /font-size: 20px/);
-  assert.ok(dark.includes(HIGHLIGHT_RULE));
+  assert.match(dark, /::highlight\(mochi-tts\) \{ background-color: #5a4819; color: #f6f1e4; \}/);
+  assert.match(bookStyle({ theme: 'light', textSize: 20 }, true), /::highlight\(mochi-tts\) \{ background-color: #fde6a6; color: #24231f; \}/);
   assert.match(HIGHLIGHT_RULE, /::highlight\(mochi-tts\)/);
+});
+
+test('a book has the face of the house for its text and its headings, and keeps the rest of its own style', () => {
+  const style = bookStyle({ theme: 'light', textSize: 18 }, false);
+  assert.match(style, /body \{ font-family: "Sitka Text"[^}]*!important/);
+  assert.match(style, /h1, h2, h3, h4, h5, h6 \{ font-family: "Segoe UI Variable Display"[^}]*!important/);
+  // Weighing nothing, these lose to any rule of the book.
+  assert.match(style, /:where\(p\) \{/);
+  assert.match(style, /:where\(blockquote\) \{/);
 });
 
 test('a chosen theme does not depend on the one of Windows', () => {

@@ -117,12 +117,14 @@ async function startBookShell({ bookmarks = [], makeBook = async () => goodBook(
     window: {
       getCurrentWindow: () => ({
         setTitle: () => {},
+        setTheme: async () => {},
         onFocusChanged: async (callback) => {
           state.onFocus = callback;
         },
       }),
     },
     webview: { getCurrentWebview: () => ({ onDragDropEvent: () => {} }) },
+    app: { getVersion: async () => '1.2.3' },
     dialog: { open: async () => null },
   };
   Object.assign(globalThis, {
@@ -133,6 +135,11 @@ async function startBookShell({ bookmarks = [], makeBook = async () => goodBook(
     requestAnimationFrame: (callback) => setTimeout(callback),
     getComputedStyle: () => ({ scrollPaddingTop: 'auto' }),
     matchMedia: () => ({ matches: false, addEventListener() {} }),
+    ResizeObserver: class {
+      observe() {}
+
+      disconnect() {}
+    },
     fetch: async () => new Response('a book', { status: 200 }),
     fakeMakeBook: makeBook,
   });
@@ -194,8 +201,8 @@ test('a book that turns unreadable on disk stays on screen and says so', async (
   changeFile(shell, SECOND_MTIME, brokenBook);
   await noticeShown(shell);
 
-  assert.equal(shell.pane().querySelector('.file-notice').textContent, en['file.notReloaded']);
-  assert.equal(shell.pane().querySelector('.notice'), null);
+  assert.equal(shell.pane().querySelector('.file-notice-text').textContent, en['file.notReloaded']);
+  assert.ok(![...shell.pane().children].some((child) => child.classList.contains('state')));
   assert.equal(shell.shownViews().length, 1);
   assert.ok(shell.shownViews()[0] === view);
   assert.equal(view.closed, undefined);
@@ -308,7 +315,7 @@ test('a new file that is damaged at the place being read leaves the book on scre
   shell.state.contents = [{ doc: parseHTML('<html><head></head><body><p data-unreadable-section="">x</p></body></html>').document }];
   changeFile(shell, SECOND_MTIME, async () => goodBook());
   await noticeShown(shell);
-  assert.equal(shell.pane().querySelector('.file-notice').textContent, en['file.notReloaded']);
+  assert.equal(shell.pane().querySelector('.file-notice-text').textContent, en['file.notReloaded']);
   assert.ok(shell.shownViews()[0] === view);
   assert.equal(shell.shownViews().length, 1);
   assert.equal(view.closed, undefined);

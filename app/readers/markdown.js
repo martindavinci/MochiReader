@@ -28,6 +28,7 @@ const MOVE_INPUTS = ['wheel', 'keydown', 'pointerdown'];
 // Pressed on its own on the way to a shortcut, which is no reason to leave a point: Ctrl+D saves that very point.
 const MODIFIER_KEYS = new Set(['Control', 'Shift', 'Alt', 'AltGraph', 'Meta']);
 // How far down the pane a sentence lands when the voice takes the text to it: what comes next is what stays in view.
+const TEXT_NODE = 3;
 const FOLLOW_ROOM_SHARE = 0.25;
 
 const nextTurn = () => new Promise((resolve) => {
@@ -205,11 +206,21 @@ export function openMarkdown(doc, host) {
   return {
     kind: 'markdown',
     lang: lang ?? null,
-    toc: () => headings.map(({ text, line }) => ({
+    toc: () => headings.map(({ text, line, level }) => ({
       label: text,
+      level,
       target: { kind: 'md', line, sentence: FIRST_SENTENCE },
     })),
+    currentToc: () => {
+      const { line } = position();
+      return headings.findLastIndex((heading) => heading.line <= line);
+    },
     position,
+    placeAt: (node) => {
+      const block = (node.nodeType === TEXT_NODE ? node.parentElement : node).closest('[data-sourcepos]');
+      if (!block) return null;
+      return { position: { kind: 'md', line: lineOf(block), sentence: FIRST_SENTENCE }, excerpt: excerptOf(block.textContent) };
+    },
     // Not in the contract: only the report of the tabs asks, to check the screen and not what the reader says.
     screenLine: () => lineOrNone(topBlock()),
     goTo: async (target) => {

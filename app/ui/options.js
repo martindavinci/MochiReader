@@ -1,11 +1,19 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { t } from '../core/i18n.js';
+import { mascot } from './home.js';
+import { named } from './icons.js';
+import { panelHead } from './panel-parts.js';
+import { shortVoiceName } from './voice-name.js';
 
 const THEME_ATTRIBUTE = 'data-theme';
 const TEXT_SIZE_VARIABLE = '--text-size';
 const SYSTEM = 'system';
 const VOICE_OPTIONS_CLASS = 'voice-options';
 const ABOUT_CLASS = 'about';
+const ABOUT_MASCOT_PX = 32;
+const FOCUS_KEY = 'data-key';
+const TEXT_SIZE = 'textSize';
+const DEFAULT_TEXT_SIZE = 18;
 
 /** Not translated: it is the same notice as the one at the top of `licenses.txt`. */
 export const COPYRIGHT_NOTICE = 'Copyright (C) 2026 Martin DaVinci';
@@ -14,13 +22,14 @@ export const COPYRIGHT_NOTICE = 'Copyright (C) 2026 Martin DaVinci';
 export const TEXT_SIZES = [13, 14, 15, 16, 17, 18, 20, 22, 24, 26, 28, 32];
 
 const keyed = (value, key) => ({ value, text: () => t(key) });
-const named = (value, name) => ({ value, text: () => name });
+const plain = (value, name) => ({ value, text: () => name });
 
 // In the order of the panel. The first choice is the default, except where `fallback` says.
 const FIELDS = [
   {
     name: 'theme',
     label: 'options.theme',
+    group: 'options.groupAppearance',
     choices: [
       keyed(SYSTEM, 'options.themeSystem'),
       keyed('light', 'options.themeLight'),
@@ -28,26 +37,31 @@ const FIELDS = [
     ],
   },
   {
-    name: 'textSize',
+    name: TEXT_SIZE,
     label: 'options.textSize',
-    fallback: 17,
-    choices: TEXT_SIZES.map((size) => named(size, String(size))),
-  },
-  {
-    name: 'sourceMode',
-    label: 'options.source',
-    choices: [keyed('skip', 'options.sourceSkip'), keyed('name', 'options.sourceName')],
+    group: 'options.groupAppearance',
+    fallback: DEFAULT_TEXT_SIZE,
+    choices: TEXT_SIZES.map((size) => plain(size, String(size))),
   },
   {
     name: 'epubView',
     label: 'options.epubView',
+    group: 'options.groupBooks',
     choices: [keyed('paginated', 'options.epubPaginated'), keyed('scrolled', 'options.epubScrolled')],
+  },
+  {
+    name: 'sourceMode',
+    label: 'options.source',
+    group: 'options.groupSpeech',
+    choices: [keyed('skip', 'options.sourceSkip'), keyed('name', 'options.sourceName')],
   },
   {
     name: 'language',
     label: 'options.language',
+    hint: 'options.languageHint',
+    group: 'options.groupLanguage',
     // Each in its own language, so that it can be found whatever the interface speaks.
-    choices: [keyed(SYSTEM, 'options.themeSystem'), named('it', 'Italiano'), named('en', 'English')],
+    choices: [keyed(SYSTEM, 'options.themeSystem'), plain('it', 'Italiano'), plain('en', 'English')],
   },
 ];
 
@@ -98,17 +112,15 @@ export function interfaceLang({ language }, systemLang) {
  */
 export function renderVoiceOptions(host, groups, onVoice) {
   const document = host.ownerDocument;
-  host.querySelector(`.${VOICE_OPTIONS_CLASS}`)?.remove();
-  const section = document.createElement('section');
-  section.className = VOICE_OPTIONS_CLASS;
-  section.append(...groups.map(({ lang, name, voices, selected }) => {
+  host.querySelector(`.${VOICE_OPTIONS_CLASS}`).replaceChildren(...groups.map(({ lang, name, voices, selected }) => {
     const select = document.createElement('select');
     select.setAttribute('name', `voice-${lang}`);
     select.append(...voices.map((voice) => {
       const option = document.createElement('option');
       option.setAttribute('value', voice.id);
+      option.setAttribute('title', voice.name);
       if (voice.id === selected) option.setAttribute('selected', '');
-      option.textContent = voice.name;
+      option.textContent = shortVoiceName(voice.name);
       return option;
     }));
     select.addEventListener('change', () => onVoice(lang, select.value));
@@ -119,56 +131,107 @@ export function renderVoiceOptions(host, groups, onVoice) {
     row.append(caption, select);
     return row;
   }));
-  host.querySelector(`.${ABOUT_CLASS}`).before(section);
 }
 
 /**
  * @param {HTMLElement} host
  * @param {Record<string, *>} options
- * @param {{onChange: (name: string, value: *) => void, onLicenses: () => void}} handlers
+ * @param {{onChange: (name: string, value: *) => void, onLicenses: () => void, version?: string}} handlers
  */
-export function renderOptions(host, options, { onChange, onLicenses }) {
+export function renderOptions(host, options, { onChange, onLicenses, version = '' }) {
   const document = host.ownerDocument;
+  const make = (tag, className, text) => {
+    const made = document.createElement(tag);
+    if (className) made.className = className;
+    if (text !== undefined) made.textContent = text;
+    return made;
+  };
 
-  const field = ({ name, label, choices }) => {
-    const select = document.createElement('select');
-    select.setAttribute('name', name);
-    select.append(...choices.map(({ value, text }) => {
-      const option = document.createElement('option');
-      option.setAttribute('value', String(value));
-      if (value === options[name]) option.setAttribute('selected', '');
-      option.textContent = text();
-      return option;
+  /** Choices that fit on one line: all of them in sight, one click from each other. */
+  const segmented = ({ name, label, choices }) => {
+    const group = make('div', 'segmented');
+    group.setAttribute('role', 'radiogroup');
+    group.setAttribute('aria-label', t(label));
+    group.append(...choices.map(({ value, text }) => {
+      const input = make('input');
+      input.setAttribute('type', 'radio');
+      input.setAttribute('name', name);
+      input.setAttribute('value', String(value));
+      input.setAttribute(FOCUS_KEY, `${name}-${value}`);
+      if (value === options[name]) input.setAttribute('checked', '');
+      input.addEventListener('change', () => onChange(name, value));
+      const choice = make('label');
+      choice.append(input, make('span', undefined, text()));
+      return choice;
     }));
-    select.addEventListener('change', () => {
-      onChange(name, choices.find(({ value }) => String(value) === select.value).value);
-    });
-    const caption = document.createElement('span');
-    caption.textContent = t(label);
-    const row = document.createElement('label');
-    row.className = 'option';
-    row.append(caption, select);
+    return group;
+  };
+
+  /** The sizes are a long list with an order: a step at a time, between the two ends. */
+  const stepper = () => {
+    const size = options[TEXT_SIZE];
+    const box = make('div', 'stepper');
+    const step = (mark, label, delta) => {
+      const button = make('button', undefined, mark);
+      named(button, t(label));
+      button.setAttribute(FOCUS_KEY, `${TEXT_SIZE}${delta}`);
+      const next = nextTextSize(size, delta);
+      if (next === size) button.setAttribute('disabled', '');
+      button.addEventListener('click', () => onChange(TEXT_SIZE, next));
+      return button;
+    };
+    box.append(step('A−', 'options.smaller', -1), make('output', undefined, String(size)), step('A+', 'options.larger', 1));
+    return box;
+  };
+
+  const field = (description) => {
+    const caption = make('span', 'option-label');
+    caption.append(make('span', undefined, t(description.label)));
+    if (description.hint) caption.append(make('span', 'option-hint', t(description.hint)));
+    const row = make('div', 'option');
+    row.append(caption, description.name === TEXT_SIZE ? stepper() : segmented(description));
     return row;
   };
 
   // The notices GPL-3.0 asks of a program with an interface, and the way to the license.
   const about = () => {
-    const paragraph = (text) => {
-      const made = document.createElement('p');
-      made.textContent = text;
-      return made;
-    };
-    const licenses = document.createElement('button');
-    licenses.textContent = t('about.licenses');
+    const licenses = make('button', 'link-button', t('about.licenses'));
     licenses.addEventListener('click', () => onLicenses());
-    const section = document.createElement('section');
-    section.className = ABOUT_CLASS;
-    section.append(paragraph(COPYRIGHT_NOTICE), paragraph(t('about.notice')), licenses);
+    const words = make('div', 'about-words');
+    words.append(
+      make('p', 'about-name', version ? `MochiReader ${version}` : 'MochiReader'),
+      make('p', undefined, COPYRIGHT_NOTICE),
+      make('p', undefined, t('about.short')),
+    );
+    const section = make('section', ABOUT_CLASS);
+    section.append(mascot(document, ABOUT_MASCOT_PX), words, licenses);
     return section;
   };
 
-  const title = document.createElement('h1');
-  title.className = 'panel-title';
-  title.textContent = t('options.title');
-  host.replaceChildren(title, ...FIELDS.map(field), about());
+  // What the voices drew stays until they are asked for again, so the panel does not jump while it waits.
+  const voices = host.querySelector(`.${VOICE_OPTIONS_CLASS}`) ?? make('section', VOICE_OPTIONS_CLASS);
+  const body = make('div', 'panel-body');
+  let group = null;
+  for (const description of FIELDS) {
+    if (description.group !== group) {
+      group = description.group;
+      body.append(make('h2', 'option-group', t(group)));
+      if (description.name === 'sourceMode') body.append(voices);
+    }
+    body.append(field(description));
+  }
+  body.append(about());
+  host.replaceChildren(panelHead(host, { glyph: 'sliders', title: t('options.title') }), body);
 }
+
+/**
+ * Drawing the panel again takes the focus with the old controls.
+ * @param {HTMLElement} host
+ * @param {string|null} key What the control that had it was called.
+ */
+export function focusOption(host, key) {
+  if (key) host.querySelector(`[${FOCUS_KEY}="${key}"]`)?.focus({ preventScroll: true });
+}
+
+/** @param {Document} document @returns {string|null} What to give `focusOption` once the panel is drawn again. */
+export const focusedOption = (document) => document.activeElement?.getAttribute?.(FOCUS_KEY) ?? null;

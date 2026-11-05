@@ -7,6 +7,7 @@
  * @property {'markdown'|'epub'} kind
  * @property {string|null} lang
  * @property {() => TocEntry[]} toc
+ * @property {() => number} currentToc The entry of `toc` the reader is in, or -1 before the first.
  * @property {() => Position} position Current point.
  * @property {(p: Position) => Promise<void>} goTo
  * @property {() => Promise<SpeechRoot[]>} speechRoots
@@ -37,13 +38,34 @@
  * @property {() => Promise<void>} [next] To the next page in reading order, if the format has pages.
  * @property {(flow: 'paginated'|'scrolled') => void} [setFlow] The view of a book.
  * @property {() => void} [focus] Sends the keys to the text, if the shell cannot do it by focusing the pane.
+ * @property {(node: Node, offset: number) => {position: Position, excerpt: string}|null} [placeAt] A place in the text as
+ *   a bookmark would keep it.
+ * @property {() => BookProgress} [progress] Where a book is now.
+ * @property {(cb: () => void) => void} [onProgress] The book went somewhere, or the page changed.
  * @property {() => void} destroy
  */
 
 /**
  * @typedef {Object} TocEntry
  * @property {string} label
+ * @property {number} [level] How deep it is, from 1, if the format says.
  * @property {*} target
+ */
+
+/**
+ * @typedef {Object} BookProgress
+ * @property {number} chapter Which one, from 1.
+ * @property {number} chapters
+ * @property {string} label The name of the chapter, empty if the book gives none.
+ * @property {number|null} page Which page of the chapter, from 1; null when the text scrolls or the pages are fixed.
+ * @property {number|null} pages
+ * @property {number} percent Of the whole book.
+ * @property {{weight: number, done: number}[]} parts Each chapter: its share of the book, and how much of it is behind.
+ * @property {string} next The name of the next chapter, when this is the last page of one and it has a name.
+ * @property {boolean} atStart
+ * @property {boolean} atEnd
+ * @property {boolean} scrolled
+ * @property {boolean} damaged This part of the book could not be read.
  */
 
 /**

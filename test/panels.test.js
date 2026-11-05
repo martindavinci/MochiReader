@@ -152,16 +152,13 @@ test('a panel shows only while it is open and leaves nothing behind', () => {
   assert.equal(host.children.length, 0);
 });
 
-test('a panel takes the focus: the first control, or itself with none', () => {
+test('a panel takes the focus itself, so no row has a ring before an arrow is pressed', () => {
   const { host, focused } = page();
   const panels = createPanels(host);
   panels.show('toc');
+  host.append(host.ownerDocument.createElement('button'));
   panels.focus();
   assert.ok(focused.at(-1) === host);
-  const first = host.ownerDocument.createElement('button');
-  host.append(first, host.ownerDocument.createElement('button'));
-  panels.focus();
-  assert.ok(focused.at(-1) === first);
 });
 
 test('showing a panel takes away what the last one drew', () => {

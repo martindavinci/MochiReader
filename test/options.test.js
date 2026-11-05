@@ -33,6 +33,7 @@ function draw(options = DEFAULT_OPTIONS) {
     },
   });
   const field = (name) => host.querySelector(`select[name="${name}"]`);
+  const pick = (name, value) => host.querySelector(`input[name="${name}"][value="${value}"]`).dispatchEvent(new Event('change'));
   const choose = (name, value) => {
     const select = field(name);
     // linkedom reads the value of a list from this attribute, and offers no other way to set it.
@@ -40,7 +41,7 @@ function draw(options = DEFAULT_OPTIONS) {
     select.dispatchEvent(new Event('change'));
   };
   const click = (element) => element.dispatchEvent(new Event('click'));
-  return { host, field, choose, changes, click, licensesAsked: () => asked };
+  return { host, field, pick, choose, changes, click, licensesAsked: () => asked };
 }
 
 const selected = (select) => select.querySelector('option[selected]').getAttribute('value');
@@ -98,19 +99,28 @@ test('the interface language is the chosen one, or the one of the system', () =>
   assert.equal(interfaceLang({ language: 'system' }, 'it-IT'), 'it-IT');
 });
 
+const radios = (host, name) => [...host.querySelectorAll(`input[name="${name}"]`)];
+const radioValues = (host, name) => radios(host, name).map((input) => input.getAttribute('value'));
+const checked = (host, name) => radios(host, name).find((input) => input.hasAttribute('checked'))?.getAttribute('value');
+
 test('the panel offers what the plan lists, in order, each showing its current value', () => {
   const options = { theme: 'dark', textSize: 22, sourceMode: 'name', epubView: 'scrolled', language: 'it' };
-  const { host, field } = draw(options);
-  assert.deepEqual(
-    [...host.querySelectorAll('select')].map((select) => select.getAttribute('name')),
-    ['theme', 'textSize', 'sourceMode', 'epubView', 'language'],
-  );
-  for (const [name, value] of Object.entries(options)) assert.equal(selected(field(name)), String(value), name);
-  assert.deepEqual(values(field('theme')), ['system', 'light', 'dark']);
-  assert.deepEqual(values(field('textSize')), TEXT_SIZES.map(String));
-  assert.deepEqual(values(field('sourceMode')), ['skip', 'name']);
-  assert.deepEqual(values(field('epubView')), ['paginated', 'scrolled']);
-  assert.deepEqual(values(field('language')), ['system', 'it', 'en']);
+  const { host } = draw(options);
+  assert.deepEqual(radioValues(host, 'theme'), ['system', 'light', 'dark']);
+  assert.deepEqual(radioValues(host, 'sourceMode'), ['skip', 'name']);
+  assert.deepEqual(radioValues(host, 'epubView'), ['paginated', 'scrolled']);
+  assert.deepEqual(radioValues(host, 'language'), ['system', 'it', 'en']);
+  for (const name of ['theme', 'sourceMode', 'epubView', 'language']) assert.equal(checked(host, name), options[name], name);
+  assert.equal(host.querySelector('.stepper output').textContent, '22');
+});
+
+test('the size goes a step at a time, and stops at each end of the list', () => {
+  const smallest = draw({ ...DEFAULT_OPTIONS, textSize: TEXT_SIZES[0] });
+  const [down, up] = smallest.host.querySelectorAll('.stepper button');
+  assert.ok(down.hasAttribute('disabled'));
+  smallest.click(up);
+  assert.deepEqual(smallest.changes, [['textSize', TEXT_SIZES[1]]]);
+  assert.ok(draw({ ...DEFAULT_OPTIONS, textSize: TEXT_SIZES.at(-1) }).host.querySelectorAll('.stepper button')[1].hasAttribute('disabled'));
 });
 
 test('the panel gives the notices of the license and a way to read it', () => {
@@ -118,7 +128,7 @@ test('the panel gives the notices of the license and a way to read it', () => {
   const { host, click, licensesAsked } = draw();
   const about = host.querySelector('.about');
   assert.ok(about.textContent.includes(COPYRIGHT_NOTICE));
-  assert.ok(about.textContent.includes(en['about.notice']));
+  assert.ok(about.textContent.includes(en['about.short']));
   const button = about.querySelector('button');
   assert.equal(button.textContent, en['about.licenses']);
   assert.equal(licensesAsked(), 0);
@@ -131,29 +141,31 @@ test('the notice says what the license requires in both languages', () => {
   assert.match(en['about.notice'], /GNU General Public License/);
   assert.match(it['about.notice'], /nessuna garanzia/i);
   assert.match(it['about.notice'], /GNU General Public License/);
+  assert.match(en['about.short'], /no warranty/i);
+  assert.match(it['about.short'], /nessuna garanzia/i);
 });
 
 for (const [lang, table] of Object.entries({ it, en })) {
   test(`the panel speaks ${lang}`, () => {
     setLang(lang);
-    const { host, field } = draw();
+    const { host } = draw();
     const keys = ['options.title', 'options.theme', 'options.textSize', 'options.source', 'options.epubView', 'options.language'];
     for (const key of keys) assert.ok(host.textContent.includes(table[key]), key);
-    assert.equal(field('sourceMode').querySelector('option[value="name"]').textContent, table['options.sourceName']);
+    assert.equal(host.querySelector('input[name="sourceMode"][value="name"]').parentElement.textContent, table['options.sourceName']);
   });
 }
 
 test('a language is named in that language, whatever the interface speaks', () => {
   setLang('en');
-  const { field } = draw();
-  assert.equal(field('language').querySelector('option[value="it"]').textContent, 'Italiano');
-  assert.equal(field('language').querySelector('option[value="en"]').textContent, 'English');
+  const { host } = draw();
+  assert.equal(host.querySelector('input[name="language"][value="it"]').parentElement.textContent, 'Italiano');
+  assert.equal(host.querySelector('input[name="language"][value="en"]').parentElement.textContent, 'English');
 });
 
 test('a change reports the value as the app stores it', () => {
-  const { choose, changes } = draw();
-  choose('theme', 'dark');
-  choose('textSize', '22');
+  const { host, pick, click, changes } = draw({ ...DEFAULT_OPTIONS, textSize: 20 });
+  pick('theme', 'dark');
+  click(host.querySelectorAll('.stepper button')[1]);
   assert.deepEqual(changes, [['theme', 'dark'], ['textSize', 22]]);
 });
 
@@ -178,7 +190,9 @@ test('the voices come before the notices at the bottom of the panel, and drawing
   renderVoiceOptions(host, GROUPS, () => {});
   renderVoiceOptions(host, GROUPS, () => {});
   assert.equal(host.querySelectorAll('select[name="voice-it"]').length, 1);
-  assert.equal(host.querySelector('.about').previousElementSibling, host.querySelector('.voice-options'));
+  assert.ok(host.querySelector('.about').previousElementSibling.closest('.panel-body') === host.querySelector('.voice-options').parentElement);
+  const parts = [...host.querySelector('.panel-body').children];
+  assert.ok(parts.indexOf(host.querySelector('.voice-options')) < parts.indexOf(host.querySelector('.about')));
 });
 
 test('choosing a voice says for which language', () => {

@@ -78,7 +78,7 @@ test('the rendered text goes in the host and is the only speech root', async () 
 });
 
 test('the contents are the headings, each going to its line', () => {
-  assert.deepEqual(setup().reader.toc(), [{ label: 'Titolo', target: { kind: 'md', line: 1, sentence: 0 } }]);
+  assert.deepEqual(setup().reader.toc(), [{ label: 'Titolo', level: 1, target: { kind: 'md', line: 1, sentence: 0 } }]);
 });
 
 test('the position is the block at the top of the screen', () => {

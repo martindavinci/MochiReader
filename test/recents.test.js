@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { parseHTML } from 'linkedom';
 import { renderRecents } from '../app/ui/recents.js';
 
-const LABELS = { hint: 'Hint', title: 'Recent', empty: 'None yet', missing: 'Not found', remove: 'Remove' };
+const LABELS = { title: 'Recent', empty: 'None yet', missing: 'Not found', remove: 'Remove' };
 const recent = (path, exists = true) => ({ path, kind: 'markdown', title: path.split('\\').at(-1), openedAt: 1, exists });
 
 function draw(recents) {
@@ -21,9 +21,8 @@ function draw(recents) {
   return { host, opened, removed, click };
 }
 
-test('with no recent files it says so and still shows how to open one', () => {
+test('with no recent files it says so', () => {
   const { host } = draw([]);
-  assert.ok(host.textContent.includes('Hint'));
   assert.ok(host.textContent.includes('None yet'));
   assert.equal(host.querySelector('.recents'), null);
 });
@@ -54,13 +53,20 @@ test('a title that is the name of the file does not say it twice', () => {
   assert.equal(host.querySelector('.recent-file'), null);
 });
 
-test('a file that exists opens, and has no command to take it away', () => {
-  const { host, opened, click } = draw([recent('C:\\x\\a.md')]);
+test('a file that exists opens, and can be taken away too', () => {
+  const { host, opened, removed, click } = draw([recent('C:\\x\\a.md')]);
   assert.ok(!host.querySelector('.recent').classList.contains('missing'));
-  assert.equal(host.querySelector('.recent-remove'), null);
   assert.ok(!host.textContent.includes('Not found'));
   click(host.querySelector('.recent-open'));
   assert.deepEqual(opened, ['C:\\x\\a.md']);
+  click(host.querySelector('.recent-remove'));
+  assert.deepEqual(removed, ['C:\\x\\a.md']);
+});
+
+test('a book says which chapter it was left at', () => {
+  const { host } = draw([{ ...recent('C:\\x\\a.epub'), kind: 'epub', chapter: 2, chapters: 3 }]);
+  assert.ok(host.querySelector('.recent-progress').textContent.includes('2'));
+  assert.equal(host.querySelector('.recent-open').getAttribute('data-kind'), 'epub');
 });
 
 test('a missing file is marked, can still be tried, and can be taken away', () => {
@@ -89,11 +95,3 @@ test('drawing again replaces the list', () => {
   assert.equal(host.querySelectorAll('h1').length, 1);
 });
 
-test('with no hint it shows only the list, as in the panel over a file', () => {
-  const { document } = parseHTML('<!doctype html><html><body><aside id="panel"></aside></body></html>');
-  const host = document.getElementById('panel');
-  const { hint, ...labels } = LABELS;
-  renderRecents(host, [], { labels, onOpen: () => {}, onRemove: () => {} });
-  assert.equal(host.querySelector('.home-hint'), null);
-  assert.ok(host.textContent.includes('Recent'));
-});

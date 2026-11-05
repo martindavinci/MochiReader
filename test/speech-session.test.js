@@ -6,7 +6,8 @@ import { parseHTML } from 'linkedom';
 import { getLang, setLang } from '../app/core/i18n.js';
 import en from '../app/lang/en.js';
 import { HIGHLIGHT_NAME } from '../app/speech/highlight.js';
-import { caretAt, createSession } from '../app/speech/session.js';
+import { caretAt } from '../app/core/caret.js';
+import { createSession } from '../app/speech/session.js';
 import { withHighlights } from './speech-fakes.js';
 
 const ELSA = { id: 'elsa', name: 'Elsa', lang: 'it-IT' };
@@ -202,9 +203,7 @@ test('with no voice for the language, a message tells how to add one', async () 
   await flush();
   assert.deepEqual(engine.calls, []);
   assert.equal(helps.length, 1);
-  assert.ok(helps[0][0].includes('Add voices'));
-  assert.ok(helps[0][0].includes(en['lang.it']));
-  assert.equal(helps[0][1], en['speech.hiddenVoice']);
+  assert.equal(helps[0], en['lang.it']);
   assert.equal(bar.view, null);
   assert.equal(session.active(), false);
 });
@@ -213,7 +212,7 @@ test('a language with no name in the app is named by the browser, and a voice li
   const { session, helps, engine } = setup({ voices: [ZIRA] });
   await session.start(fakeTab(TWO, { lang: 'de' }).entry);
   await flush();
-  assert.ok(helps[0][0].includes('German'));
+  assert.equal(helps[0], 'German');
   engine.voices = async () => {
     throw new Error('no list');
   };

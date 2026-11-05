@@ -25,6 +25,7 @@ use tauri::webview::NewWindowResponse;
 use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow, WebviewWindowBuilder, WindowEvent};
 
 const MAIN_WINDOW: &str = "main";
+const SPEECH_SETTINGS: &str = "ms-settings:speech";
 const PROTOCOL: &str = "mochi";
 const OPEN_PATHS_EVENT: &str = "open-paths";
 const SHELL_COMMAND_EVENT: &str = "shell-command";
@@ -129,6 +130,22 @@ fn state_touch_recent(path: String, kind: String, title: String, store: State<'_
 }
 
 #[tauri::command(async)]
+fn state_recent_progress(path: String, chapter: u32, chapters: u32, store: State<'_, Store>) {
+    store.set_recent_progress(&path, chapter, chapters);
+}
+
+#[tauri::command(async)]
+fn state_clear_recents(store: State<'_, Store>) {
+    store.set_recents(Vec::new());
+}
+
+/// Puts back a list that was cleared by mistake.
+#[tauri::command(async)]
+fn state_set_recents(recents: Vec<Recent>, store: State<'_, Store>) {
+    store.set_recents(recents);
+}
+
+#[tauri::command(async)]
 fn state_remove_recent(path: String, store: State<'_, Store>) {
     store.remove_recent(&path);
 }
@@ -218,6 +235,25 @@ fn open_external(url: String) -> Result<(), String> {
         native::shell_open(&url)
     } else {
         Err("only web and mail links open outside the app".to_string())
+    }
+}
+
+/// Windows, on the page where a voice can be added.
+#[tauri::command]
+fn open_speech_settings() -> Result<(), String> {
+    native::shell_open(SPEECH_SETTINGS)
+}
+
+#[tauri::command]
+fn show_in_folder(path: String) -> Result<(), String> {
+    native::show_in_folder(&path)
+}
+
+/// The title bar in the colour of the page, where Windows has such a thing. Older versions just keep their own.
+#[tauri::command]
+fn window_caption(dark: bool, app: AppHandle) {
+    if let Some(hwnd) = app.get_webview_window(MAIN_WINDOW).and_then(|window| window.hwnd().ok()) {
+        native::set_caption_color(hwnd, dark);
     }
 }
 
@@ -434,12 +470,18 @@ pub fn run() {
             file_hash,
             take_pending_paths,
             open_external,
+            window_caption,
+            open_speech_settings,
+            show_in_folder,
             first_paint,
             measure_open_done,
             file_modified,
             state_get,
             state_touch_recent,
             state_remove_recent,
+            state_recent_progress,
+            state_clear_recents,
+            state_set_recents,
             state_check_recents,
             state_save_position,
             state_get_position,

@@ -8,6 +8,7 @@ import { detectLang, parseLangTag } from './lang.js';
 import { createMediaKeys } from './media-keys.js';
 import { lineOfPlace, placeOfLine, sentenceAt, sentenceFrom, sentenceRange } from './place.js';
 import { ERROR_ENGINE, nextRate, prevRate, SpeechPlayer } from './player.js';
+import { caretAt } from '../core/caret.js';
 import { createSpeechBar } from '../ui/speechbar.js';
 
 const STATE_PLAYING = 'playing';
@@ -20,19 +21,6 @@ const LINK = 'a[href]';
 const PREPARE_SLICE_MS = 8;
 const TOP = { block: 0, sentence: 0 };
 const LAST = { block: Infinity, sentence: Infinity };
-
-/**
- * @param {Document} doc
- * @param {number} x
- * @param {number} y
- * @returns {{node: Node, offset: number}|null} The place in the text under a point of the window of `doc`.
- */
-export function caretAt(doc, x, y) {
-  const position = doc.caretPositionFromPoint?.(x, y);
-  if (position) return { node: position.offsetNode, offset: position.offset };
-  const range = doc.caretRangeFromPoint?.(x, y);
-  return range ? { node: range.startContainer, offset: range.startOffset } : null;
-}
 
 const nextTurn = () => new Promise((resolve) => {
   setTimeout(resolve);
@@ -62,6 +50,8 @@ class SpeechSession {
   #nameOf;
   #showMessage;
   #showVoiceHelp;
+  #showEntry;
+  #onReading;
   #sourceMode;
   /** The tab being read, from the moment it was asked for. */
   #entry = null;
@@ -95,6 +85,8 @@ class SpeechSession {
     nameOf,
     showMessage,
     showVoiceHelp,
+    showEntry = () => {},
+    onReading = () => {},
     sourceMode,
   }) {
     this.#engine = engine;
@@ -104,6 +96,8 @@ class SpeechSession {
     this.#nameOf = nameOf;
     this.#showMessage = showMessage;
     this.#showVoiceHelp = showVoiceHelp;
+    this.#showEntry = showEntry;
+    this.#onReading = onReading;
     this.#sourceMode = sourceMode;
     this.#player = new SpeechPlayer({
       engine,
@@ -176,6 +170,7 @@ class SpeechSession {
       'speech.faster': () => this.#setRate(nextRate(player.rate)),
       'speech.slower': () => this.#setRate(prevRate(player.rate)),
       'speech.follow': () => this.#follow(),
+      'speech.goToTab': () => this.#showEntry(this.#entry),
     };
     commands[action]?.();
   }
@@ -203,6 +198,12 @@ class SpeechSession {
   /** A tab in the back has no layout to scroll, so the text catches up when it comes to the front. */
   tabShown(entry) {
     if (this.#entry === entry && this.#following && !this.#switching) this.#tellReader(this.#player.current);
+    if (this.#shown) this.#draw();
+  }
+
+  /** @returns {object|null} The tab being read. */
+  reading() {
+    return this.#entry;
   }
 
   /**
@@ -323,7 +324,7 @@ class SpeechSession {
     const ofLanguage = this.#voices.filter((voice) => parseLangTag(voice.lang).language === language);
     if (ofLanguage.length === 0) {
       this.stop();
-      this.#showVoiceHelp([t('speech.noVoice', { lang: languageName(language) }), t('speech.hiddenVoice')]);
+      this.#showVoiceHelp(languageName(language));
       return false;
     }
     const wanted = [this.#tabVoices.get(this.#entry), this.#savedVoices[language]];
@@ -476,6 +477,7 @@ class SpeechSession {
       this.#bar.hide();
     }
     this.#shown = false;
+    this.#onReading(null);
     entry.reader?.speechStopped();
   }
 
@@ -489,7 +491,9 @@ class SpeechSession {
       voices: this.#voices.filter((voice) => parseLangTag(voice.lang).language === language),
       voiceId: this.#voiceId,
       following: this.#following,
+      elsewhere: !this.#isInFront(this.#entry),
     });
+    this.#onReading(this.#entry);
   }
 }
 

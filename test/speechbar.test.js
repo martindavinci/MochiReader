@@ -5,7 +5,7 @@ import { parseHTML } from 'linkedom';
 import { setLang } from '../app/core/i18n.js';
 import en from '../app/lang/en.js';
 import it from '../app/lang/it.js';
-import { createSpeechBar, openTextMenu } from '../app/ui/speechbar.js';
+import { createSpeechBar } from '../app/ui/speechbar.js';
 
 const PAGE = '<!doctype html><html><body><main id="panes"></main><aside id="panel"></aside></body></html>';
 
@@ -43,7 +43,8 @@ test('it says which file is being read and how fast', () => {
   setLang('en');
   const { bar, element } = setup();
   bar.show(VIEW);
-  assert.equal(element().querySelector('.speech-name').textContent, 'Reading a.md');
+  assert.equal(element().querySelector('.speech-name').textContent, 'a.md');
+  assert.equal(element().querySelector('.speech-status').textContent, en['speech.reading']);
   assert.equal(element().querySelector('.speech-rate').textContent, '1.3×');
 });
 
@@ -106,40 +107,17 @@ test('a press on a button leaves the focus on the text, or the arrows would stay
   assert.ok(document.getElementById('speechbar'));
 });
 
-test('the menu of the text offers to read from there, and goes away by itself', () => {
+test('in a pause and from another tab the bar says so, and offers the way to the tab being read', () => {
   setLang('en');
-  const { document, window } = setup();
-  let chosen = 0;
-  let focused = null;
-  window.HTMLElement.prototype.focus = function focus() {
-    focused = this;
-  };
-  openTextMenu(document, { x: 40, y: 60 }, () => {
-    chosen += 1;
-  });
-  const menu = document.querySelector('.text-menu');
-  assert.ok(menu);
-  assert.equal(menu.style.left, '40px');
-  assert.equal(menu.style.top, '60px');
-  assert.equal(focused, menu.querySelector('button'));
-  assert.equal(menu.querySelector('button').textContent, en['speech.readFromHere']);
-  menu.querySelector('button').dispatchEvent(new window.Event('click'));
-  assert.equal(chosen, 1);
-  assert.equal(document.querySelector('.text-menu'), null);
-});
-
-test('one menu at a time, and leaving it closes it without reading', () => {
-  const { document, window } = setup();
-  window.HTMLElement.prototype.focus = function focus() {};
-  let chosen = 0;
-  openTextMenu(document, { x: 1, y: 2 }, () => {
-    chosen += 1;
-  });
-  openTextMenu(document, { x: 3, y: 4 }, () => {});
-  assert.equal(document.querySelectorAll('.text-menu').length, 1);
-  document.querySelector('.text-menu button').dispatchEvent(new window.Event('blur'));
-  assert.equal(document.querySelector('.text-menu'), null);
-  assert.equal(chosen, 0);
+  const { bar, element, commands, click } = setup();
+  bar.show({ ...VIEW, playing: false });
+  assert.equal(element().querySelector('.speech-status').textContent, en['speech.paused']);
+  assert.equal(element().querySelector('.speech-go').hidden, true);
+  bar.show({ ...VIEW, elsewhere: true });
+  assert.equal(element().querySelector('.speech-status').textContent, en['speech.elsewhere']);
+  assert.equal(element().querySelector('.speech-go').hidden, false);
+  click('speech.goToTab');
+  assert.deepEqual(commands, ['speech.goToTab']);
 });
 
 test('a voice chosen with the mouse leaves the keys to the text; with the keyboard the list keeps them', () => {
@@ -159,24 +137,3 @@ test('a voice chosen with the mouse leaves the keys to the text; with the keyboa
   assert.equal(blurs, 1);
 });
 
-// A browser takes the focus away during remove(), so the menu hears of leaving while it is leaving, and refuses a second one.
-test('choosing from the menu is not lost to the menu leaving', () => {
-  const { document, window } = setup();
-  window.HTMLElement.prototype.focus = function focus() {};
-  let chosen = 0;
-  openTextMenu(document, { x: 1, y: 2 }, () => {
-    chosen += 1;
-  });
-  const menu = document.querySelector('.text-menu');
-  const button = menu.querySelector('button');
-  const remove = menu.remove.bind(menu);
-  let leaving = false;
-  menu.remove = () => {
-    if (leaving) throw new Error('the node to be removed is no longer a child of this node');
-    leaving = true;
-    button.dispatchEvent(new window.Event('blur'));
-    remove();
-  };
-  button.dispatchEvent(new window.Event('click'));
-  assert.equal(chosen, 1);
-});

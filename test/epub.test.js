@@ -213,9 +213,9 @@ test('the table of contents comes flat, in reading order, with places to go to',
     { label: 'Due', href: 'c.xhtml' },
   ];
   assert.deepEqual(flattenToc(toc), [
-    { label: 'Uno', target: { kind: 'epub', href: 'a.xhtml' } },
-    { label: 'Uno punto uno', target: { kind: 'epub', href: 'a.xhtml#b' } },
-    { label: 'Due', target: { kind: 'epub', href: 'c.xhtml' } },
+    { label: 'Uno', level: 1, target: { kind: 'epub', href: 'a.xhtml' } },
+    { label: 'Uno punto uno', level: 2, target: { kind: 'epub', href: 'a.xhtml#b' } },
+    { label: 'Due', level: 1, target: { kind: 'epub', href: 'c.xhtml' } },
   ]);
   assert.deepEqual(flattenToc(undefined), []);
 });

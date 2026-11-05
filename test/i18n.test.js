@@ -9,7 +9,7 @@ const placeholders = (s) => [...s.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort(
 
 // One key per user-visible message named by the spec, plus the plan's OpenError codes.
 const REQUIRED_KEYS = [
-  'app.noFile', 'app.unsupported',
+  'app.unsupported',
   'open.error.not_found', 'open.error.unreadable', 'open.error.unsupported', 'open.error.timeout',
   'file.deleted', 'epub.error',
   'tabs.close',
@@ -45,8 +45,8 @@ test('both languages use the same placeholders', () => {
 
 // The labels of the Windows 10 Settings app: the message is useful only if its path can be followed.
 test('the missing voice message names real Windows settings pages', () => {
-  assert.ok(it['speech.noVoice'].includes('Data/ora e lingua > Riconoscimento vocale > Aggiungi voci'));
-  assert.ok(en['speech.noVoice'].includes('Time & Language > Speech > Add voices'));
+  assert.ok(it['speech.voicePath'].includes('Data/ora e lingua > Riconoscimento vocale > Aggiungi voci'));
+  assert.ok(en['speech.voicePath'].includes('Time & Language > Speech > Add voices'));
 });
 
 test('the language decides the text', () => {

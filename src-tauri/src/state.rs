@@ -40,6 +40,11 @@ pub struct Recent {
     pub title: String,
     pub opened_at: f64,
     pub exists: bool,
+    /// Where a book was left, to say so in the list: its chapter, and how many it has.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chapter: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chapters: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -191,6 +196,11 @@ impl Store {
         let key = same_file_key(path);
         {
             let mut state = self.state();
+            let known = state
+                .recents
+                .iter()
+                .find(|recent| same_file_key(&recent.path) == key);
+            let (chapter, chapters) = known.map_or((None, None), |recent| (recent.chapter, recent.chapters));
             state
                 .recents
                 .retain(|recent| same_file_key(&recent.path) != key);
@@ -202,10 +212,38 @@ impl Store {
                     title: title.to_string(),
                     opened_at: now_ms,
                     exists: true,
+                    chapter,
+                    chapters,
                 },
             );
             state.recents.truncate(MAX_RECENTS);
         }
+        self.persist();
+    }
+
+    /// Written only when the chapter changes: the reader turns pages far more often than that.
+    pub fn set_recent_progress(&self, path: &str, chapter: u32, chapters: u32) {
+        let key = same_file_key(path);
+        let changed = {
+            let mut state = self.state();
+            let found = state
+                .recents
+                .iter_mut()
+                .find(|recent| same_file_key(&recent.path) == key);
+            found.is_some_and(|recent| {
+                let same = recent.chapter == Some(chapter) && recent.chapters == Some(chapters);
+                recent.chapter = Some(chapter);
+                recent.chapters = Some(chapters);
+                !same
+            })
+        };
+        if changed {
+            self.persist();
+        }
+    }
+
+    pub fn set_recents(&self, recents: Vec<Recent>) {
+        self.state().recents = recents;
         self.persist();
     }
 

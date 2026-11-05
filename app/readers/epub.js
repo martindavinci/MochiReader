@@ -77,11 +77,65 @@ const nameOfFile = (href) => (href ?? '').split('#')[0].replace(FILE_NAME, '');
  * @param {{label: string|null, href: string, subitems?: object[]}[]} [toc] As foliate reads it from the book.
  * @returns {import('./reader.js').TocEntry[]}
  */
-export function flattenToc(toc) {
+export function flattenToc(toc, level = 1) {
   return (toc ?? []).flatMap(({ label, href, subitems }) => [
-    { label: label?.trim() || nameOfFile(href), target: { kind: 'epub', href } },
-    ...flattenToc(subitems),
+    { label: label?.trim() || nameOfFile(href), level, target: { kind: 'epub', href } },
+    ...flattenToc(subitems, level + 1),
   ]);
+}
+
+// With more parts than this a bar of chapters is only a row of dots: it becomes one bar.
+const MOST_PROGRESS_PARTS = 40;
+const FULL = 100;
+// The paginator keeps an empty page at each end of a section.
+const SPARE_PAGES = 2;
+
+/**
+ * @param {object} view
+ * @returns {import('./reader.js').BookProgress} Told from what foliate knows about the place on screen.
+ */
+export function bookProgress(view) {
+  const { book, renderer, lastLocation: location, isFixedLayout: fixed } = view;
+  const shown = shownIndex(view);
+  const order = book.sections
+    .map((section, index) => ({ index, size: section.size || 1, linear: section.linear }))
+    .filter(({ linear }) => linear !== NOT_IN_READING_ORDER);
+  const scrolled = Boolean(renderer.scrolled);
+  const paged = !fixed && !scrolled;
+  const pages = paged ? Math.max(renderer.pages - SPARE_PAGES, 1) : null;
+  const page = paged ? Math.min(Math.max(renderer.page, 1), pages) : null;
+  const seen = scrolled ? renderer.start / (renderer.viewSize || 1) : (page ?? 1) / (pages ?? 1);
+
+  // A chapter is an entry at the top of the contents, whatever is inside it. Without contents, each section is one.
+  const chapters = book.toc ?? [];
+  const href = location?.tocItem?.href;
+  const holds = ({ href: at, subitems }) => at === href || (subitems ?? []).some(holds);
+  const listed = href ? chapters.findIndex(holds) : -1;
+  const inOrder = order.findIndex(({ index }) => index === shown);
+  const parts = order.length > MOST_PROGRESS_PARTS
+    ? [{ weight: 1, done: Math.round((location?.fraction ?? 0) * FULL) }]
+    : order.map(({ index, size }) => ({
+      weight: size,
+      done: index < shown ? FULL : index === shown ? Math.round(seen * FULL) : 0,
+    }));
+
+  const after = paged && page === pages ? order.find(({ index }) => index > shown) : null;
+  const label = location?.tocItem?.label?.trim() ?? '';
+  const nextLabel = after ? view.getProgressOf?.(after.index)?.tocItem?.label?.trim() ?? '' : '';
+  return {
+    chapter: (listed >= 0 ? listed : Math.max(inOrder, 0)) + 1,
+    chapters: listed >= 0 ? chapters.length : order.length,
+    label,
+    page,
+    pages,
+    percent: Math.round((location?.fraction ?? 0) * FULL),
+    parts,
+    next: nextLabel === label ? '' : nextLabel,
+    atStart: Boolean(renderer.atStart),
+    atEnd: Boolean(renderer.atEnd),
+    scrolled,
+    damaged: false,
+  };
 }
 
 const hasOwnText = (element) => [...element.childNodes]
@@ -303,6 +357,10 @@ export function makeReader(view, { key, title, onInput = () => {}, place = null,
     }
   };
 
+  const progressCallbacks = [];
+  const notifyProgress = () => progressCallbacks.forEach((callback) => callback());
+  view.addEventListener('relocate', notifyProgress);
+
   const notifyMove = debounce(() => {
     const at = position();
     moveCallbacks.forEach((callback) => callback(at));
@@ -334,6 +392,15 @@ export function makeReader(view, { key, title, onInput = () => {}, place = null,
     title,
     lang: bookLang(view.book.metadata),
     toc: () => flattenToc(view.book.toc),
+    currentToc: () => flattenToc(view.book.toc).findIndex(({ target }) => target.href === view.lastLocation?.tocItem?.href),
+    progress: () => ({ ...bookProgress(view), damaged: shownDocs().some(({ doc }) => isUnreadablePage(doc)) }),
+    onProgress: (callback) => progressCallbacks.push(callback),
+    placeAt: (node, offset) => {
+      const range = node.ownerDocument.createRange();
+      range.setStart(node, offset);
+      range.collapse(true);
+      return { position: { kind: 'epub', cfi: placeOf(range), sentence: FIRST_SENTENCE }, excerpt: excerptOf((node.parentElement ?? node).textContent.replace(SPACES, ' ')) };
+    },
     position,
     goTo: async ({ cfi, href, sentence }) => {
       spoken = null;
@@ -388,6 +455,7 @@ export function makeReader(view, { key, title, onInput = () => {}, place = null,
     destroy: () => {
       notifyMove.cancel();
       view.removeEventListener('relocate', notifyMove);
+      view.removeEventListener('relocate', notifyProgress);
       view.renderer.removeEventListener('relocate', onRelocate);
       view.removeEventListener('load', onSectionLoad);
       closeView(view);

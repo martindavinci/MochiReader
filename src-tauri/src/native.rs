@@ -5,12 +5,16 @@ use std::ffi::c_void;
 use std::fmt::Write as _;
 use std::io::{self, Read};
 use std::mem::size_of;
+use std::os::windows::process::CommandExt;
+use std::process::Command;
 use webview2_com::Microsoft::Web::WebView2::Win32::{
     ICoreWebView2Controller, ICoreWebView2Settings3,
 };
 use windows::core::{w, Interface, BOOL, HSTRING};
 use windows::Win32::Foundation::{CloseHandle, HANDLE, HWND, RECT};
-use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_TRANSITIONS_FORCEDISABLED};
+use windows::Win32::Graphics::Dwm::{
+    DwmSetWindowAttribute, DWMWA_CAPTION_COLOR, DWMWA_TRANSITIONS_FORCEDISABLED,
+};
 use windows::Win32::Security::Cryptography::{
     BCryptCreateHash, BCryptDestroyHash, BCryptFinishHash, BCryptHashData, BCRYPT_HASH_HANDLE,
     BCRYPT_SHA256_ALG_HANDLE,
@@ -22,8 +26,12 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WINDOWPLACEMENT, WPF_RESTORETOMAXIMIZED,
 };
 
+const VERBATIM_PREFIX: &str = r"\\?\";
 // ShellExecuteW answers with a value above this when it succeeds.
 const SHELL_EXECUTE_LAST_ERROR: isize = 32;
+// The colour of the page in each theme, as Windows writes it: 0x00BBGGRR.
+const CAPTION_LIGHT: u32 = 0x00F7_FAFB;
+const CAPTION_DARK: u32 = 0x001A_1C1C;
 const BOOT_GATE_NAME: &str = "io.github.martindavinci.mochireader-boot";
 const BOOT_GATE_TIMEOUT_MS: u32 = 10_000;
 const SHA256_BYTES: usize = 32;
@@ -40,6 +48,29 @@ pub fn disable_open_animation(hwnd: HWND) -> windows::core::Result<()> {
             size_of::<BOOL>() as u32,
         )
     }
+}
+
+/// The title bar in the colour of the page. Only Windows 11 has this: elsewhere the call fails, and the bar keeps the
+/// light or dark of the theme, which is good enough to say nothing about it.
+pub fn set_caption_color(hwnd: HWND, dark: bool) {
+    let color = if dark { CAPTION_DARK } else { CAPTION_LIGHT };
+    let _ = unsafe {
+        DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_CAPTION_COLOR,
+            (&raw const color).cast::<c_void>(),
+            size_of::<u32>() as u32,
+        )
+    };
+}
+
+/// Opens the folder of a file with the file selected. Explorer takes the path as one argument of its own making.
+pub fn show_in_folder(path: &str) -> Result<(), String> {
+    Command::new("explorer.exe")
+        .raw_arg(format!("/select,\"{}\"", path.trim_start_matches(VERBATIM_PREFIX)))
+        .spawn()
+        .map(drop)
+        .map_err(|error| error.to_string())
 }
 
 /// Where the window goes when it is neither maximized nor minimized, and whether it is maximized now.
