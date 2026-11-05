@@ -104,6 +104,8 @@ export function createTabTools(row, { onOpen, onCount, onContents, onBookmark, o
     button.className = className;
     named(button, label, keys);
     if (glyph) button.append(icon(document, glyph));
+    // The arrows and space stay with the text: a press with the mouse must not leave the focus on the button.
+    button.addEventListener('mousedown', (event) => event.preventDefault());
     button.addEventListener('click', () => action(button));
     return button;
   };

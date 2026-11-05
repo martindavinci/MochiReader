@@ -667,6 +667,8 @@ pre {
 }
 
 pre code { padding: 0; border: 0; background: none; font-size: .9em; }
+pre[data-lang]::before { content: attr(data-lang); display: block; margin-bottom: .6em; color: var(--muted); font: 600 11px/1 var(--font-ui-s); letter-spacing: .04em; }
+.image-caption { display: block; margin-top: .5em; color: var(--muted); font: .82em/1.4 var(--font-ui); }
 
 blockquote {
   margin-block: 1.4em;

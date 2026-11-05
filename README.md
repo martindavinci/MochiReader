@@ -40,6 +40,7 @@ MochiReader uses the voices installed in Windows and never sends text anywhere. 
 | `Ctrl+D` | Add or remove a bookmark |
 | `Ctrl+B` / `Ctrl+T` / `Ctrl+R` | Bookmarks / table of contents / recent files |
 | `Ctrl+,` | Options |
+| `F1` | All the shortcuts |
 
 ## Build from source
 

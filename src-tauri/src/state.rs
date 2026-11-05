@@ -533,6 +533,29 @@ mod tests {
     }
 
     #[test]
+    fn a_recent_keeps_its_chapter_when_it_is_opened_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_in(dir.path());
+        store.touch_recent("C:\\b.epub", "epub", "B", NOW);
+        store.set_recent_progress("C:\\b.epub", 2, 7);
+        store.touch_recent("C:\\b.epub", "epub", "B", NOW + 1.0);
+        let recent = store.snapshot().recents[0].clone();
+        assert_eq!((recent.chapter, recent.chapters), (Some(2), Some(7)));
+    }
+
+    #[test]
+    fn a_list_of_recents_can_be_emptied_and_put_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_in(dir.path());
+        store.touch_recent("C:\\a.md", "markdown", "a", NOW);
+        let before = store.snapshot().recents;
+        store.set_recents(Vec::new());
+        assert!(store.snapshot().recents.is_empty());
+        store.set_recents(before.clone());
+        assert_eq!(store.snapshot().recents, before);
+    }
+
+    #[test]
     fn another_spelling_of_a_recent_file_is_the_same_entry() {
         let dir = tempfile::tempdir().unwrap();
         let store = store_in(dir.path());

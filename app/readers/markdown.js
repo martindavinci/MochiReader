@@ -29,6 +29,8 @@ const MOVE_INPUTS = ['wheel', 'keydown', 'pointerdown'];
 const MODIFIER_KEYS = new Set(['Control', 'Shift', 'Alt', 'AltGraph', 'Meta']);
 // How far down the pane a sentence lands when the voice takes the text to it: what comes next is what stays in view.
 const TEXT_NODE = 3;
+const FILE_NAME = /\.\w{2,5}$/;
+const CODE_LANGUAGE = /language-(\S+)/;
 const FOLLOW_ROOM_SHARE = 0.25;
 
 const nextTurn = () => new Promise((resolve) => {
@@ -45,11 +47,34 @@ function appendPart(article, html) {
 }
 
 /** Puts in the first part now and the others over the next turns of the page, until `stopped` says so. */
+/**
+ * What the text can have around it. A caption comes from the alternative text of an image alone in its paragraph, unless
+ * that is only the name of a file. Hidden from the voice and from assistive software, which read it from the image.
+ */
+function dressText(root) {
+  const document = root.ownerDocument;
+  for (const image of root.querySelectorAll('p > img[alt]')) {
+    const alt = image.getAttribute('alt').trim();
+    const paragraph = image.parentElement;
+    if (!alt || FILE_NAME.test(alt) || paragraph.children.length !== 1 || paragraph.textContent.trim()) continue;
+    const caption = document.createElement('span');
+    caption.className = 'image-caption';
+    caption.setAttribute('aria-hidden', 'true');
+    caption.textContent = alt;
+    paragraph.append(caption);
+  }
+  for (const code of root.querySelectorAll('pre > code[class*="language-"]')) {
+    const [, language] = CODE_LANGUAGE.exec(code.className) ?? [];
+    if (language) code.parentElement.setAttribute('data-lang', language);
+  }
+}
+
 async function fillInParts(article, html, stopped) {
   let sliceEnd = 0;
   for (const part of htmlParts(html, PART_CHARS)) {
     if (stopped()) return;
     appendPart(article, part);
+    dressText(article.lastElementChild);
     if (performance.now() >= sliceEnd) {
       await nextTurn();
       sliceEnd = performance.now() + FILL_SLICE_MS;
@@ -72,6 +97,7 @@ export function openMarkdown(doc, host) {
     filled = fillInParts(article, html, () => destroyed);
   } else {
     article.innerHTML = html;
+    dressText(article);
   }
   host.append(article);
 

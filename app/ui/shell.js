@@ -495,14 +495,20 @@ async function openReadMenu(entry, event) {
       glyph: 'bookmark',
       keys: 'Ctrl+D',
       disabled: !entry.restored || !entry.key,
-      run: () => addBookmarkAt(entry, doc, x, y),
+      run: () => {
+        focusText();
+        addBookmarkAt(entry, doc, x, y);
+      },
     },
     {
       label: t('menu.copy'),
       glyph: 'copy',
       keys: 'Ctrl+C',
       disabled: !selected,
-      run: () => navigator.clipboard.writeText(selected),
+      run: () => {
+        focusText();
+        navigator.clipboard.writeText(selected);
+      },
     },
   ]);
 }
@@ -894,11 +900,12 @@ function drawTocPanel() {
   const toc = reader?.toc() ?? [];
   const isBook = activeEntry()?.kind === KIND_EPUB;
   const count = isBook ? toc.filter(({ level }) => level === 1).length : toc.length;
+  const progress = reader?.progress?.();
   renderToc(panelHost, toc, {
     labels: {
       title: t('toc.title'),
       empty: t('toc.empty'),
-      here: t('toc.here'),
+      here: progress?.page ? t('book.page', { n: progress.page, total: progress.pages }) : t('toc.here'),
       count: t(isBook ? 'toc.chapters' : 'toc.headings', { n: count }),
     },
     current: reader?.currentToc?.() ?? -1,
