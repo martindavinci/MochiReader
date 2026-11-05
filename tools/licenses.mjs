@@ -47,6 +47,11 @@ MochiReader is distributed in the hope that it will be useful, but WITHOUT ANY
 WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
 PARTICULAR PURPOSE. See the GNU General Public License below for more details.
 
+Additional term, as section 7(e) of the license permits: no rights are granted
+under trademark law for the use of the name "MochiReader", the name "Martin
+DaVinci", or the MochiReader logo, mascot and icons. A modified version you
+distribute needs a different name and a different icon.
+
 The source code of MochiReader: ${SOURCE_REPOSITORY}`;
 // CPL-1.0, section 3, asks a distributor of its object code to say where the source is.
 const INSTALLER_NOTICE = `\

@@ -9,7 +9,6 @@
 <p align="center">
   <a href="https://github.com/martindavinci/MochiReader/actions/workflows/ci.yml"><img src="https://github.com/martindavinci/MochiReader/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://github.com/martindavinci/MochiReader/releases/latest"><img src="https://img.shields.io/github/v/release/martindavinci/MochiReader" alt="Latest release"></a>
-  <a href="https://github.com/martindavinci/MochiReader/releases"><img src="https://img.shields.io/github/downloads/martindavinci/MochiReader/total" alt="Downloads"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/martindavinci/MochiReader" alt="License: GPL-3.0-or-later"></a>
   <img src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078D6" alt="Platform: Windows 10 | 11">
 </p>
@@ -95,6 +94,6 @@ GitHub Actions runs the tests, builds the installer and creates a draft release 
 
 ## License
 
-GPL-3.0-or-later. See [LICENSE](LICENSE).
+GPL-3.0-or-later, see [LICENSE](LICENSE). The name "MochiReader", the name "Martin DaVinci" and the MochiReader logo and mascot are not licensed as trademarks: a modified version you distribute needs a different name and a different icon, see [TRADEMARKS.md](TRADEMARKS.md).
 
 The licenses of MochiReader and of everything distributed with it are in [app/licenses.txt](app/licenses.txt). In the app, open Options with Ctrl+, and choose "Licenses and source code". The installer also puts the same text in `licenses.txt`, in the folder where it installs the app.
