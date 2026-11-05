@@ -4,7 +4,7 @@ name: Release
 on:
   push:
     tags: ['v*']
-  # Manual runs only build the installer (artifact); they never publish.
+  # Manual runs only build the installer and the portable zip (artifact); they never publish.
   workflow_dispatch:
 
 permissions:
@@ -53,10 +53,14 @@ jobs:
         run: cargo install tauri-cli --version "$env:TAURI_CLI_VERSION" --locked
       - name: Installer
         run: cargo tauri build
+      - name: Portable zip
+        run: ./tools/portable.ps1
       - uses: actions/upload-artifact@v7
         with:
           name: installer
-          path: src-tauri/target/release/bundle/nsis/*-setup.exe
+          path: |
+            src-tauri/target/release/bundle/nsis/*-setup.exe
+            src-tauri/target/release/bundle/portable/*-portable.zip
           if-no-files-found: error
 
   publish:

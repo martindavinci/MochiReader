@@ -31,6 +31,10 @@ const OPEN_PATHS_EVENT: &str = "open-paths";
 const SHELL_COMMAND_EVENT: &str = "shell-command";
 const CLOSING_EVENT: &str = "app-closing";
 const LICENSES_ASSET: &str = "licenses.txt";
+// A copy with a file of this name beside it is portable: it keeps all it writes in a folder beside it.
+const PORTABLE_MARKER: &str = "portable";
+const PORTABLE_DATA: &str = "data";
+const PORTABLE_WEBVIEW: &str = "webview";
 // The page saves what it has when the app closes, but a page that does not answer must not keep the window open.
 const CLOSE_SAVE_DEADLINE: Duration = Duration::from_millis(1500);
 // Only in the smoke build: the state of a test run stays out of the reader's own.
@@ -393,6 +397,11 @@ fn create_window(app: &mut tauri::App) -> tauri::Result<()> {
         .cloned()
         .expect("tauri.conf.json declares the window");
     let builder = WebviewWindowBuilder::from_config(app.handle(), &config)?;
+    // What WebView2 keeps goes with a portable copy too, and not to the profile of the user.
+    let builder = match portable_folder() {
+        Some(folder) => builder.data_directory(folder.join(PORTABLE_WEBVIEW)),
+        None => builder,
+    };
     #[cfg(feature = "smoke")]
     let builder = match std::env::var(SMOKE_BROWSER_ARGS) {
         Ok(flags) => builder.additional_browser_args(&flags),
@@ -421,12 +430,27 @@ fn create_window(app: &mut tauri::App) -> tauri::Result<()> {
     Ok(())
 }
 
+/// The folder a portable copy writes to, if the copy in `exe_dir` is portable.
+fn portable_folder_in(exe_dir: &std::path::Path) -> Option<std::path::PathBuf> {
+    exe_dir
+        .join(PORTABLE_MARKER)
+        .is_file()
+        .then(|| exe_dir.join(PORTABLE_DATA))
+}
+
+fn portable_folder() -> Option<std::path::PathBuf> {
+    portable_folder_in(std::env::current_exe().ok()?.parent()?)
+}
+
 fn state_folder(app: &tauri::App) -> tauri::Result<std::path::PathBuf> {
     #[cfg(feature = "smoke")]
     if let Some(folder) = std::env::var_os(SMOKE_STATE_DIR) {
         return Ok(folder.into());
     }
-    app.path().app_data_dir()
+    match portable_folder() {
+        Some(folder) => Ok(folder),
+        None => app.path().app_data_dir(),
+    }
 }
 
 pub fn run() {
@@ -525,6 +549,17 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_copy_is_portable_only_with_the_marker_beside_it() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(super::portable_folder_in(dir.path()), None);
+        std::fs::write(dir.path().join(super::PORTABLE_MARKER), b"").unwrap();
+        assert_eq!(
+            super::portable_folder_in(dir.path()),
+            Some(dir.path().join(super::PORTABLE_DATA))
+        );
+    }
+
     use super::*;
     use std::sync::Arc;
 

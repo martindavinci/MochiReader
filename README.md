@@ -44,6 +44,8 @@ Double-click a file and read it, or have it read aloud. Nothing leaves your comp
 
 Download `MochiReader_<version>_x64-setup.exe` from the [releases](https://github.com/martindavinci/MochiReader/releases) page and run it. It installs for the current user, so it does not ask for administrator rights. If WebView2 is missing, the installer downloads it.
 
+For a copy that leaves nothing on the computer, download `MochiReader-<version>-windows-x64-portable.zip` instead, extract it anywhere you can write to, and run `MochiReader.exe`. Its settings, bookmarks and positions stay in the `data` folder beside it. It does not register itself for `.md` and `.epub` files.
+
 The installer is not signed, so Windows SmartScreen may warn you. Choose "More info", then "Run anyway".
 
 ### Make it the default app
