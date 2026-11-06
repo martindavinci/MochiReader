@@ -204,6 +204,8 @@ button, select { font: inherit; color: inherit; }
   overflow: auto;
   visibility: hidden;
   contain: strict;
+  /* What is wider than the text, like a table, measures itself on the pane. */
+  container-type: inline-size;
   scrollbar-width: thin;
   scrollbar-color: var(--line-strong) transparent;
 }
@@ -586,6 +588,8 @@ article {
   padding: 2.75rem var(--article-pad-x) 6rem;
   overflow-wrap: break-word;
   text-wrap: pretty;
+  /* As wide as a table may grow beyond the text: the pane less its margins, up to a width the eye can still cross. */
+  --wide: max(100%, min(100cqi - 2 * var(--article-pad-x), 80rem));
 }
 
 /* A part clips what leaves its box, so it spans the padding of the text: list numbers stand out to the left. */
@@ -599,7 +603,9 @@ article.large > .part {
 /* A block cut in two parts reads as one: no gap at the cut, no second marker, and the columns of a table stay in line. */
 article.large > .part:has(> [data-continued]) { margin-top: -1em; }
 li[data-continued] { list-style: none; }
-table[data-split], table[data-continued] { display: table; width: 100%; table-layout: fixed; }
+table[data-split], table[data-continued] { display: table; width: var(--wide); table-layout: fixed; }
+/* A part clips what leaves it, and a table may leave it on both sides. */
+article.large > .part:has(table) { content-visibility: visible; }
 
 h1, h2, h3, h4, h5, h6 { margin: 1.8em 0 .5em; font-family: var(--font-display); font-weight: 600; line-height: 1.25; text-wrap: balance; }
 article > :first-child, article > .part:first-child > :first-child { margin-top: 0; }
@@ -685,7 +691,19 @@ blockquote {
   line-height: 1.6;
 }
 
-table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; font-size: .92em; line-height: 1.45; font-variant-numeric: tabular-nums; }
+/* A table takes the room its columns ask for, beyond the text if it must, centred on it; past that it scrolls. */
+table {
+  position: relative;
+  left: 50%;
+  display: block;
+  width: max-content;
+  min-width: 100%;
+  max-width: var(--wide);
+  overflow-x: auto;
+  translate: -50% 0;
+  scrollbar-width: thin;
+}
+table { border-collapse: collapse; font-size: .92em; line-height: 1.45; font-variant-numeric: tabular-nums; }
 th, td { padding: .55em .9em .55em 0; border: 0; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
 th { border-bottom: 1.5px solid var(--line-strong); background: none; font-weight: 600; }
 th:last-child, td:last-child { padding-right: 0; }
