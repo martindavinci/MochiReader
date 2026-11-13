@@ -500,6 +500,8 @@ class SpeechSession {
       name: this.#nameOf(this.#entry),
       playing: this.#player.state === STATE_PLAYING,
       rate: this.#player.rate,
+      rates: RATE_LEVELS,
+      volume: this.#player.volume,
       voices: this.#voices.filter((voice) => parseLangTag(voice.lang).language === language),
       voiceId: this.#voiceId,
       following: this.#following,

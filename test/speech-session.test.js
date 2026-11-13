@@ -8,6 +8,7 @@ import en from '../app/lang/en.js';
 import { HIGHLIGHT_NAME } from '../app/speech/highlight.js';
 import { caretAt } from '../app/core/caret.js';
 import { createSession } from '../app/speech/session.js';
+import { RATE_LEVELS } from '../app/speech/player.js';
 import { withHighlights } from './speech-fakes.js';
 
 const ELSA = { id: 'elsa', name: 'Elsa', lang: 'it-IT' };
@@ -793,4 +794,13 @@ test('stopping while a long document is prepared reads nothing of it', async () 
   await flush();
   now.mock.restore();
   assert.deepEqual(engine.calls, []);
+});
+
+test('the bar is drawn with every rate and the volume of the player', async () => {
+  const { session, bar, handlers } = setup();
+  await session.start(fakeTab(TWO).entry);
+  await flush();
+  handlers().onVolume(0.4);
+  assert.deepEqual(bar.view.rates, RATE_LEVELS);
+  assert.equal(bar.view.volume, 0.4);
 });

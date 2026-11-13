@@ -15,6 +15,7 @@
 ### Fixed
 
 - A wide table no longer stays inside the column of text with its last columns cut off: it grows into the width of the window, centred on the text, and scrolls only when even that is not enough.
+- The speed slider offers every speed again, and the volume shows its real value.
 
 ## [0.2.0] - 2026-11-05
 
