@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Where the downloaded voices and the engine pack live: beside a portable copy, in the local app data otherwise.
+//! Where the downloaded voices live: beside a portable copy, in the local app data otherwise. The engine that makes
+//! them speak is part of the app, in the `engine` folder beside it.
 
 use std::path::{Path, PathBuf};
 
 const VOICES: &str = "voices";
-const ENGINE: &str = "engine";
-/// The version of the engine pack this build expects. A new pack goes to a new folder.
-pub const ENGINE_VERSION: &str = "1";
+/// The folder of the engine, among the resources of the app.
+pub const ENGINE: &str = "engine";
 pub const PART_SUFFIX: &str = ".part";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -16,12 +16,13 @@ pub struct Places {
 }
 
 impl Places {
-    /// `portable` is the `data` folder of a portable copy; `local_app_data` is where an installed copy keeps big files.
-    pub fn resolve(portable: Option<&Path>, local_app_data: &Path) -> Self {
+    /// `portable` is the `data` folder of a portable copy; `local_app_data` is where an installed copy keeps big files;
+    /// `engine` is the engine folder of the app.
+    pub fn resolve(portable: Option<&Path>, local_app_data: &Path, engine: &Path) -> Self {
         let root = portable.unwrap_or(local_app_data);
         Self {
             voices: root.join(VOICES),
-            engine: root.join(ENGINE).join(ENGINE_VERSION),
+            engine: engine.to_owned(),
         }
     }
 
@@ -86,17 +87,19 @@ mod tests {
         let places = Places::resolve(
             Some(Path::new(r"D:\Mochi\data")),
             Path::new(r"C:\Users\a\AppData\Local\x"),
+            Path::new(r"D:\Mochi\engine"),
         );
         assert_eq!(places.voices, Path::new(r"D:\Mochi\data\voices"));
-        assert_eq!(places.engine, Path::new(r"D:\Mochi\data\engine\1"));
+        assert_eq!(places.engine, Path::new(r"D:\Mochi\engine"));
     }
 
     #[test]
     fn an_installed_copy_keeps_them_in_local_app_data() {
         let local = Path::new(r"C:\Users\a\AppData\Local\io.github.martindavinci.mochireader");
-        let places = Places::resolve(None, local);
+        let app = Path::new(r"C:\Users\a\AppData\Local\MochiReader\engine");
+        let places = Places::resolve(None, local, app);
         assert_eq!(places.voices, local.join("voices"));
-        assert_eq!(places.engine, local.join("engine").join("1"));
+        assert_eq!(places.engine, app);
     }
 
     #[test]
@@ -107,11 +110,9 @@ mod tests {
         std::fs::write(voice.join("model.onnx.part"), b"half").unwrap();
         std::fs::write(voice.join("model.onnx"), b"whole").unwrap();
         std::fs::create_dir_all(dir.path().join("de_DE-thorsten-medium.part")).unwrap();
-        std::fs::write(dir.path().join("engine.zip.part"), b"half").unwrap();
         sweep_parts(dir.path());
         assert!(!voice.join("model.onnx.part").exists());
         assert!(voice.join("model.onnx").exists());
         assert!(!dir.path().join("de_DE-thorsten-medium.part").exists());
-        assert!(!dir.path().join("engine.zip.part").exists());
     }
 }

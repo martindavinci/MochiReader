@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Puts the engine pack together from an eSpeak NG build and the ONNX Runtime zip of Microsoft, and prints its SHA-256
-# and size for app/speech/voices.json. It only copies files: it never loads the libraries.
-# Run it with PowerShell 7 (pwsh), whose zip writes the paths the way the app reads them.
+# Puts the voice engine together, in the folder the app is built with (src-tauri\engine): ONNX Runtime as Microsoft
+# publishes it, and eSpeak NG from its build, with the dictionaries of the languages that have voices in
+# app/speech/voices.json only. It only copies files: it never loads the libraries.
 param(
   [Parameter(Mandatory)] [string] $EspeakBuild,
   [Parameter(Mandatory)] [string] $EspeakSource,
@@ -11,39 +11,50 @@ param(
   [Parameter(Mandatory)] [string] $EspeakTag,
   # The folder of the Visual C++ redistributable: ONNX Runtime needs its C++ runtime beside it.
   [string] $Redist = '',
-  [string] $Out = 'dist'
+  [string] $Out = 'src-tauri/engine'
 )
 $ErrorActionPreference = 'Stop'
-Add-Type -AssemblyName System.IO.Compression.FileSystem
 
-$name = 'mochireader-engine-1-windows-x64.zip'
 $found = (Get-FileHash -Algorithm SHA256 $OrtZip).Hash.ToLowerInvariant()
 if ($found -ne $OrtSha256.ToLowerInvariant()) { throw "ONNX Runtime zip: SHA-256 $found, expected $OrtSha256" }
 
+$root = Split-Path -Parent $PSScriptRoot
+$catalog = Get-Content (Join-Path $root 'app/speech/voices.json') -Raw | ConvertFrom-Json
+$languages = $catalog.voices | ForEach-Object { ($_.lang -split '-')[0].ToLowerInvariant() } | Sort-Object -Unique
+
+if (Test-Path $Out) { Remove-Item $Out -Recurse -Force }
+New-Item -ItemType Directory -Force (Join-Path $Out 'LICENSES') | Out-Null
 $work = Join-Path ([IO.Path]::GetTempPath()) ('engine-pack-' + [Guid]::NewGuid())
-$stage = Join-Path $work 'pack'
-New-Item -ItemType Directory -Force (Join-Path $stage 'LICENSES') | Out-Null
-Expand-Archive $OrtZip -DestinationPath (Join-Path $work 'ort')
-$ort = Get-ChildItem (Join-Path $work 'ort') -Directory | Select-Object -First 1
-Copy-Item (Join-Path $ort.FullName 'lib/onnxruntime.dll') $stage
-Copy-Item (Join-Path $ort.FullName 'LICENSE') (Join-Path $stage 'LICENSES/onnxruntime.txt')
-Copy-Item (Join-Path $ort.FullName 'ThirdPartyNotices.txt') (Join-Path $stage 'LICENSES/ThirdPartyNotices-onnxruntime.txt')
+Expand-Archive $OrtZip -DestinationPath $work
+$ort = Get-ChildItem $work -Directory | Select-Object -First 1
+Copy-Item (Join-Path $ort.FullName 'lib/onnxruntime.dll') $Out
+Copy-Item (Join-Path $ort.FullName 'LICENSE') (Join-Path $Out 'LICENSES/onnxruntime.txt')
+Copy-Item (Join-Path $ort.FullName 'ThirdPartyNotices.txt') (Join-Path $Out 'LICENSES/ThirdPartyNotices-onnxruntime.txt')
+Remove-Item $work -Recurse -Force
 
 $espeak = Get-ChildItem $EspeakBuild -Recurse -Filter 'espeak-ng.dll' | Select-Object -First 1
 if (-not $espeak) { throw "no espeak-ng.dll under $EspeakBuild" }
-Copy-Item $espeak.FullName $stage
+Copy-Item $espeak.FullName $Out
 $data = Get-ChildItem $EspeakBuild -Recurse -Directory -Filter 'espeak-ng-data' |
   Where-Object { Test-Path (Join-Path $_.FullName 'phontab') } | Select-Object -First 1
 if (-not $data) { throw "no compiled espeak-ng-data under $EspeakBuild" }
-Copy-Item $data.FullName (Join-Path $stage 'espeak-ng-data') -Recurse
-Copy-Item (Join-Path $EspeakSource 'COPYING') (Join-Path $stage 'LICENSES/espeak-ng.txt')
+$target = Join-Path $Out 'espeak-ng-data'
+Copy-Item $data.FullName $target -Recurse
+foreach ($dict in Get-ChildItem $target -Filter '*_dict') {
+  if ($languages -notcontains ($dict.Name -replace '_dict$', '')) { Remove-Item $dict.FullName }
+}
+foreach ($language in $languages) {
+  if (-not (Test-Path (Join-Path $target "$($language)_dict"))) { throw "eSpeak NG has no dictionary for $language" }
+}
+Copy-Item (Join-Path $EspeakSource 'COPYING') (Join-Path $Out 'LICENSES/espeak-ng.txt')
 
 $sources = @(
   "ONNX Runtime $OrtVersion (MIT): https://github.com/microsoft/onnxruntime/releases/tag/v$OrtVersion",
   "  onnxruntime-win-x64-$OrtVersion.zip, SHA-256 $OrtSha256",
   "eSpeak NG $EspeakTag (GPL-3.0-or-later): https://github.com/espeak-ng/espeak-ng/tree/$EspeakTag",
   '  built by .github/workflows/engine.yml of https://github.com/martindavinci/MochiReader;',
-  "  its source is espeak-ng-$EspeakTag-source.tar.gz, in the same release as this pack."
+  "  its source is espeak-ng-$EspeakTag-source.tar.gz, in the release of MochiReader this engine came with.",
+  "  Dictionaries kept: $($languages -join ', ')."
 )
 if ($Redist) {
   $crt = Get-ChildItem $Redist -Recurse -Directory -Filter 'Microsoft.VC14*.CRT' |
@@ -51,22 +62,13 @@ if ($Redist) {
   if ($crt) {
     foreach ($dll in 'msvcp140.dll', 'vcruntime140_1.dll') {
       $path = Join-Path $crt.FullName $dll
-      if (Test-Path $path) { Copy-Item $path $stage }
+      if (Test-Path $path) { Copy-Item $path $Out }
     }
     $sources += "Microsoft Visual C++ runtime, redistributable files of Visual Studio: $($crt.Name)"
   }
 }
-Set-Content -Encoding utf8 (Join-Path $stage 'SOURCES.txt') $sources
-Set-Content -Encoding ascii -NoNewline (Join-Path $stage 'VERSION') '1'
+Set-Content -Encoding utf8 (Join-Path $Out 'SOURCES.txt') $sources
+Set-Content -Encoding ascii -NoNewline (Join-Path $Out 'VERSION') '1'
 
-New-Item -ItemType Directory -Force $Out | Out-Null
-$zip = Join-Path (Resolve-Path $Out) $name
-if (Test-Path $zip) { Remove-Item $zip }
-[IO.Compression.ZipFile]::CreateFromDirectory($stage, $zip, [IO.Compression.CompressionLevel]::Optimal, $false)
-Remove-Item $work -Recurse -Force
-
-$hash = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLowerInvariant()
-$bytes = (Get-Item $zip).Length
-Write-Output $name
-Write-Output "sha256 $hash"
-Write-Output "bytes  $bytes"
+$bytes = (Get-ChildItem $Out -Recurse -File | Measure-Object -Sum Length).Sum
+Write-Output "engine in $Out, $bytes bytes"

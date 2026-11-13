@@ -20,9 +20,9 @@ const voice = (id, lang, extra = {}) => ({
   ...extra,
 });
 
-function catalog({ engine = 'missing', voices } = {}) {
+function catalog({ engine = 'ready', voices } = {}) {
   return {
-    engine: { state: engine, bytes: engine === 'ready' ? 25_000_000 : 0, download: 22_000_000 },
+    engine: { state: engine },
     used: 0,
     unavailable: ['ja', 'ko', 'zh'],
     voices: voices ?? [
@@ -53,10 +53,11 @@ function draw(view) {
 
 const lastButton = (row) => [...row.querySelectorAll('button')].at(-1);
 
-test('a voice not installed offers download with the engine size', () => {
-  const { row, calls } = draw({});
+test('a voice not installed offers its download', () => {
+  const { host, row, calls } = draw({});
+  assert.equal(host.querySelector('.voice-engine'), null);
   const button = lastButton(row('it_IT-paola-medium'));
-  assert.equal(button.textContent, en['voices.withEngine'].replace('{size}', '22'));
+  assert.equal(button.textContent, en['voices.download']);
   button.click();
   assert.deepEqual(calls, [['onDownload', 'it_IT-paola-medium']]);
 });
@@ -108,7 +109,7 @@ test('a failed download says why on its row and offers to try again', () => {
   const progress = new Map([['it_IT-paola-medium', { phase: 'error', error: { kind: 'voice' } }]]);
   const { row } = draw({ progress });
   assert.equal(row('it_IT-paola-medium').querySelector('.voice-error').textContent, en['voices.hashError']);
-  assert.equal(lastButton(row('it_IT-paola-medium')).textContent, en['voices.withEngine'].replace('{size}', '22'));
+  assert.equal(lastButton(row('it_IT-paola-medium')).textContent, en['voices.download']);
 });
 
 test('the license opens its card and the play button its sample', () => {
@@ -137,19 +138,18 @@ test('the sample playing turns its play button into stop', () => {
   assert.equal(calls[0][0], 'onPreview');
 });
 
-test('without a released engine no voice can be downloaded, and the panel says why', () => {
-  const { host, row } = draw({ catalog: catalog({ engine: 'unpublished' }) });
-  const button = lastButton(row('it_IT-paola-medium'));
-  assert.equal(button.textContent, en['voices.notYet']);
-  assert.ok(button.hasAttribute('disabled'));
-  assert.equal(host.querySelector('.voice-engine').textContent, en['voices.engineUnpublished']);
-  assert.ok(row('it_IT-paola-medium').querySelector('.voice-preview'));
-});
+for (const [state, key] of [['missing', 'voices.noEngine'], ['broken', 'voices.engineBroken']]) {
+  test(`with the engine ${state} no voice can be downloaded, and the panel says why`, () => {
+    const { host, row } = draw({ catalog: catalog({ engine: state }) });
+    const button = lastButton(row('it_IT-paola-medium'));
+    assert.equal(button.textContent, en['voices.unavailable']);
+    assert.ok(button.hasAttribute('disabled'));
+    assert.equal(host.querySelector('.voice-engine').textContent, en[key]);
+    assert.ok(row('it_IT-paola-medium').querySelector('.voice-preview'));
+  });
+}
 
-test('the engine download says it is the engine', () => {
-  const progress = new Map([['it_IT-paola-medium', { phase: 'engine', received: 1, total: 4 }]]);
-  const { row } = draw({ progress });
-  assert.equal(row('it_IT-paola-medium').querySelector('.voice-status').textContent, en['voices.engineDownloading'].replace('{percent}', '25'));
+test('a download under way says its share', () => {
   assert.equal(progressText({ phase: 'queued' }), en['voices.waiting']);
   assert.equal(progressText({ phase: 'voice', received: 1, total: 2 }), '50%');
 });

@@ -455,17 +455,20 @@ fn state_folder(app: &tauri::App) -> tauri::Result<std::path::PathBuf> {
     }
 }
 
-/// Where the downloaded voices and the engine go: beside a portable copy, in the local app data otherwise.
+/// Where the downloaded voices go: beside a portable copy, in the local app data otherwise. The engine is among the
+/// resources of the app, beside its exe.
 fn voice_places(app: &tauri::App) -> tauri::Result<tts::paths::Places> {
+    let engine = app.path().resource_dir()?.join(tts::paths::ENGINE);
     #[cfg(feature = "smoke")]
     if let Some(folder) = std::env::var_os(SMOKE_STATE_DIR) {
         let folder = std::path::PathBuf::from(folder);
-        return Ok(tts::paths::Places::resolve(Some(&folder), &folder));
+        return Ok(tts::paths::Places::resolve(Some(&folder), &folder, &engine));
     }
     let local = app.path().app_local_data_dir()?;
     Ok(tts::paths::Places::resolve(
         portable_folder().as_deref(),
         &local,
+        &engine,
     ))
 }
 

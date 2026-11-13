@@ -1,10 +1,5 @@
 {
   "version": 1,
-  "engine": {
-    "url": "https://github.com/martindavinci/MochiReader/releases/download/engine-1/mochireader-engine-1-windows-x64.zip",
-    "sha256": "pending-engine-1",
-    "bytes": 0
-  },
   "unavailable": [
     "ja",
     "ko",

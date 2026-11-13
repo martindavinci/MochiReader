@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { checkEngine, checkTag, ENGINE_PENDING, readVersions } from '../tools/check-tag.mjs';
+import { checkTag, readVersions } from '../tools/check-tag.mjs';
 
 const PACKAGE_JSON = 'package.json';
 const TAURI_CONF = 'src-tauri/tauri.conf.json';
@@ -110,7 +110,3 @@ test('a file that declares no literal version is named in the failure', (t) => {
   );
 });
 
-test('a release is refused while the engine pack has no hash', () => {
-  assert.throws(() => checkEngine({ engine: { sha256: ENGINE_PENDING } }), /engine pack/);
-  assert.doesNotThrow(() => checkEngine({ engine: { sha256: 'a'.repeat(64) } }));
-});

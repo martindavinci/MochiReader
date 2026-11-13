@@ -32,7 +32,6 @@ pub struct CatalogVoice {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct Catalog {
     pub version: u32,
-    pub engine: RemoteFile,
     #[serde(default)]
     pub unavailable: Vec<String>,
     pub voices: Vec<CatalogVoice>,

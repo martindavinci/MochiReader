@@ -11,7 +11,11 @@ permissions:
   contents: read
 
 jobs:
+  engine:
+    uses: ./.github/workflows/engine.yml
+
   build:
+    needs: engine
     runs-on: windows-2022
     permissions:
       contents: read
@@ -51,8 +55,19 @@ jobs:
       - name: Install tauri-cli
         if: steps.tauri-cli.outputs.cache-hit != 'true'
         run: cargo install tauri-cli --version "$env:TAURI_CLI_VERSION" --locked
+      - uses: actions/download-artifact@v8
+        with:
+          name: engine
+          path: engine-dist
+      # The engine goes into the installer and the portable zip; the source of eSpeak NG goes beside them.
+      - name: Engine
+        shell: pwsh
+        run: |
+          Move-Item engine-dist/engine src-tauri/engine
+          New-Item -ItemType Directory -Force src-tauri/target/release/bundle/source | Out-Null
+          Copy-Item engine-dist/espeak-ng-*-source.tar.gz src-tauri/target/release/bundle/source/
       - name: Installer
-        run: cargo tauri build
+        run: cargo tauri build --config src-tauri/tauri.engine.conf.json
       - name: Portable zip
         run: ./tools/portable.ps1
       - uses: actions/upload-artifact@v7
@@ -61,6 +76,7 @@ jobs:
           path: |
             src-tauri/target/release/bundle/nsis/*-setup.exe
             src-tauri/target/release/bundle/portable/*-portable.zip
+            src-tauri/target/release/bundle/source/*-source.tar.gz
           if-no-files-found: error
 
   publish:
@@ -72,8 +88,8 @@ jobs:
     steps:
       - uses: actions/download-artifact@v8
         with:
+          name: installer
           path: dist
-          merge-multiple: true
       - name: Draft release
         env:
           GH_TOKEN: ${{ github.token }}

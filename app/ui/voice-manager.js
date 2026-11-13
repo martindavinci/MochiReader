@@ -4,7 +4,7 @@ import { icon, named } from './icons.js';
 import { elementIn, panelHead } from './panel-parts.js';
 
 /** The phases of a download still under way, as `tts-download` names them. */
-const BUSY = new Set(['queued', 'engine', 'voice']);
+const BUSY = new Set(['queued', 'voice']);
 const BYTES_PER_MB = 1_000_000;
 const PERCENT = 100;
 
@@ -21,24 +21,23 @@ export const PREVIEW_TEXT = {
 const languageOf = (tag) => tag.split('-')[0].toLowerCase();
 const megabytes = (bytes) => Math.max(1, Math.round(bytes / BYTES_PER_MB));
 
-/** What the row of a download under way says: the share once its size is known, and whether it is the engine. */
+/** What the row of a download under way says: the share once its size is known. */
 export function progressText(state) {
   if (!state?.total) return t('voices.waiting');
-  const percent = Math.floor(((state.received ?? 0) * PERCENT) / state.total);
-  return t(state.phase === 'engine' ? 'voices.engineDownloading' : 'voices.downloading', { percent });
+  return t('voices.downloading', { percent: Math.floor(((state.received ?? 0) * PERCENT) / state.total) });
 }
 
 const ERROR_KEYS = {
   network: 'voices.networkError',
   voice: 'voices.hashError',
-  engine: 'voices.engineError',
+  engine: 'voices.engineBroken',
 };
 
 /**
  * The voices the reader can download, their state, and what can be done with each.
  * @param {HTMLElement} host
  * @param {{
- *   catalog: {engine: {state: string, bytes: number, download: number}, used: number, unavailable: string[],
+ *   catalog: {engine: {state: 'ready'|'missing'|'broken'}, used: number, unavailable: string[],
  *     voices: {id: string, name: string, lang: string, quality: string, bytes: number, license: string,
  *       card: string, installed: boolean, busy: boolean}[]},
  *   progress: Map<string, {phase: string, received?: number, total?: number|null, error?: {kind: string}|null}>,
@@ -54,8 +53,8 @@ const ERROR_KEYS = {
 export function renderVoiceManager(host, view, handlers) {
   const element = elementIn(host);
   const { catalog, progress, inUse, nameOf } = view;
-  const engineMissing = catalog.engine.state !== 'ready';
-  const engineUnpublished = catalog.engine.state === 'unpublished';
+  // The engine comes with the app: a copy built without it, or with it damaged, can only play the samples.
+  const engineReady = catalog.engine.state === 'ready';
 
   const button = (className, text, action) => {
     const made = element('button', `btn ${className}`, text);
@@ -83,15 +82,12 @@ export function renderVoiceManager(host, view, handlers) {
     } else if (voice.installed) {
       if (inUse.has(voice.id)) actions.append(element('span', 'voice-badge', t('voices.inUse')));
       actions.append(button('btn-secondary', t('voices.delete'), () => handlers.onDelete(voice.id)));
-    } else if (engineUnpublished) {
-      const waiting = element('button', 'btn btn-neutral', t('voices.notYet'));
-      waiting.setAttribute('disabled', '');
-      actions.append(waiting);
+    } else if (engineReady) {
+      actions.append(button('btn-neutral', t('voices.download'), () => handlers.onDownload(voice.id)));
     } else {
-      const text = engineMissing
-        ? t('voices.withEngine', { size: megabytes(catalog.engine.download) })
-        : t('voices.download');
-      actions.append(button('btn-neutral', text, () => handlers.onDownload(voice.id)));
+      const none = element('button', 'btn btn-neutral', t('voices.unavailable'));
+      none.setAttribute('disabled', '');
+      actions.append(none);
     }
     return actions;
   };
@@ -139,17 +135,14 @@ export function renderVoiceManager(host, view, handlers) {
     .sort((one, other) => nameOf(one).localeCompare(nameOf(other)));
 
   const summary = element('div', 'voice-summary');
-  const engineText = {
-    missing: () => t('voices.engineMissing', { size: megabytes(catalog.engine.download) }),
-    unpublished: () => t('voices.engineUnpublished'),
-    ready: () => t('voices.engineReady', { size: megabytes(catalog.engine.bytes) }),
-    broken: () => t('voices.engineBroken'),
-  }[catalog.engine.state] ?? (() => t('voices.engineBroken'));
   summary.append(
     element('p', 'panel-message', t('voices.intro')),
     element('p', 'voice-used', t('voices.used', { size: megabytes(catalog.used) })),
-    element('p', 'voice-engine', engineText()),
   );
+  if (!engineReady) {
+    const why = catalog.engine.state === 'missing' ? 'voices.noEngine' : 'voices.engineBroken';
+    summary.append(element('p', 'voice-engine', t(why)));
+  }
 
   const body = element('div', 'panel-body voice-manager');
   body.append(summary);

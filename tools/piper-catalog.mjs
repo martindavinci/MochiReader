@@ -4,9 +4,9 @@
 // huggingface.co/rhasspy/piper-voices, with SHA-256 and size. The list is kept by hand: a voice goes in only after its
 // MODEL_CARD was read, and only with a license the app can offer (see test/voices-catalog.test.js).
 // Usage: node tools/piper-catalog.mjs [--write] [--commit <40 hex>]
-// Without --commit it takes the current commit of the repository. The engine entry is kept as it is.
+// Without --commit it takes the current commit of the repository.
 import { createHash } from 'node:crypto';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isEntryPoint } from './is-entry-point.mjs';
@@ -96,13 +96,12 @@ async function voiceEntry(commit, { id, name, license }) {
 async function main(args) {
   const at = args.indexOf('--commit');
   const commit = at >= 0 ? args[at + 1] : (await json(`${HF}/api/models/${REPO}`)).sha;
-  const current = JSON.parse(readFileSync(CATALOG, 'utf8'));
   const voices = [];
   for (const voice of VOICES) {
     voices.push(await voiceEntry(commit, voice));
     console.log(`${voice.id}: ok`);
   }
-  const catalog = { version: 1, engine: current.engine, unavailable: UNAVAILABLE, voices };
+  const catalog = { version: 1, unavailable: UNAVAILABLE, voices };
   const text = `${JSON.stringify(catalog, null, 2)}\n`;
   if (args.includes('--write')) writeFileSync(CATALOG, text);
   else console.log(text);

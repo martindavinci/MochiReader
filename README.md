@@ -58,16 +58,13 @@ The installer registers MochiReader for `.md`, `.markdown` and `.epub`. Windows 
 
 MochiReader reads with the voices installed in Windows, and never sends text anywhere. To add one, open Settings, Time & Language, Speech, and choose "Add voices". If the app tells you a language has no voice, it also explains what to do.
 
-For more natural voices, open Options with Ctrl+, and choose "Manage voices…". Each voice is about 60 MB; the first one also brings the voice engine. Press the play button of a voice to hear a sample first. A voice you download becomes the voice of its language, unless you already chose one. English, Italian, German, Spanish, French and Portuguese have voices there; Japanese, Korean and Chinese have none yet with a license that allows it, so the Windows voices read them.
+For more natural voices, open Options with Ctrl+, and choose "Manage voices…". Each voice is about 60 MB; the engine that makes them speak comes with the app. Press the play button of a voice to hear a sample first. A voice you download becomes the voice of its language, unless you already chose one. English, Italian, German, Spanish, French and Portuguese have voices there; Japanese, Korean and Chinese have none yet with a license that allows it, so the Windows voices read them.
 
-The voices are kept in `%LOCALAPPDATA%\io.github.martindavinci.mochireader\voices`, the engine beside them in `engine`; a portable copy keeps both in its `data` folder.
+The voices are kept in `%LOCALAPPDATA%\io.github.martindavinci.mochireader\voices`; a portable copy keeps them in its `data` folder. The voice engine, ONNX Runtime and eSpeak NG, is in the `engine` folder of the app.
 
 ## Privacy
 
-MochiReader sends nothing about you or what you read. It connects to the internet only when you ask it to:
-
-- to download a voice, or to play the sample of one, from [rhasspy/piper-voices](https://huggingface.co/rhasspy/piper-voices) on Hugging Face, at a fixed revision;
-- to download the voice engine (ONNX Runtime and eSpeak NG) from the releases of MochiReader on GitHub, with the first voice.
+MochiReader sends nothing about you or what you read. It connects to the internet only when you ask it to download a voice, or to play the sample of one, from [rhasspy/piper-voices](https://huggingface.co/rhasspy/piper-voices) on Hugging Face, at a fixed revision.
 
 Every file is checked against the SHA-256 the app carries before it is used. Opening the voice manager connects to nothing. Reading aloud happens entirely on your computer.
 
@@ -107,7 +104,7 @@ The installer lands in `src-tauri/target/release/bundle/nsis/`.
 
 GitHub Actions runs the tests, builds the installer and creates a draft release with it. Publish the draft when you are happy with it.
 
-The voice engine is a release of its own: pushing a tag `engine-<n>` runs `.github/workflows/engine.yml`, which builds eSpeak NG from source, packs it with ONNX Runtime and drafts a release with the pack and the source of eSpeak NG. Its URL, SHA-256 and size go in `app/speech/voices.json`; `tools/check-tag.mjs` refuses to release while the hash is missing. `node tools/piper-catalog.mjs --write` fills in the files of the voices listed in it.
+The release workflow first builds the voice engine with `.github/workflows/engine.yml`: eSpeak NG from its source, with the dictionaries of the languages that have voices, and ONNX Runtime as Microsoft publishes it. It puts the engine in `src-tauri/engine`, builds with `cargo tauri build --config src-tauri/tauri.engine.conf.json`, and adds the source of eSpeak NG to the release beside the installer. A plain `cargo tauri build` makes an installer without the engine, whose voice manager says so. `node tools/piper-catalog.mjs --write` fills in the files of the voices listed in `app/speech/voices.json`.
 
 ## License
 

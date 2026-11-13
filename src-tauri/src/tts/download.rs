@@ -140,7 +140,7 @@ impl Http {
 #[serde(rename_all = "camelCase")]
 pub struct Progress {
     pub voice_id: String,
-    /// `queued`, `engine`, `voice`, `done`, `error` or `canceled`.
+    /// `queued`, `voice`, `done`, `error` or `canceled`.
     pub phase: &'static str,
     pub received: u64,
     pub total: Option<u64>,

@@ -16,14 +16,10 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 const SUMS_FILE: &str = "sums.json";
 const LICENSE_FILE: &str = "LICENSE.txt";
-const ENGINE_ZIP: &str = "engine.zip";
 /// The sample of a voice is a short MP3: anything bigger is not one.
 const SAMPLE_MAX_BYTES: u64 = 2 * 1024 * 1024;
 /// Voices kept loaded at once: each holds its model in memory.
 const LOADED_VOICES: usize = 2;
-/// Under the smoke build only: an engine pack from a local zip, before the real one is published.
-#[cfg(feature = "smoke")]
-const SMOKE_ENGINE_ZIP: &str = "MOCHIREADER_ENGINE_ZIP";
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
@@ -43,11 +39,8 @@ struct Sums {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EngineView {
-    /// `missing`, `ready` or `broken`.
+    /// `ready`, or `missing` in a copy of the app built without it, or `broken`.
     pub state: &'static str,
-    pub bytes: u64,
-    /// What downloading it costs.
-    pub download: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -137,9 +130,6 @@ impl Voices {
     /// Removes what downloads cut short left behind. Run once, away from the start of the app.
     pub fn sweep(&self) {
         super::paths::sweep_parts(&self.places.voices);
-        if let Some(parent) = self.places.engine.parent() {
-            super::paths::sweep_parts(parent);
-        }
     }
 
     fn installed(&self, id: &str) -> bool {
@@ -150,12 +140,10 @@ impl Voices {
     }
 
     pub fn view(&self) -> CatalogView {
-        let engine = engine_pack::state(&self.places.engine);
-        let (state, engine_bytes) = match engine {
-            EngineState::Missing if !self.engine_published() => ("unpublished", 0),
-            EngineState::Missing => ("missing", 0),
-            EngineState::Ready { bytes } => ("ready", bytes),
-            EngineState::Broken(_) => ("broken", 0),
+        let state = match engine_pack::state(&self.places.engine) {
+            EngineState::Missing => "missing",
+            EngineState::Ready { .. } => "ready",
+            EngineState::Broken(_) => "broken",
         };
         let voices: Vec<VoiceView> = self
             .catalog
@@ -173,18 +161,13 @@ impl Voices {
                 busy: self.queue.busy(&voice.id),
             })
             .collect();
-        let used = engine_bytes
-            + voices
-                .iter()
-                .filter(|voice| voice.installed)
-                .map(|voice| folder_bytes(&self.places.voice(&voice.id)))
-                .sum::<u64>();
+        let used = voices
+            .iter()
+            .filter(|voice| voice.installed)
+            .map(|voice| folder_bytes(&self.places.voice(&voice.id)))
+            .sum::<u64>();
         CatalogView {
-            engine: EngineView {
-                state,
-                bytes: engine_bytes,
-                download: self.catalog.engine.bytes,
-            },
+            engine: EngineView { state },
             used,
             unavailable: self.catalog.unavailable.clone(),
             voices,
@@ -245,11 +228,12 @@ impl Voices {
 
     fn install(&self, id: &str, cancel: &AtomicBool, report: &Report) -> Result<(), TtsError> {
         let voice = self.known(id)?.clone();
-        if !matches!(
-            engine_pack::state(&self.places.engine),
-            EngineState::Ready { .. }
-        ) {
-            self.install_engine(cancel, report)?;
+        if let EngineState::Missing | EngineState::Broken(_) =
+            engine_pack::state(&self.places.engine)
+        {
+            return Err(TtsError::Engine(
+                "this copy of the app has no voice engine".into(),
+            ));
         }
         let part = part_of(&self.places.voice(id));
         let outcome = self
@@ -316,49 +300,6 @@ impl Voices {
         std::fs::write(dir.join(LICENSE_FILE), license).map_err(voice_error)
     }
 
-    /// Whether the catalog names an engine pack that can be downloaded. A build made before the pack was released
-    /// carries no hash for it, and so no voice can be downloaded with it.
-    fn engine_published(&self) -> bool {
-        #[cfg(feature = "smoke")]
-        if std::env::var_os(SMOKE_ENGINE_ZIP).is_some() {
-            return true;
-        }
-        self.catalog.engine.sha256 != super::ENGINE_PENDING
-    }
-
-    fn install_engine(&self, cancel: &AtomicBool, report: &Report) -> Result<(), TtsError> {
-        let engine = &self.catalog.engine;
-        let parent = self
-            .places
-            .engine
-            .parent()
-            .ok_or_else(|| TtsError::Engine("no folder for the engine".into()))?;
-        std::fs::create_dir_all(parent).map_err(|error| TtsError::Engine(error.to_string()))?;
-        #[cfg(feature = "smoke")]
-        if let Some(local) = std::env::var_os(SMOKE_ENGINE_ZIP) {
-            let local = PathBuf::from(local);
-            return engine_pack::install(&local, &self.places.engine, &hash_of(&local)?);
-        }
-        if engine.sha256 == super::ENGINE_PENDING {
-            return Err(TtsError::Engine(
-                "the engine pack is not published yet".into(),
-            ));
-        }
-        let zip = parent.join(ENGINE_ZIP);
-        self.http.fetch(
-            &engine.url,
-            &zip,
-            &engine.sha256,
-            cancel,
-            |received, total| {
-                report.phase("engine", received, total.or(Some(engine.bytes)));
-            },
-        )?;
-        let outcome = engine_pack::install(&zip, &self.places.engine, &engine.sha256);
-        let _ = std::fs::remove_file(&zip);
-        outcome
-    }
-
     /// The engine, loaded once per run.
     fn engine(&self) -> Result<Arc<Loaded>, TtsError> {
         let mut engine = lock(&self.engine);
@@ -366,7 +307,9 @@ impl Voices {
             return Ok(Arc::clone(loaded));
         }
         if engine_pack::state(&self.places.engine) == EngineState::Missing {
-            return Err(TtsError::Engine("the engine pack is not installed".into()));
+            return Err(TtsError::Engine(
+                "this copy of the app has no voice engine".into(),
+            ));
         }
         let loaded = Arc::new(engine_pack::load(&self.places.engine)?);
         *engine = Some(Arc::clone(&loaded));
@@ -446,7 +389,6 @@ pub mod testing {
         let sha = |bytes: &[u8]| crate::native::sha256(bytes).unwrap();
         let text = serde_json::json!({
             "version": 1,
-            "engine": { "url": "https://example.invalid/engine.zip", "sha256": "0".repeat(64), "bytes": 10 },
             "unavailable": ["ja"],
             "voices": [
                 { "id": "it_IT-paola-medium", "name": "Paola", "lang": "it-IT", "quality": "medium",
@@ -478,7 +420,7 @@ pub mod testing {
     }
 
     pub fn voices_in(dir: &Path, catalog: Catalog) -> Arc<Voices> {
-        let places = Places::resolve(Some(dir), dir);
+        let places = Places::resolve(Some(dir), dir, &dir.join("engine"));
         Arc::new(Voices::new(places, catalog, "test", Arc::new(|_| {})))
     }
 }
@@ -520,12 +462,15 @@ mod tests {
     }
 
     #[test]
-    fn an_engine_not_released_yet_says_so() {
+    fn without_an_engine_no_voice_is_downloaded() {
         let dir = tempfile::tempdir().unwrap();
-        let mut catalog = catalog_with(b"model", b"{}");
-        catalog.engine.sha256 = crate::tts::ENGINE_PENDING.into();
-        let voices = voices_in(dir.path(), catalog);
-        assert_eq!(voices.view().engine.state, "unpublished");
+        let voices = voices_in(dir.path(), catalog_with(b"model", b"{}"));
+        let report = Report::for_test("it_IT-paola-medium");
+        assert!(matches!(
+            voices.install("it_IT-paola-medium", &AtomicBool::new(false), &report),
+            Err(TtsError::Engine(_))
+        ));
+        assert!(!voices.places().voice("it_IT-paola-medium").exists());
     }
 
     #[test]
@@ -551,7 +496,7 @@ mod tests {
         assert!(!voices.view().voices[0].installed);
     }
 
-    /// Only in the engine workflow, which unpacks the pack and sets MOCHIREADER_ENGINE_DIR: it loads its libraries and
+    /// Only in the engine workflow, which builds the engine and sets MOCHIREADER_ENGINE_DIR: it loads its libraries and
     /// downloads one voice.
     #[test]
     #[ignore]
@@ -561,9 +506,7 @@ mod tests {
         );
         let dir = tempfile::tempdir().unwrap();
         let catalog = Catalog::embedded().unwrap();
-        let places = Places::resolve(Some(dir.path()), dir.path());
-        std::fs::create_dir_all(places.engine.parent().unwrap()).unwrap();
-        copy_dir(&engine_dir, &places.engine);
+        let places = Places::resolve(Some(dir.path()), dir.path(), &engine_dir);
         let voices = Arc::new(Voices::new(places, catalog, "test", Arc::new(|_| {})));
         let report = Report::for_test("it_IT-paola-medium");
         voices
@@ -576,18 +519,6 @@ mod tests {
         assert!(sound.samples.len() > 22050 / 2);
         assert_eq!(sound.words.len(), 5, "{:?}", sound.words);
         assert_eq!(sound.words.last().unwrap().end, 24);
-    }
-
-    fn copy_dir(from: &Path, to: &Path) {
-        std::fs::create_dir_all(to).unwrap();
-        for entry in std::fs::read_dir(from).unwrap().flatten() {
-            let target = to.join(entry.file_name());
-            if entry.path().is_dir() {
-                copy_dir(&entry.path(), &target);
-            } else {
-                std::fs::copy(entry.path(), target).unwrap();
-            }
-        }
     }
 
     #[test]

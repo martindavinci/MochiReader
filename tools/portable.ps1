@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Makes the portable zip from the release build: the program, the file that makes it portable, and the texts.
-# Run it after `cargo tauri build`. The zip goes to src-tauri\target\release\bundle\portable.
+# Makes the portable zip from the release build: the program, the voice engine when the build has it, the file that
+# makes it portable, and the texts. Run it after `cargo tauri build`. The zip goes to
+# src-tauri\target\release\bundle\portable.
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -33,6 +34,14 @@ try {
   [void][System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $exe, 'MochiReader.exe')
   [void][System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, (Join-Path $root 'LICENSE'), 'LICENSE.txt')
   [void][System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, (Join-Path $root 'app\licenses.txt'), 'licenses.txt')
+  $engine = Join-Path $root 'src-tauri\engine'
+  if (Test-Path $engine) {
+    $base = (Resolve-Path $engine).Path.TrimEnd('\') + '\'
+    foreach ($file in Get-ChildItem $engine -Recurse -File) {
+      $name = 'engine/' + $file.FullName.Substring($base.Length).Replace('\', '/')
+      [void][System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $file.FullName, $name)
+    }
+  }
   [void]$zip.CreateEntry('portable')
   $entry = $zip.CreateEntry('README.txt')
   $writer = New-Object System.IO.StreamWriter($entry.Open(), (New-Object System.Text.UTF8Encoding $false))

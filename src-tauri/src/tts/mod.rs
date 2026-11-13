@@ -28,8 +28,6 @@ pub const MIN_RATE: f32 = 0.5;
 pub const MAX_RATE: f32 = 4.0;
 pub const PIPER_PREFIX: &str = "piper:";
 pub const EDGE_PREFIX: &str = "edge:";
-/// The hash of the engine pack in app/speech/voices.json until it is published (see tools/check-tag.mjs).
-pub const ENGINE_PENDING: &str = "pending-engine-1";
 
 /// What went wrong, as the page reads it: `{ kind, message }`.
 #[derive(Debug, Clone, PartialEq)]

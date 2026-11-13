@@ -3,6 +3,8 @@
 /src-tauri/gen
 /dist
 /node_modules
+# The voice engine, put together by tools/engine-pack.ps1 (CI only)
+/src-tauri/engine
 
 # Local working notes and agent scratch
 docs/superpowers/

@@ -104,6 +104,19 @@ export const VENDORED = [
     license: 'Apache-2.0',
     licenseFile: 'src-tauri/vendor/sonic/LICENSE',
   },
+  // The voice engine, in the engine folder of the app: its LICENSES folder also has the notices of ONNX Runtime.
+  {
+    name: 'ONNX Runtime',
+    version: '1.32.0',
+    license: 'MIT',
+    licenseFile: 'tools/vendored-licenses/onnxruntime-LICENSE',
+  },
+  {
+    name: 'eSpeak NG',
+    version: '1.52.0',
+    license: 'GPL-3.0-or-later',
+    licenseFile: 'tools/vendored-licenses/espeak-ng-COPYING',
+  },
   {
     name: 'Rust standard library',
     version: '1.99.1',

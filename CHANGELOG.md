@@ -1,5 +1,13 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- The voice engine comes with the app, in the installer and in the portable zip: the natural voices no longer wait for a second download, and nothing is downloaded but the voices themselves.
+- In the voice manager, the play button of a sample stops it while it plays, each language has its name over its voices, and languages without voices to download are not listed.
+- The list of voices in Options and in the reading bar ends with an entry that opens the voice manager.
+
 ## [0.4.0] - 2026-11-13
 
 ### Added
