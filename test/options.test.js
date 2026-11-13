@@ -57,7 +57,7 @@ test('nothing saved means the defaults, which follow Windows', () => {
 });
 
 test('saved options come back', () => {
-  const saved = { theme: 'dark', textSize: 22, sourceMode: 'name', epubView: 'scrolled', language: 'it' };
+  const saved = { theme: 'dark', textSize: 22, sourceMode: 'name', speechWords: 'off', epubView: 'scrolled', language: 'it' };
   assert.deepEqual(readOptions(saved), saved);
 });
 

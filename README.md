@@ -4,7 +4,7 @@
 
 <h1 align="center">MochiReader</h1>
 
-<p align="center">A calm Windows reader for Markdown and EPUB, which can read aloud with the voices already in Windows. Entirely offline.</p>
+<p align="center">A calm Windows reader for Markdown and EPUB, which can read aloud with the voices of Windows or with natural voices you download once. Offline by default.</p>
 
 <p align="center">
   <a href="https://github.com/martindavinci/MochiReader/actions/workflows/ci.yml"><img src="https://github.com/martindavinci/MochiReader/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
@@ -17,12 +17,14 @@
   <img src="docs/screenshots/home.png" width="720" alt="The home page of MochiReader on first run: the mascot, an Open a file button and the keys worth knowing">
 </p>
 
-Double-click a file and read it, or have it read aloud. Nothing leaves your computer.
+Double-click a file and read it, or have it read aloud. What you read never leaves your computer.
 
 ## Features
 
 - Opens `.md`, `.markdown` and `.epub` files in tabs, and reopens each one where you stopped. The recent files show the chapter a book was left at.
-- Reads aloud with the Windows voices, sentence by sentence, highlighting the sentence and following it down the page. It goes on with the window minimised.
+- Reads aloud with the Windows voices, or with natural voices that work offline once downloaded, sentence by sentence, highlighting the sentence and following it down the page. It goes on with the window minimised.
+- Marks the word being said, for the downloaded voices and for the Windows voices that tell their words. It can be turned off in Options.
+- The downloaded voices read from 0.5× to 4× without changing their pitch, and a new speed or volume reaches the sentence being read instead of starting it again.
 - Skips what sounds wrong when spoken: link addresses, source citations and frontmatter.
 - Remembers the last voice used for each language.
 - Books show their chapter, page and progress, with arrows to turn the page, in pages or in one long scroll.
@@ -54,7 +56,20 @@ The installer registers MochiReader for `.md`, `.markdown` and `.epub`. Windows 
 
 ### Add a voice
 
-MochiReader uses the voices installed in Windows and never sends text anywhere. To add one, open Settings, Time & Language, Speech, and choose "Add voices". If the app tells you a language has no voice, it also explains what to do.
+MochiReader reads with the voices installed in Windows, and never sends text anywhere. To add one, open Settings, Time & Language, Speech, and choose "Add voices". If the app tells you a language has no voice, it also explains what to do.
+
+For more natural voices, open Options with Ctrl+, and choose "Manage voices…". Each voice is about 60 MB; the first one also brings the voice engine. Press the play button of a voice to hear a sample first. A voice you download becomes the voice of its language, unless you already chose one. English, Italian, German, Spanish, French and Portuguese have voices there; Japanese, Korean and Chinese have none yet with a license that allows it, so the Windows voices read them.
+
+The voices are kept in `%LOCALAPPDATA%\io.github.martindavinci.mochireader\voices`, the engine beside them in `engine`; a portable copy keeps both in its `data` folder.
+
+## Privacy
+
+MochiReader sends nothing about you or what you read. It connects to the internet only when you ask it to:
+
+- to download a voice, or to play the sample of one, from [rhasspy/piper-voices](https://huggingface.co/rhasspy/piper-voices) on Hugging Face, at a fixed revision;
+- to download the voice engine (ONNX Runtime and eSpeak NG) from the releases of MochiReader on GitHub, with the first voice.
+
+Every file is checked against the SHA-256 the app carries before it is used. Opening the voice manager connects to nothing. Reading aloud happens entirely on your computer.
 
 ## Keyboard
 
@@ -91,6 +106,8 @@ The installer lands in `src-tauri/target/release/bundle/nsis/`.
 2. Commit, then push a tag named `v<version>`.
 
 GitHub Actions runs the tests, builds the installer and creates a draft release with it. Publish the draft when you are happy with it.
+
+The voice engine is a release of its own: pushing a tag `engine-<n>` runs `.github/workflows/engine.yml`, which builds eSpeak NG from source, packs it with ONNX Runtime and drafts a release with the pack and the source of eSpeak NG. Its URL, SHA-256 and size go in `app/speech/voices.json`; `tools/check-tag.mjs` refuses to release while the hash is missing. `node tools/piper-catalog.mjs --write` fills in the files of the voices listed in it.
 
 ## License
 

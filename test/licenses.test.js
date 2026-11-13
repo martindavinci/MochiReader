@@ -77,7 +77,7 @@ test('the vendored list is allowed and its license files exist', () => {
   assert.doesNotThrow(() => checkLicenses(VENDORED));
   assert.deepEqual(
     VENDORED.map(({ name }) => name),
-    ['foliate-js', 'zip.js', 'fflate', 'WebView2 loader', 'Rust standard library'],
+    ['foliate-js', 'zip.js', 'fflate', 'WebView2 loader', 'Sonic', 'Rust standard library'],
   );
   for (const { licenseFile } of VENDORED) {
     assert.ok(existsSync(join(REPO_ROOT, licenseFile)), licenseFile);

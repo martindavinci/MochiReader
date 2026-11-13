@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.4.0] - 2026-11-13
+
+### Added
+
+- Natural voices that read offline, in English, Italian, German, Spanish, French and Portuguese, downloaded on request from a voice manager in Options. Each shows its quality, size and license, can be heard first, and can be deleted. The first one also brings the voice engine. Only voices whose license allows it are offered.
+- A downloaded voice becomes the voice of its language, unless one was already chosen by hand.
+- Speeds from 0.5× to 4× for the downloaded voices, without changing their pitch. A new speed or volume reaches the sentence being read instead of starting it again.
+- The word being said is marked over its sentence, for the downloaded voices and for the Windows voices that tell their words. "Follow word by word" in Options turns it off.
+- If a downloaded voice cannot read, a Windows voice goes on with the reading and says so.
+
+### Changed
+
+- The voices of each language in Options are grouped by where they come from.
+- The README says what the app downloads, from where, and when; nothing is sent anywhere.
+
 ## [0.3.0] - 2026-11-05
 
 ### Added

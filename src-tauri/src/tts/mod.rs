@@ -377,8 +377,10 @@ mod tests {
         let start = (4 + length).div_ceil(4) * 4;
         assert!(bytes[4 + length..start].iter().all(|byte| *byte == 0));
         let samples = bytes[start..]
-            .chunks_exact(4)
-            .map(|chunk| f32::from_le_bytes(chunk.try_into().unwrap()))
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|chunk| f32::from_le_bytes(*chunk))
             .collect();
         (header, samples)
     }

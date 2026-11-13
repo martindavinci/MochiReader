@@ -409,7 +409,7 @@ article:empty { display: none; }
   --icon-fill: var(--raised);
 }
 #panel[data-panel="options"] { width: min(460px, calc(100% - 16px)); }
-#panel[data-panel="licenses"], #panel[data-panel="shortcuts"] { width: min(520px, calc(100% - 16px)); }
+#panel[data-panel="licenses"], #panel[data-panel="shortcuts"], #panel[data-panel="voices"] { width: min(520px, calc(100% - 16px)); }
 
 @keyframes panel-in { from { opacity: 0; translate: 0 -4px; } }
 @media (prefers-reduced-motion: reduce) { #panel, #toast, .text-menu { animation: none !important; } }

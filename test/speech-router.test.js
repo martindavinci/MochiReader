@@ -70,3 +70,14 @@ test('the voices of both engines are listed', async () => {
   });
   assert.deepEqual((await engine.voices()).map(({ id }) => id), ['Microsoft Elsa', 'piper:paola']);
 });
+
+test('a change of engine stops the one that spoke, and only then', async () => {
+  const web = fake('web');
+  const audio = fake('audio');
+  const engine = new RoutedEngine({ web, audio });
+  await engine.speak('Uno.', { voiceId: 'piper:paola' });
+  await engine.speak('Due.', { voiceId: 'piper:paola' });
+  assert.equal(web.stops, 0);
+  await engine.speak('Tre.', { voiceId: 'Microsoft Elsa' });
+  assert.equal(audio.stops, 1);
+});
