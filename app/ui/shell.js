@@ -50,6 +50,10 @@ const PANEL_LICENSES = 'licenses';
 const PANEL_VOICE_HELP = 'voice-help';
 const PANEL_TABS = 'tabs';
 const PANEL_SHORTCUTS = 'shortcuts';
+const PANEL_VOICES = 'voices';
+const PIPER_PREFIX = 'piper:';
+const DOWNLOAD_EVENT = 'tts-download';
+const DOWNLOAD_OVER = new Set(['done', 'error', 'canceled']);
 const GAP_PX = 6;
 const DROP_MASCOT_PX = 88;
 const FORWARD = 1;
@@ -108,6 +112,10 @@ let dropZone = null;
 /** Reading aloud, once it has been asked for: everything it needs stays out of the first frame. */
 let speech = null;
 let speechLoading = null;
+/** The downloads of voices this run has heard of, by voice: what the manager draws on each row. */
+const downloads = new Map();
+/** What plays the sample of a voice, so that a second one stops the first. */
+let preview = null;
 
 const twoFrames = () => new Promise((resolve) => {
   requestAnimationFrame(() => requestAnimationFrame(resolve));
@@ -981,12 +989,117 @@ function chooseDefaultVoice(lang, voiceId) {
 
 /** Asks for what only reading aloud needs, so they come a moment after the rest of the panel. */
 async function drawVoiceOptions() {
-  const { languageName, voiceGroups, WebSpeechEngine } = await import('../speech/engine-web.js');
-  const [voices, { voices: saved }] = await Promise.all([new WebSpeechEngine().voices(), invoke('state_get')]);
+  const [{ languageName, voiceGroups, WebSpeechEngine }, { listVoices }] = await Promise.all([
+    import('../speech/engine-web.js'),
+    import('../speech/engine-router.js'),
+  ]);
+  const [voices, { voices: saved }] = await Promise.all([
+    listVoices({ web: new WebSpeechEngine(), invoke }),
+    invoke('state_get'),
+  ]);
   if (!panelHost.querySelector('.voice-options')) return;
   if (panels.current() !== PANEL_OPTIONS) return;
   const groups = voiceGroups(voices, saved).map((group) => ({ ...group, name: languageName(group.lang) }));
-  renderVoiceOptions(panelHost, groups, chooseDefaultVoice);
+  renderVoiceOptions(panelHost, groups, chooseDefaultVoice, { onManage: () => showPanel(PANEL_VOICES) });
+}
+
+/** The languages the manager shows first: of the documents open, then of the interface. */
+function voiceLanguages() {
+  const ofDocuments = [...entries.values()].map((entry) => entry.reader?.lang).filter(Boolean);
+  return [...ofDocuments, getLang()];
+}
+
+async function drawVoicesPanel() {
+  const [{ languageName }, { renderVoiceManager }, catalog, { voices: saved }] = await Promise.all([
+    import('../speech/engine-web.js'),
+    import('./voice-manager.js'),
+    invoke('tts_catalog'),
+    invoke('state_get'),
+  ]);
+  if (panels.current() !== PANEL_VOICES) return;
+  const inUse = new Set(Object.values(saved ?? {})
+    .filter((id) => typeof id === 'string' && id.startsWith(PIPER_PREFIX))
+    .map((id) => id.slice(PIPER_PREFIX.length)));
+  const refocus = keepFocus(panelHost);
+  renderVoiceManager(panelHost, {
+    catalog,
+    progress: downloads,
+    languages: voiceLanguages(),
+    inUse,
+    nameOf: languageName,
+  }, {
+    onDownload: (voiceId) => {
+      downloads.set(voiceId, { phase: 'queued' });
+      invoke('tts_download', { voiceId }).catch(() => downloads.set(voiceId, { phase: 'error', error: null }));
+      drawVoicesPanel();
+    },
+    onCancel: (voiceId) => invoke('tts_cancel', { voiceId }),
+    onDelete: async (voiceId) => {
+      await invoke('tts_delete', { voiceId }).catch(() => {});
+      downloads.delete(voiceId);
+      drawVoicesPanel();
+    },
+    onPreview: previewVoice,
+    onCard: (url) => invoke('open_external', { url }),
+  });
+  refocus();
+}
+
+/**
+ * A voice not downloaded plays its published sample, which Rust fetches and the page plays from memory. A voice on
+ * this PC says one sentence in its own language.
+ */
+async function previewVoice(voice) {
+  preview?.stop();
+  if (voice.installed) {
+    const [{ AudioEngine }, { PREVIEW_TEXT }] = await Promise.all([
+      import('../speech/engine-audio.js'),
+      import('./voice-manager.js'),
+    ]);
+    const engine = new AudioEngine({ invoke });
+    const language = voice.lang.split('-')[0];
+    preview = engine;
+    engine.speak(PREVIEW_TEXT[language] ?? PREVIEW_TEXT.en, { voiceId: `${PIPER_PREFIX}${voice.id}` });
+    return;
+  }
+  try {
+    const bytes = await invoke('tts_sample', { voiceId: voice.id });
+    const url = URL.createObjectURL(new Blob([bytes], { type: 'audio/mpeg' }));
+    const audio = new Audio(url);
+    const release = () => URL.revokeObjectURL(url);
+    audio.addEventListener('ended', release, { once: true });
+    preview = { stop: () => { audio.pause(); release(); } };
+    await audio.play();
+  } catch {
+    showToast(t('voices.networkError'), { glyph: 'alert' });
+  }
+}
+
+/** What a download says as it goes. When a voice arrives it may become the voice of its language. */
+async function onDownload({ voiceId, phase, received, total, error }) {
+  if (phase === 'done' || phase === 'canceled') downloads.delete(voiceId);
+  else downloads.set(voiceId, { phase, received, total, error });
+  if (phase === 'done') {
+    const catalog = await invoke('tts_catalog');
+    const voice = catalog.voices.find(({ id }) => id === voiceId);
+    if (voice) await (await loadSpeech()).voiceInstalled(voice.lang.split('-')[0], `${PIPER_PREFIX}${voiceId}`);
+  }
+  if (panels.current() === PANEL_VOICES && (DOWNLOAD_OVER.has(phase) || !panelHost.querySelector(`[data-voice="${voiceId}"] progress`))) {
+    drawVoicesPanel();
+  } else if (panels.current() === PANEL_VOICES) {
+    updateDownloadRow(voiceId);
+  }
+}
+
+/** Progress moves only the bar and the number of its row: the rest of the panel, and its focus, stay as they are. */
+function updateDownloadRow(voiceId) {
+  const state = downloads.get(voiceId);
+  const row = panelHost.querySelector(`[data-voice="${voiceId}"]`);
+  if (!state?.total || !row) return;
+  const share = Math.floor(((state.received ?? 0) * 100) / state.total);
+  row.querySelector('progress')?.setAttribute('value', String(share));
+  const status = row.querySelector('.voice-status');
+  if (status) status.textContent = t('voices.downloading', { percent: share });
 }
 
 function drawOptionsPanel() {
@@ -1025,6 +1138,7 @@ const PANELS = {
   [PANEL_LICENSES]: drawLicensesPanel,
   [PANEL_TABS]: drawTabsPanel,
   [PANEL_SHORTCUTS]: () => renderShortcuts(panelHost),
+  [PANEL_VOICES]: drawVoicesPanel,
 };
 
 async function showPanel(name, opener) {
@@ -1243,6 +1357,7 @@ function listenAfterFirstPaint() {
   }, { capture: true });
   getCurrentWindow().onFocusChanged(onWindowFocus);
   listen('app-closing', onAppClosing);
+  listen(DOWNLOAD_EVENT, ({ payload }) => onDownload(payload));
 }
 
 async function boot() {

@@ -3,6 +3,14 @@
 //! asked, and hands it to the page as samples. The page plays them with Web Audio.
 
 pub mod cache;
+pub mod catalog;
+pub mod download;
+pub mod engine_pack;
+pub mod espeak;
+pub mod manager;
+pub mod onnx_patch;
+pub mod paths;
+pub mod piper;
 mod router;
 pub mod stretch;
 #[cfg(any(test, feature = "smoke"))]
@@ -18,8 +26,10 @@ pub use router::Router;
 
 pub const MIN_RATE: f32 = 0.5;
 pub const MAX_RATE: f32 = 4.0;
-const PIPER_PREFIX: &str = "piper:";
-const EDGE_PREFIX: &str = "edge:";
+pub const PIPER_PREFIX: &str = "piper:";
+pub const EDGE_PREFIX: &str = "edge:";
+/// The hash of the engine pack in app/speech/voices.json until it is published (see tools/check-tag.mjs).
+pub const ENGINE_PENDING: &str = "pending-engine-1";
 
 /// What went wrong, as the page reads it: `{ kind, message }`.
 #[derive(Debug, Clone, PartialEq)]
@@ -296,6 +306,53 @@ pub async fn tts_voices(
 ) -> Result<Vec<VoiceInfo>, TtsError> {
     let service = Arc::clone(&service);
     off_the_workers(move || Ok(service.voices())).await
+}
+
+/// The catalog as the voice manager shows it. Reads the disk only: no request leaves the computer.
+#[tauri::command]
+pub async fn tts_catalog(
+    voices: tauri::State<'_, Arc<manager::Voices>>,
+) -> Result<manager::CatalogView, TtsError> {
+    let voices = Arc::clone(&voices);
+    off_the_workers(move || Ok(voices.view())).await
+}
+
+#[tauri::command]
+pub async fn tts_download(
+    voice_id: String,
+    voices: tauri::State<'_, Arc<manager::Voices>>,
+) -> Result<(), TtsError> {
+    let voices = Arc::clone(&voices);
+    off_the_workers(move || voices.download(&voice_id)).await
+}
+
+#[tauri::command]
+pub async fn tts_cancel(
+    voice_id: String,
+    voices: tauri::State<'_, Arc<manager::Voices>>,
+) -> Result<(), TtsError> {
+    voices.cancel(&voice_id);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn tts_delete(
+    voice_id: String,
+    voices: tauri::State<'_, Arc<manager::Voices>>,
+) -> Result<(), TtsError> {
+    let voices = Arc::clone(&voices);
+    off_the_workers(move || voices.delete(&voice_id)).await
+}
+
+/// The published sample of a voice not installed, as MP3 bytes. Asked only when the reader presses its play button.
+#[tauri::command]
+pub async fn tts_sample(
+    voice_id: String,
+    voices: tauri::State<'_, Arc<manager::Voices>>,
+) -> Result<tauri::ipc::Response, TtsError> {
+    let voices = Arc::clone(&voices);
+    let bytes = off_the_workers(move || voices.sample(&voice_id)).await?;
+    Ok(tauri::ipc::Response::new(bytes))
 }
 
 #[cfg(test)]

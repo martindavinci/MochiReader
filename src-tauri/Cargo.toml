@@ -22,24 +22,35 @@ tauri-build = { version = "=2.7.3", features = [] }
 [dependencies]
 ammonia = "=4.2.4"
 comrak = { version = "=0.59.0", default-features = false }
+# The inflate of zip, in Rust: the engine pack is a zip.
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+libloading = "0.9"
+# load-dynamic: ONNX Runtime comes with the engine pack the reader downloads, and is loaded from its folder by path.
+ort = { version = "=2.0.0-rc.15", default-features = false, features = ["load-dynamic", "std"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # custom-protocol: serve the embedded pages from every build, since the app has no dev server.
 tauri = { version = "=2.12.4", features = ["custom-protocol"] }
 tauri-plugin-dialog = "=2.6.0"
 tauri-plugin-single-instance = "=2.5.4"
+# The TLS of Windows, so the app ships no TLS of its own.
+ureq = { version = "3", default-features = false, features = ["native-tls-no-default"] }
 # Already in the app through Tauri, at this version: named here for the WebView2 settings Tauri does not offer.
 webview2-com = "=0.39.1"
 windows = { version = "=0.62.2", features = [
   "Win32_Foundation",
+  "Win32_Globalization",
   "Win32_Graphics_Dwm",
   "Win32_Security",
   "Win32_Security_Cryptography",
+  "Win32_Storage_FileSystem",
+  "Win32_System_LibraryLoader",
   "Win32_System_SystemInformation",
   "Win32_System_Threading",
   "Win32_UI_Shell",
   "Win32_UI_WindowsAndMessaging",
 ] }
+zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
 
 [dev-dependencies]
 tempfile = "3"

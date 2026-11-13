@@ -2,7 +2,7 @@
 // Loads with the first reading, not with the app: this module brings all of app/speech with it.
 import { getLang, t } from '../core/i18n.js';
 import { AudioEngine } from './engine-audio.js';
-import { RoutedEngine } from './engine-router.js';
+import { engineOf, listVoices, RoutedEngine } from './engine-router.js';
 import { closestVoice, languageName, WebSpeechEngine } from './engine-web.js';
 import { extractBlocks } from './extract.js';
 import { createHighlighter, HIGHLIGHT_NAME } from './highlight.js';
@@ -76,6 +76,10 @@ class SpeechSession {
   #finished = null;
   #tabVoices = new WeakMap();
   #watched = new WeakSet();
+  /** Whether this reading already said that the downloaded voice could not read. */
+  #toldFallback = false;
+  /** Lists the voices: injected by tests, every engine of the app otherwise. */
+  #listVoices;
 
   constructor({
     engine = null,
@@ -91,8 +95,12 @@ class SpeechSession {
     showEntry = () => {},
     onReading = () => {},
     sourceMode,
+    edgeOn = () => false,
   }) {
-    this.#engine = engine ?? new RoutedEngine({ web: new WebSpeechEngine(), audio: new AudioEngine({ invoke }) });
+    const web = new WebSpeechEngine();
+    this.#engine = engine ?? new RoutedEngine({ web, audio: new AudioEngine({ invoke }) });
+    this.#listVoices = engine ? () => engine.voices() : () => listVoices({ web, invoke, edgeOn: edgeOn() });
+    if ('onLiveError' in this.#engine) this.#engine.onLiveError = (options) => this.#liveFailed(options);
     this.#invoke = invoke;
     this.#save = save;
     this.#isInFront = isInFront;
@@ -226,6 +234,20 @@ class SpeechSession {
     this.#useVoice(voiceId);
   }
 
+  /**
+   * A voice was just downloaded. It becomes the voice of its language, unless the reader already chose one by hand:
+   * the state keeps a voice only once someone chose it.
+   * @returns {Promise<boolean>} Whether it did.
+   */
+  async voiceInstalled(language, voiceId) {
+    const { voices } = await this.#invoke('state_get');
+    if (voices?.[language]) return false;
+    await this.#invoke('state_set_voice', { lang: language, voiceId });
+    if (this.active()) this.#voices = await this.#listVoices().catch(() => this.#voices);
+    this.defaultVoiceChanged(language, voiceId);
+    return true;
+  }
+
   /** Draws the bar again, in the language the interface has now. */
   redraw() {
     if (this.active()) this.#draw();
@@ -259,6 +281,7 @@ class SpeechSession {
     this.#entry = entry;
     this.#finished = null;
     this.#following = true;
+    this.#toldFallback = false;
     this.#lang = null;
     this.#switching = true;
     this.#watch(entry.reader);
@@ -267,7 +290,7 @@ class SpeechSession {
     this.#savedVoices = { ...saved };
     this.#player.setRate(options?.[OPTION_RATE]);
     this.#player.setVolume(options?.[OPTION_VOLUME]);
-    const voices = await this.#engine.voices().catch(() => []);
+    const voices = await this.#listVoices().catch(() => []);
     if (run !== this.#run) return;
     this.#voices = voices;
     await this.#loadSection(run, from);
@@ -337,10 +360,46 @@ class SpeechSession {
     }
     const wanted = [this.#tabVoices.get(this.#entry), this.#savedVoices[language]];
     const known = wanted.find((id) => ofLanguage.some((voice) => voice.id === id));
+    const lost = !known && wanted.find((id) => engineOf(id) === 'piper');
+    const windows = ofLanguage.filter((voice) => engineOf(voice.id) === 'sapi');
     this.#lang = lang;
-    this.#voiceId = known ?? closestVoice(ofLanguage, lang).id;
+    // A downloaded voice that is gone hands over to Windows, which every PC has, rather than to another download.
+    this.#voiceId = known ?? (lost && closestVoice(windows, lang)?.id) ?? closestVoice(ofLanguage, lang).id;
+    if (lost) this.#tellFallback('speech.offlineFallback');
     this.#player.setLang(lang);
     this.#player.setVoice(this.#voiceId);
+    return true;
+  }
+
+  #tellFallback(key, { always = false } = {}) {
+    if (this.#toldFallback && !always) return;
+    this.#toldFallback = true;
+    this.#showMessage(t(key));
+  }
+
+  /**
+   * A voice of the app failed on a sentence: the reading goes on with an offline voice of the language, for the rest
+   * of this reading. After Edge that is a downloaded voice if there is one, after Piper a voice of Windows.
+   * @returns {boolean} Whether another voice took over.
+   */
+  #liveFailed({ voiceId }) {
+    if (!this.active() || this.#switching || voiceId !== this.#voiceId) return false;
+    const failed = engineOf(voiceId);
+    if (failed === 'sapi') return false;
+    const language = parseLangTag(this.#lang).language;
+    const ofLanguage = this.#voices.filter((voice) => parseLangTag(voice.lang).language === language);
+    const offline = (engine) => ofLanguage.filter((voice) => engineOf(voice.id) === engine);
+    const choices = failed === 'edge' ? [offline('piper'), offline('sapi')] : [offline('sapi')];
+    const saved = this.#savedVoices[language];
+    const replacement = choices
+      .map((voices) => voices.find((voice) => voice.id === saved) ?? closestVoice(voices, this.#lang))
+      .find(Boolean);
+    if (!replacement) return false;
+    if (failed === 'edge') this.#tellFallback('speech.edgeFailed', { always: true });
+    else this.#tellFallback('speech.offlineFallback');
+    this.#voiceId = replacement.id;
+    this.#player.setVoice(replacement.id);
+    this.#draw();
     return true;
   }
 

@@ -10,6 +10,16 @@ import { isEntryPoint } from './is-entry-point.mjs';
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const TAG_PREFIX = 'v';
 const MISSING_VERSION = '(missing)';
+const CATALOG_FILE = 'app/speech/voices.json';
+/** The hash of the engine pack before it is published: a release with it could never install Piper. */
+export const ENGINE_PENDING = 'pending-engine-1';
+
+/** Refuses a catalog whose engine pack has no hash yet. */
+export function checkEngine(catalog) {
+  if (catalog.engine?.sha256 === ENGINE_PENDING) {
+    throw new Error(`${CATALOG_FILE}: the engine pack has no hash yet; publish engine-1 and fill it in`);
+  }
+}
 
 export function checkTag(tag, declared) {
   if (!tag.startsWith(TAG_PREFIX)) {
@@ -56,6 +66,7 @@ export function readVersions(root) {
 if (isEntryPoint(import.meta.url)) {
   try {
     checkTag(process.argv[2] ?? '', readVersions(REPO_ROOT));
+    checkEngine(JSON.parse(readFileSync(join(REPO_ROOT, CATALOG_FILE), 'utf8')));
   } catch (error) {
     console.error(error.message);
     process.exit(1);

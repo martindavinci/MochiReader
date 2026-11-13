@@ -119,22 +119,37 @@ export function interfaceLang({ language }, systemLang) {
 /**
  * The voices are asked for separately, and they come when the rest of the panel is on screen.
  * @param {HTMLElement} host The panel, with its options already drawn.
- * @param {{lang: string, name: string, voices: {id: string, name: string}[], selected: string}[]} groups
+ * @param {{lang: string, name: string, voices: {id: string, name: string, group?: 'local'|'online'}[], selected: string}[]} groups
+ *   The voices of each language: those of this PC first, then the online ones.
  * @param {(lang: string, voiceId: string) => void} onVoice
+ * @param {{onManage?: () => void}} [more]
  */
-export function renderVoiceOptions(host, groups, onVoice) {
+export function renderVoiceOptions(host, groups, onVoice, { onManage } = {}) {
   const document = host.ownerDocument;
-  host.querySelector(`.${VOICE_OPTIONS_CLASS}`).replaceChildren(...groups.map(({ lang, name, voices, selected }) => {
+  const optionOf = (voice, selected) => {
+    const option = document.createElement('option');
+    option.setAttribute('value', voice.id);
+    option.setAttribute('title', voice.name);
+    if (voice.id === selected) option.setAttribute('selected', '');
+    option.textContent = voice.group === 'online' ? `${shortVoiceName(voice.name)} (${t('edge.online')})` : shortVoiceName(voice.name);
+    return option;
+  };
+  const rows = groups.map(({ lang, name, voices, selected }) => {
     const select = document.createElement('select');
     select.setAttribute('name', `voice-${lang}`);
-    select.append(...voices.map((voice) => {
-      const option = document.createElement('option');
-      option.setAttribute('value', voice.id);
-      option.setAttribute('title', voice.name);
-      if (voice.id === selected) option.setAttribute('selected', '');
-      option.textContent = shortVoiceName(voice.name);
-      return option;
-    }));
+    const local = voices.filter((voice) => voice.group !== 'online');
+    const online = voices.filter((voice) => voice.group === 'online');
+    if (online.length === 0) {
+      select.append(...local.map((voice) => optionOf(voice, selected)));
+    } else {
+      for (const [label, list] of [[t('voices.onThisPc'), local], [t('voices.online'), online]]) {
+        if (list.length === 0) continue;
+        const group = document.createElement('optgroup');
+        group.setAttribute('label', label);
+        group.append(...list.map((voice) => optionOf(voice, selected)));
+        select.append(group);
+      }
+    }
     select.addEventListener('change', () => onVoice(lang, select.value));
     const caption = document.createElement('span');
     caption.textContent = t('options.voice', { lang: name });
@@ -142,7 +157,19 @@ export function renderVoiceOptions(host, groups, onVoice) {
     row.className = 'option';
     row.append(caption, select);
     return row;
-  }));
+  });
+  if (onManage) {
+    const manage = document.createElement('button');
+    manage.className = 'btn btn-secondary voice-manage';
+    manage.setAttribute(FOCUS_KEY, 'voice-manage');
+    manage.textContent = t('voices.manage');
+    manage.addEventListener('click', () => onManage());
+    const row = document.createElement('div');
+    row.className = 'option option-action';
+    row.append(manage);
+    rows.push(row);
+  }
+  host.querySelector(`.${VOICE_OPTIONS_CLASS}`).replaceChildren(...rows);
 }
 
 /**

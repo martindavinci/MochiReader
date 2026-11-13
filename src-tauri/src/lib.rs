@@ -31,6 +31,7 @@ const PROTOCOL: &str = "mochi";
 const OPEN_PATHS_EVENT: &str = "open-paths";
 const SHELL_COMMAND_EVENT: &str = "shell-command";
 const CLOSING_EVENT: &str = "app-closing";
+const TTS_DOWNLOAD_EVENT: &str = "tts-download";
 const LICENSES_ASSET: &str = "licenses.txt";
 // A copy with a file of this name beside it is portable: it keeps all it writes in a folder beside it.
 const PORTABLE_MARKER: &str = "portable";
@@ -454,6 +455,44 @@ fn state_folder(app: &tauri::App) -> tauri::Result<std::path::PathBuf> {
     }
 }
 
+/// Where the downloaded voices and the engine go: beside a portable copy, in the local app data otherwise.
+fn voice_places(app: &tauri::App) -> tauri::Result<tts::paths::Places> {
+    #[cfg(feature = "smoke")]
+    if let Some(folder) = std::env::var_os(SMOKE_STATE_DIR) {
+        let folder = std::path::PathBuf::from(folder);
+        return Ok(tts::paths::Places::resolve(Some(&folder), &folder));
+    }
+    let local = app.path().app_local_data_dir()?;
+    Ok(tts::paths::Places::resolve(
+        portable_folder().as_deref(),
+        &local,
+    ))
+}
+
+fn manage_voices(app: &mut tauri::App) -> tauri::Result<()> {
+    let catalog =
+        tts::catalog::Catalog::embedded().map_err(|error| tauri::Error::Anyhow(error.into()))?;
+    let handle = app.handle().clone();
+    let emit: tts::download::Emit = std::sync::Arc::new(move |progress| {
+        let _ = handle.emit(TTS_DOWNLOAD_EVENT, progress);
+    });
+    let version = app.package_info().version.to_string();
+    let voices = std::sync::Arc::new(tts::manager::Voices::new(
+        voice_places(app)?,
+        catalog,
+        &version,
+        emit,
+    ));
+    let sweeping = std::sync::Arc::clone(&voices);
+    std::thread::spawn(move || sweeping.sweep());
+    let router = tts::Router::new(std::sync::Arc::clone(&voices));
+    app.manage(voices);
+    app.manage(std::sync::Arc::new(tts::Service::with(
+        std::sync::Arc::new(router),
+    )));
+    Ok(())
+}
+
 pub fn run() {
     let created_ms = timing::process_created_unix_ms();
     let main_ms = timing::now_unix_ms() - created_ms;
@@ -486,9 +525,6 @@ pub fn run() {
         .manage(docs)
         .manage(pending)
         .manage(session)
-        .manage(std::sync::Arc::new(tts::Service::with(
-            std::sync::Arc::new(tts::Router::new()),
-        )))
         .register_asynchronous_uri_scheme_protocol(PROTOCOL, move |_, request, responder| {
             let roots = roots.clone();
             let path = request.uri().path().to_string();
@@ -527,6 +563,11 @@ pub fn run() {
             tts::tts_prepare,
             tts::tts_restretch,
             tts::tts_voices,
+            tts::tts_catalog,
+            tts::tts_download,
+            tts::tts_cancel,
+            tts::tts_delete,
+            tts::tts_sample,
             #[cfg(feature = "smoke")]
             smoke_write_dump,
             #[cfg(feature = "smoke")]
@@ -542,6 +583,7 @@ pub fn run() {
         })
         .setup(|app| {
             app.manage(Store::load(&state_folder(app)?, timing::now_unix_ms()));
+            manage_voices(app)?;
             Ok(create_window(app)?)
         })
         .build(tauri::generate_context!())

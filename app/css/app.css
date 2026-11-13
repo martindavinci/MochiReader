@@ -517,6 +517,28 @@ article:empty { display: none; }
 .option select:hover { border-color: var(--fg); background-color: var(--surface); }
 .option select:disabled { opacity: .45; cursor: default; }
 .option select option { background: var(--raised); color: var(--fg); }
+.option-action { justify-content: flex-end; }
+.voice-manage { height: 32px; }
+
+/* Voices: the downloads of the reader, a row for each, its actions on the right or under it when there is no room. */
+.voice-summary { padding: 0 var(--space-2) var(--space-2); }
+.voice-summary .panel-message { margin-bottom: var(--space-2); padding: 0; }
+.voice-used, .voice-engine { margin: 0; color: var(--muted); font: 12px/1.5 var(--font-ui-s); }
+.voice-list { margin: 0; padding: 0; list-style: none; }
+.voice-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px var(--space-3); margin: 0; padding: 6px var(--space-3); border-radius: var(--radius-s); }
+.voice-row:hover { background: var(--surface); }
+.voice-words { min-width: 0; }
+.voice-name { margin: 0; font: 600 14px/1.3 var(--font-ui); }
+.voice-meta { display: flex; flex-wrap: wrap; align-items: center; margin: 0; color: var(--muted); font: 12px/1.4 var(--font-ui-s); }
+.voice-license { padding: 2px 4px; font-size: 12px; }
+.voice-error { margin: 2px 0 0; color: var(--accent); font: 12px/1.4 var(--font-ui-s); }
+.voice-none { margin: 0 var(--space-3) var(--space-2); color: var(--muted); font: 13px/1.5 var(--font-ui-s); }
+.voice-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-left: auto; }
+.voice-actions .btn { height: 30px; padding: 0 var(--space-3); font-size: 13px; }
+.voice-actions .voice-preview { width: 30px; padding: 0; }
+.voice-status { color: var(--muted); font: 12px/1 var(--font-ui-s); font-variant-numeric: tabular-nums; }
+.voice-progress { width: 88px; height: 6px; accent-color: var(--accent); }
+.voice-badge { padding: 3px 8px; border-radius: 999px; background: var(--surface-2); color: var(--fg); font: 600 11px/1.2 var(--font-ui-s); }
 
 .segmented { display: inline-flex; padding: 2px; border: 1px solid var(--line); border-radius: var(--radius-m); background: var(--surface); }
 .segmented label { position: relative; padding: 6px 10px; border-radius: var(--radius-s); color: var(--muted); font: 13px/1 var(--font-ui-s); cursor: pointer; }

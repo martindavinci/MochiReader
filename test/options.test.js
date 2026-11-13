@@ -203,3 +203,37 @@ test('choosing a voice says for which language', () => {
   choose('voice-it', 'elsa');
   assert.deepEqual(chosen, [['it', 'elsa']]);
 });
+
+test('voices are grouped on this pc and online, with a way to manage them', () => {
+  setLang('en');
+  const { host, field } = draw();
+  let managed = 0;
+  const groups = [{
+    lang: 'it',
+    name: 'Italian',
+    voices: [
+      { id: 'elsa', name: 'Elsa', group: 'local' },
+      { id: 'piper:it_IT-paola-medium', name: 'Paola', group: 'local' },
+      { id: 'edge:it-IT-ElsaNeural', name: 'Elsa Neural', group: 'online' },
+    ],
+    selected: 'piper:it_IT-paola-medium',
+  }];
+  renderVoiceOptions(host, groups, () => {}, {
+    onManage: () => {
+      managed += 1;
+    },
+  });
+  const labels = [...field('voice-it').querySelectorAll('optgroup')].map((group) => group.getAttribute('label'));
+  assert.deepEqual(labels, [en['voices.onThisPc'], en['voices.online']]);
+  assert.deepEqual(values(field('voice-it')), ['elsa', 'piper:it_IT-paola-medium', 'edge:it-IT-ElsaNeural']);
+  assert.ok(field('voice-it').querySelector('[value^="edge:"]').textContent.includes(en['edge.online']));
+  host.querySelector('.voice-manage').click();
+  assert.equal(managed, 1);
+});
+
+test('without online voices the list has no groups', () => {
+  const { host, field } = draw();
+  renderVoiceOptions(host, GROUPS, () => {});
+  assert.equal(field('voice-it').querySelectorAll('optgroup').length, 0);
+  assert.equal(host.querySelector('.voice-manage'), null);
+});

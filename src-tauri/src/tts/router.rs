@@ -1,14 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Sends each voice to its engine.
 
-use super::{engine_of, Engine, Synthesis, Synthesizer, TtsError, VoiceInfo};
+use super::manager::Voices;
+use super::{engine_of, Engine, Synthesis, Synthesizer, TtsError, VoiceInfo, PIPER_PREFIX};
+use std::sync::Arc;
 
-#[derive(Default)]
-pub struct Router {}
+pub struct Router {
+    voices: Arc<Voices>,
+}
 
 impl Router {
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new(voices: Arc<Voices>) -> Self {
+        Self { voices }
     }
 }
 
@@ -18,18 +21,17 @@ impl Synthesizer for Router {
         if voice == super::tone::TONE_VOICE {
             return super::tone::Tone.synthesize(voice, text);
         }
-        let _ = text;
         match engine_of(voice) {
-            Engine::Piper | Engine::Edge | Engine::Other => {
-                Err(TtsError::Voice(format!("no voice {voice}")))
-            }
+            Engine::Piper => self.voices.synthesize(&voice[PIPER_PREFIX.len()..], text),
+            Engine::Edge | Engine::Other => Err(TtsError::Voice(format!("no voice {voice}"))),
         }
     }
 
     fn voices(&self) -> Vec<VoiceInfo> {
+        #[allow(unused_mut)]
+        let mut voices = self.voices.installed_voices();
         #[cfg(feature = "smoke")]
-        return super::tone::Tone.voices();
-        #[cfg(not(feature = "smoke"))]
-        Vec::new()
+        voices.extend(super::tone::Tone.voices());
+        voices
     }
 }

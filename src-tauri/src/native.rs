@@ -12,6 +12,7 @@ use webview2_com::Microsoft::Web::WebView2::Win32::{
 };
 use windows::core::{w, Interface, BOOL, HSTRING};
 use windows::Win32::Foundation::{CloseHandle, HANDLE, HWND, RECT};
+use windows::Win32::Globalization::{NormalizationD, NormalizeString};
 use windows::Win32::Graphics::Dwm::{
     DwmSetWindowAttribute, DWMWA_CAPTION_COLOR, DWMWA_TRANSITIONS_FORCEDISABLED,
 };
@@ -19,6 +20,8 @@ use windows::Win32::Security::Cryptography::{
     BCryptCreateHash, BCryptDestroyHash, BCryptFinishHash, BCryptHashData, BCRYPT_HASH_HANDLE,
     BCRYPT_SHA256_ALG_HANDLE,
 };
+use windows::Win32::Storage::FileSystem::GetShortPathNameW;
+use windows::Win32::System::LibraryLoader::SetDllDirectoryW;
 use windows::Win32::System::Threading::{CreateMutexW, ReleaseMutex, WaitForSingleObject};
 use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -164,6 +167,44 @@ pub fn sha256(mut reader: impl Read) -> io::Result<String> {
     Ok(text)
 }
 
+/// `text` in Unicode normalization form D: "ç" as "c" and its cedilla. What Windows cannot normalize comes back as it was.
+pub fn nfd(text: &str) -> String {
+    let wide: Vec<u16> = text.encode_utf16().collect();
+    if wide.is_empty() {
+        return String::new();
+    }
+    let estimate = unsafe { NormalizeString(NormalizationD, &wide, None) };
+    let Ok(capacity) = usize::try_from(estimate) else {
+        return text.to_owned();
+    };
+    let mut out = vec![0u16; capacity.max(1)];
+    let written = unsafe { NormalizeString(NormalizationD, &wide, Some(&mut out)) };
+    match usize::try_from(written) {
+        Ok(length) if length > 0 => String::from_utf16_lossy(&out[..length.min(out.len())]),
+        _ => text.to_owned(),
+    }
+}
+
+/// The path as ASCII, for a library that only reads narrow paths: as it is, or in its short 8.3 form.
+pub fn ascii_path(path: &std::path::Path) -> Option<String> {
+    let text = path.to_str()?;
+    if text.is_ascii() {
+        return Some(text.to_owned());
+    }
+    let long = HSTRING::from(path.as_os_str());
+    let needed = unsafe { GetShortPathNameW(&long, None) };
+    let mut short = vec![0u16; usize::try_from(needed).ok()?.max(1)];
+    let written = unsafe { GetShortPathNameW(&long, Some(&mut short)) };
+    let short =
+        String::from_utf16(&short[..usize::try_from(written).ok()?.min(short.len())]).ok()?;
+    (written > 0 && short.is_ascii()).then_some(short)
+}
+
+/// Lets the libraries of `dir` find the libraries they need beside them.
+pub fn add_library_folder(dir: &std::path::Path) -> io::Result<()> {
+    unsafe { SetDllDirectoryW(&HSTRING::from(dir.as_os_str())) }.map_err(io::Error::other)
+}
+
 /// Opens a URL in the program the system has for it.
 pub fn shell_open(url: &str) -> Result<(), String> {
     let target = HSTRING::from(url);
@@ -211,6 +252,13 @@ mod tests {
     use super::*;
 
     const LONG_INPUT_BYTES: usize = 1_000_000;
+
+    #[test]
+    fn nfd_takes_accents_apart() {
+        assert_eq!(nfd("ç"), "c\u{327}");
+        assert_eq!(nfd("tʃˈao"), "tʃˈao");
+        assert_eq!(nfd(""), "");
+    }
 
     #[test]
     fn sha256_matches_the_published_vectors() {

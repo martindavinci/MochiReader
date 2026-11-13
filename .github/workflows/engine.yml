@@ -1,0 +1,106 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Builds the engine pack the app downloads for its offline voices: ONNX Runtime as Microsoft publishes it, and eSpeak NG
+# compiled here from its source. A tag engine-<n> drafts a release with the pack and the source of eSpeak NG.
+name: Engine pack
+
+on:
+  push:
+    tags: ['engine-*']
+  # Manual runs build and test the pack (artifact); they never publish.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  ESPEAK_TAG: '1.52.0'
+  ORT_VERSION: '1.32.0'
+  ORT_SHA256: 'aaa1d04fcf86bd31e84b90bc0cbde80e632bd0720dcc5d8ba05c4fe45c09d127'
+  PACK: mochireader-engine-1-windows-x64.zip
+
+jobs:
+  build:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ilammy/msvc-dev-cmd@v1
+      - name: eSpeak NG source
+        shell: pwsh
+        run: |
+          git clone --depth 1 --branch "$env:ESPEAK_TAG" https://github.com/espeak-ng/espeak-ng.git espeak-ng
+          git -C espeak-ng archive --format=tar.gz --prefix="espeak-ng-$env:ESPEAK_TAG/" -o "../espeak-ng-$env:ESPEAK_TAG-source.tar.gz" HEAD
+      # A DLL with the C runtime inside it, and with no audio: the app only asks it for phonemes.
+      - name: eSpeak NG build
+        shell: pwsh
+        run: |
+          cmake -S espeak-ng -B espeak-build -G "Visual Studio 17 2022" -A x64 `
+            -DBUILD_SHARED_LIBS=ON -DCMAKE_POLICY_DEFAULT_CMP0091=NEW -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded `
+            -DCMAKE_C_FLAGS="/DLIBESPEAK_NG_EXPORT" -DUSE_ASYNC=OFF -DUSE_MBROLA=OFF -DUSE_LIBSONIC=OFF `
+            -DUSE_LIBPCAUDIO=OFF -DUSE_KLATT=OFF -DUSE_SPEECHPLAYER=OFF -DBUILD_TESTING=OFF
+          cmake --build espeak-build --config Release --parallel
+          $dll = Get-ChildItem espeak-build -Recurse -Filter espeak-ng.dll | Select-Object -First 1
+          $exports = dumpbin /exports $dll.FullName
+          foreach ($name in 'espeak_Initialize', 'espeak_SetVoiceByName', 'espeak_TextToPhonemes') {
+            if (-not ($exports -match $name)) { throw "espeak-ng.dll does not export $name" }
+          }
+      - name: ONNX Runtime
+        shell: pwsh
+        run: |
+          $url = "https://github.com/microsoft/onnxruntime/releases/download/v$env:ORT_VERSION/onnxruntime-win-x64-$env:ORT_VERSION.zip"
+          Invoke-WebRequest $url -OutFile ort.zip
+      - name: Pack
+        shell: pwsh
+        run: |
+          ./tools/engine-pack.ps1 -EspeakBuild espeak-build -EspeakSource espeak-ng -OrtZip ort.zip `
+            -OrtSha256 $env:ORT_SHA256 -OrtVersion $env:ORT_VERSION -EspeakTag $env:ESPEAK_TAG `
+            -Redist "$env:VCToolsRedistDir" -Out dist
+          Move-Item "espeak-ng-$env:ESPEAK_TAG-source.tar.gz" dist/
+      - uses: actions/upload-artifact@v7
+        with:
+          name: engine
+          path: dist/*
+          if-no-files-found: error
+
+  # The tests that load the pack run here only: nobody runs downloaded libraries on a development machine.
+  test:
+    needs: build
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@1.99.1
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - uses: actions/download-artifact@v8
+        with:
+          name: engine
+          path: dist
+      - name: Unpack
+        shell: pwsh
+        run: Expand-Archive "dist/$env:PACK" -DestinationPath engine
+      - name: Tests with the engine
+        working-directory: src-tauri
+        shell: pwsh
+        env:
+          MOCHIREADER_ENGINE_DIR: ${{ github.workspace }}\engine
+        run: cargo test -- --ignored engine_
+
+  publish:
+    needs: test
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/engine-')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: engine
+          path: dist
+      - name: Draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$TAG" dist/* --draft --title "Engine pack $TAG" \
+            --notes "The engine MochiReader downloads for its offline voices. Not an app: MochiReader installs it when a voice is downloaded."

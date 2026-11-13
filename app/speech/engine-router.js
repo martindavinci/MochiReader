@@ -20,9 +20,31 @@ export function engineOf(voiceId) {
 /** Whether a new speed or volume reaches the sentence being said, instead of saying it again. */
 export const isLive = (voiceId) => engineOf(voiceId) !== 'sapi';
 
+/**
+ * Every voice the app can read with, each marked `local` (Windows, Piper) or `online` (Edge, listed only while on).
+ * @returns {Promise<{id: string, name: string, lang: string, group: 'local'|'online'}[]>}
+ */
+export async function listVoices({ web, invoke, edgeOn = false }) {
+  const asked = (command) => invoke(command).then((voices) => voices ?? [], () => []);
+  const [windows, piper, edge] = await Promise.all([
+    web.voices().catch(() => []),
+    asked('tts_voices'),
+    edgeOn ? asked('tts_edge_voices') : [],
+  ]);
+  return [
+    ...[...windows, ...piper].map((voice) => ({ ...voice, group: 'local' })),
+    ...edge.map((voice) => ({ ...voice, group: 'online' })),
+  ];
+}
+
 export class RoutedEngine {
   #web;
   #audio;
+  /**
+   * Told when a voice of the app fails on a sentence, with the options of that sentence. When it answers true it
+   * has moved the reading to another voice, and this sentence is over for whoever asked.
+   */
+  onLiveError = null;
 
   constructor({ web, audio }) {
     this.#web = web;
@@ -37,11 +59,13 @@ export class RoutedEngine {
     return [...windows, ...own];
   }
 
-  speak(text, options = {}) {
+  async speak(text, options = {}) {
     const target = this.#of(options.voiceId);
     const other = target === this.#web ? this.#audio : this.#web;
     other.stop();
-    return target.speak(text, options);
+    const outcome = await target.speak(text, options);
+    if (outcome === 'error' && target === this.#audio && this.onLiveError?.(options)) return 'stopped';
+    return outcome;
   }
 
   stop() {

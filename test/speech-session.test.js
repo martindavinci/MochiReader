@@ -100,8 +100,10 @@ afterEach(() => {
   setLang('en');
 });
 
-function setup({ voices, state = {}, sourceMode = 'skip', inFront = () => true } = {}) {
-  const engine = fakeEngine(voices);
+function setup({ voices, state = {}, sourceMode = 'skip', inFront = () => true, engine: given } = {}) {
+  const engine = given ?? fakeEngine(voices);
+  const kept = { voices: {}, options: {}, ...state };
+  kept.voices = { ...kept.voices };
   const saved = [];
   const messages = [];
   const helps = [];
@@ -147,7 +149,8 @@ function setup({ voices, state = {}, sourceMode = 'skip', inFront = () => true }
     },
     invoke: async (command, args) => {
       commands.push([command, args]);
-      if (command === 'state_get') return { voices: {}, options: {}, ...state };
+      if (command === 'state_get') return { ...kept, voices: { ...kept.voices } };
+      if (command === 'state_set_voice') kept.voices[args.lang] = args.voiceId;
       return undefined;
     },
     save: (entry) => saved.push(entry),
@@ -160,6 +163,8 @@ function setup({ voices, state = {}, sourceMode = 'skip', inFront = () => true }
   sessions.push(session);
   return { session, engine, bar, media, saved, messages, helps, commands, handlers: () => barHandlers };
 }
+
+const setupWith = (engine, options = {}) => setup({ ...options, engine });
 
 test('reading starts where the reader says, and each sentence is shown, followed and saved', async () => {
   const { session, engine, bar, media, saved } = setup();
@@ -803,4 +808,54 @@ test('the bar is drawn with every rate and the volume of the player', async () =
   handlers().onVolume(0.4);
   assert.deepEqual(bar.view.rates, RATE_LEVELS);
   assert.equal(bar.view.volume, 0.4);
+});
+
+const PAOLA = { id: 'piper:it_IT-paola-medium', name: 'Paola', lang: 'it-IT' };
+
+test('a new piper voice becomes the default only if none was chosen', async () => {
+  const fresh = setup({ voices: [ELSA, PAOLA] });
+  assert.equal(await fresh.session.voiceInstalled('it', PAOLA.id), true);
+  assert.deepEqual(fresh.commands.filter(([name]) => name === 'state_set_voice'), [['state_set_voice', { lang: 'it', voiceId: PAOLA.id }]]);
+  await fresh.session.start(fakeTab(TWO).entry);
+  await flush();
+  assert.equal(fresh.engine.calls[0].voiceId, PAOLA.id);
+
+  const chosen = setup({ voices: [ELSA, PAOLA], state: { voices: { it: 'elsa' } } });
+  assert.equal(await chosen.session.voiceInstalled('it', PAOLA.id), false);
+  assert.deepEqual(chosen.commands.filter(([name]) => name === 'state_set_voice'), []);
+});
+
+test('a deleted piper voice falls back to windows without the voice help', async () => {
+  const { session, engine, messages, helps } = setup({ state: { voices: { it: PAOLA.id } } });
+  await session.start(fakeTab(TWO).entry);
+  await flush();
+  assert.equal(engine.calls[0].voiceId, 'elsa');
+  assert.deepEqual(messages, [en['speech.offlineFallback']]);
+  assert.deepEqual(helps, []);
+});
+
+test('a piper voice that fails a sentence hands the reading to windows, which says that sentence', async () => {
+  const engine = fakeEngine([ELSA, PAOLA]);
+  engine.onLiveError = null;
+  const speak = engine.speak.bind(engine);
+  // As RoutedEngine does: a voice of the app that fails asks for another, and its sentence is over.
+  engine.speak = (text, options) => {
+    if (options.voiceId === PAOLA.id) {
+      engine.calls.push({ text, ...options });
+      return Promise.resolve(engine.onLiveError?.(options) ? 'stopped' : 'error');
+    }
+    return speak(text, options);
+  };
+  const { session, messages } = setupWith(engine, { state: { voices: { it: PAOLA.id } } });
+  await session.start(fakeTab(TWO).entry);
+  await flush();
+  assert.deepEqual(engine.calls.map(({ text, voiceId }) => [text, voiceId]), [
+    ['Uno è qui.', PAOLA.id],
+    ['Uno è qui.', 'elsa'],
+  ]);
+  assert.deepEqual(messages, [en['speech.offlineFallback']]);
+  engine.finish();
+  await flush();
+  assert.equal(engine.calls.at(-1).voiceId, 'elsa');
+  assert.equal(session.active(), true);
 });
