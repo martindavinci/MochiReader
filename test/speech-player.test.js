@@ -16,6 +16,7 @@ import {
   ERROR_NOTHING_TO_READ,
   speakWatchdogMs,
 } from '../app/speech/player.js';
+import { AUDIO_RATES } from '../app/speech/engine-audio.js';
 
 const block = (kind, texts, extra = {}) => ({
   kind,
@@ -943,4 +944,94 @@ test('with nothing loaded, or already reading, parking does nothing', async () =
   player.park();
   assert.equal(player.state, 'playing');
   player.stop();
+});
+
+/** An engine like RoutedEngine: Windows voices restart, the voices of the app (`piper:`) hear changes live. */
+function liveEngine() {
+  const engine = fakeEngine();
+  engine.adjusted = [];
+  engine.prepared = [];
+  engine.rates = (voiceId) => (voiceId?.startsWith('piper:') ? AUDIO_RATES : RATE_LEVELS);
+  engine.live = (voiceId) => Boolean(voiceId?.startsWith('piper:'));
+  engine.adjust = (change) => engine.adjusted.push(change);
+  engine.prepare = (text, options) => engine.prepared.push({ text, ...options });
+  return engine;
+}
+
+function liveHarness(blocks) {
+  const engine = liveEngine();
+  const player = new SpeechPlayer({ engine, sleep: async () => {} });
+  player.load(blocks);
+  return { engine, player };
+}
+
+test('a live engine changes rate without restarting', async () => {
+  const { engine, player } = liveHarness([para('Uno.'), para('Due.')]);
+  player.setVoice('piper:x');
+  player.play();
+  await flush();
+  player.setRate(2.5);
+  player.setVolume(0.5);
+  await flush();
+  assert.equal(engine.calls.length, 1);
+  assert.equal(engine.stops, 0);
+  assert.deepEqual(engine.adjusted.at(-1), { voiceId: 'piper:x', rate: 2.5, volume: 0.5 });
+});
+
+test('a windows voice still restarts the sentence', async () => {
+  const { engine, player } = liveHarness([para('Uno.')]);
+  player.setVoice('Microsoft Elsa');
+  player.play();
+  await flush();
+  player.setRate(2);
+  await flush();
+  assert.equal(engine.calls.length, 2);
+  assert.deepEqual(engine.adjusted, []);
+});
+
+test('rates follow the voice', () => {
+  const { player } = liveHarness([para('Uno.')]);
+  player.setVoice('piper:x');
+  assert.equal(player.rates, AUDIO_RATES);
+  player.setRate(3.5);
+  assert.equal(player.rate, 3.5);
+  player.setVoice('Microsoft Elsa');
+  assert.equal(player.rates, RATE_LEVELS);
+  assert.equal(player.rate, 3);
+  player.setVoice('piper:y');
+  assert.equal(player.rate, 3.5);
+});
+
+test('the next sentence is prepared while this one is said', async () => {
+  const { engine, player } = liveHarness([para('Uno.', 'Due.')]);
+  player.setVoice('piper:x');
+  player.play();
+  await flush();
+  assert.deepEqual(engine.calls.map(({ text }) => text), ['Uno.']);
+  assert.deepEqual(engine.prepared, [{ text: 'Due.', voiceId: 'piper:x', lang: null }]);
+});
+
+test('faster at four stays at four', () => {
+  const { player } = liveHarness([para('Uno.')]);
+  player.setVoice('piper:x');
+  player.setRate(4);
+  assert.equal(nextRate(player.rate, player.rates), 4);
+  assert.equal(prevRate(0.5, player.rates), 0.5);
+  assert.equal(nextRate(3.9, player.rates), 4);
+});
+
+test('a live speed change gives the sentence the time of its new speed', async () => {
+  const { engine, player } = liveHarness([para('x'.repeat(200))]);
+  const errors = [];
+  player.setVoice('piper:x');
+  player.setRate(4);
+  player.play();
+  await flush();
+  mock.timers.tick(speakWatchdogMs('x'.repeat(200), 4) - 10);
+  player.setRate(0.5);
+  mock.timers.tick(speakWatchdogMs('x'.repeat(200), 4));
+  await flush();
+  assert.equal(player.state, 'playing');
+  assert.deepEqual(errors, []);
+  assert.equal(engine.calls.length, 1);
 });

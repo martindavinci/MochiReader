@@ -1,0 +1,5 @@
+Sonic library, vendored for MochiReader.
+Source: https://github.com/waywardgeek/sonic
+Commit: b93885dcb70aae50c6f76b0fe4e0868f029a077e
+Files: sonic.c, sonic.h, LICENSE (unchanged).
+License: Apache-2.0.

@@ -62,7 +62,8 @@ built with NSIS, whose LZMA compression module is under the Common Public Licens
 1.0, with the special exception quoted at the end of the NSIS license below.
 The source code of NSIS: ${NSIS_SOURCE}`;
 
-// What cargo metadata cannot see: the files under app/vendor/, the Microsoft loader
+// What cargo metadata cannot see: the files under app/vendor/, Sonic in
+// src-tauri/vendor/sonic/ (C, compiled into the program), the Microsoft loader
 // that webview2-com-sys links statically into the program, and the Rust standard
 // library, linked statically too.
 // webview2-com-sys holds x64/WebView2LoaderStatic.lib from the Microsoft.Web.WebView2
@@ -96,6 +97,12 @@ export const VENDORED = [
     version: '1.0.3800.47',
     license: 'BSD-3-Clause',
     licenseFile: 'tools/vendored-licenses/webview2-sdk-LICENSE',
+  },
+  {
+    name: 'Sonic',
+    version: 'b93885dc',
+    license: 'Apache-2.0',
+    licenseFile: 'src-tauri/vendor/sonic/LICENSE',
   },
   {
     name: 'Rust standard library',

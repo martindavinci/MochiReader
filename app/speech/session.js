@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Loads with the first reading, not with the app: this module brings all of app/speech with it.
 import { getLang, t } from '../core/i18n.js';
+import { AudioEngine } from './engine-audio.js';
+import { RoutedEngine } from './engine-router.js';
 import { closestVoice, languageName, WebSpeechEngine } from './engine-web.js';
 import { extractBlocks } from './extract.js';
 import { createHighlighter, HIGHLIGHT_NAME } from './highlight.js';
 import { detectLang, parseLangTag } from './lang.js';
 import { createMediaKeys } from './media-keys.js';
 import { lineOfPlace, placeOfLine, sentenceAt, sentenceFrom, sentenceRange } from './place.js';
-import { ERROR_ENGINE, nextRate, prevRate, RATE_LEVELS, SpeechPlayer } from './player.js';
+import { ERROR_ENGINE, nextRate, prevRate, SpeechPlayer } from './player.js';
 import { caretAt } from '../core/caret.js';
 import { createSpeechBar } from '../ui/speechbar.js';
 
@@ -76,7 +78,7 @@ class SpeechSession {
   #watched = new WeakSet();
 
   constructor({
-    engine = new WebSpeechEngine(),
+    engine = null,
     sleep,
     makeBar = createSpeechBar,
     makeMedia = createMediaKeys,
@@ -90,7 +92,7 @@ class SpeechSession {
     onReading = () => {},
     sourceMode,
   }) {
-    this.#engine = engine;
+    this.#engine = engine ?? new RoutedEngine({ web: new WebSpeechEngine(), audio: new AudioEngine({ invoke }) });
     this.#invoke = invoke;
     this.#save = save;
     this.#isInFront = isInFront;
@@ -101,7 +103,7 @@ class SpeechSession {
     this.#onReading = onReading;
     this.#sourceMode = sourceMode;
     this.#player = new SpeechPlayer({
-      engine,
+      engine: this.#engine,
       sleep,
       onSentence: (at, sentence) => this.#onSentence(at, sentence),
       onState: (state) => this.#onState(state),
@@ -170,8 +172,8 @@ class SpeechSession {
       'speech.prevBlock': () => player.prevBlock(),
       'speech.nextSection': () => player.nextSection(),
       'speech.prevSection': () => this.#prevSection(),
-      'speech.faster': () => this.#setRate(nextRate(player.rate)),
-      'speech.slower': () => this.#setRate(prevRate(player.rate)),
+      'speech.faster': () => this.#setRate(nextRate(player.rate, player.rates)),
+      'speech.slower': () => this.#setRate(prevRate(player.rate, player.rates)),
       'speech.follow': () => this.#follow(),
       'speech.goToTab': () => this.#showEntry(this.#entry),
     };
@@ -243,7 +245,7 @@ class SpeechSession {
       lang: this.#lang,
       voice: this.#voiceId,
       rate: this.#player.rate,
-      rates: RATE_LEVELS,
+      rates: this.#player.rates,
       volume: this.#player.volume,
       following: this.#following,
       audioPlaying: this.#media.audioPlaying(),
@@ -500,7 +502,7 @@ class SpeechSession {
       name: this.#nameOf(this.#entry),
       playing: this.#player.state === STATE_PLAYING,
       rate: this.#player.rate,
-      rates: RATE_LEVELS,
+      rates: this.#player.rates,
       volume: this.#player.volume,
       voices: this.#voices.filter((voice) => parseLangTag(voice.lang).language === language),
       voiceId: this.#voiceId,

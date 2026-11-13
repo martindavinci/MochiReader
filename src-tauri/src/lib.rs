@@ -9,6 +9,7 @@ mod raw_html;
 pub mod render;
 pub mod state;
 pub mod timing;
+pub mod tts;
 pub mod vault;
 
 use docs::{Docs, OpenError, OpenedDoc, PendingPaths};
@@ -485,6 +486,9 @@ pub fn run() {
         .manage(docs)
         .manage(pending)
         .manage(session)
+        .manage(std::sync::Arc::new(tts::Service::with(
+            std::sync::Arc::new(tts::Router::new()),
+        )))
         .register_asynchronous_uri_scheme_protocol(PROTOCOL, move |_, request, responder| {
             let roots = roots.clone();
             let path = request.uri().path().to_string();
@@ -519,6 +523,10 @@ pub fn run() {
             state_move_bookmarks,
             close_ready,
             licenses_text,
+            tts::tts_speak,
+            tts::tts_prepare,
+            tts::tts_restretch,
+            tts::tts_voices,
             #[cfg(feature = "smoke")]
             smoke_write_dump,
             #[cfg(feature = "smoke")]

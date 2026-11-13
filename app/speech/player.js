@@ -5,8 +5,13 @@
  *
  * SpeechEngine:
  *   voices(): Promise<{id, name, lang}[]>   local voices only
- *   speak(text, {voiceId, rate, lang}): Promise<'end'|'stopped'|'error'>
+ *   speak(text, {voiceId, rate, volume, lang}): Promise<'end'|'stopped'|'error'>
  *   stop(): void
+ * and may have, for engines whose voices have speeds of their own or hear a new speed while they speak:
+ *   rates(voiceId): number[]                  the speeds of that voice, RATE_LEVELS without it
+ *   live(voiceId): boolean                    a new speed or volume reaches the sentence being said
+ *   adjust({voiceId, rate, volume}): void     gives it to that sentence
+ *   prepare(text, {voiceId, lang}): void      makes the next sentence ready while this one is said
  *
  * Callbacks:
  *   onSentence({block, sentence}, sentence)  a sentence starts, or the position moved while silent
@@ -46,15 +51,15 @@ export function speakWatchdogMs(text, rate) {
 const isRate = (rate) => typeof rate === 'number' && !Number.isNaN(rate);
 
 /** The level after this rate, for the + key. The last level stays where it is, and what is no rate gets the normal speed. */
-export function nextRate(rate) {
+export function nextRate(rate, levels = RATE_LEVELS) {
   if (!isRate(rate)) return DEFAULT_RATE;
-  return RATE_LEVELS.find((level) => level > rate) ?? MAX_RATE;
+  return levels.find((level) => level > rate) ?? levels.at(-1);
 }
 
 /** The level before this rate, for the - key. The first level stays where it is, and what is no rate gets the normal speed. */
-export function prevRate(rate) {
+export function prevRate(rate, levels = RATE_LEVELS) {
   if (!isRate(rate)) return DEFAULT_RATE;
-  return RATE_LEVELS.findLast((level) => level < rate) ?? MIN_RATE;
+  return levels.findLast((level) => level < rate) ?? levels[0];
 }
 
 const clamp = (value, low, high) => Math.min(Math.max(value, low), high);
@@ -67,9 +72,10 @@ function pauseAfter(block) {
   return ITEM_PAUSE_MS;
 }
 
-function nearestLevel(rate) {
-  const distance = (level) => Math.abs(level - rate);
-  return RATE_LEVELS.reduce((best, level) => (distance(level) < distance(best) ? level : best));
+function nearestLevel(rate, levels) {
+  const wanted = clamp(rate, levels[0], levels.at(-1));
+  const distance = (level) => Math.abs(level - wanted);
+  return levels.reduce((best, level) => (distance(level) < distance(best) ? level : best));
 }
 
 const isHeading = (block) => block.kind === 'heading';
@@ -89,12 +95,16 @@ export class SpeechPlayer {
   #position = { block: 0, sentence: 0 };
   #state = 'idle';
   #rate = DEFAULT_RATE;
+  /** The speed last asked for: a voice with fewer speeds takes the closest, and the next voice starts from it again. */
+  #wantedRate = DEFAULT_RATE;
   #volume = FULL_VOLUME;
   #voiceId = null;
   #lang = null;
   /** Bumped to cancel the reading loop in progress: a stale loop exits at its next check. */
   #run = 0;
   #watchdog = null;
+  /** Starts the time of the sentence being said again, after its speed changed while it was said. */
+  #rearmWatchdog = noop;
   /**
    * Set during the gap between two blocks: the sentence that comes next, not announced yet.
    * Until then #position stays on the sentence just heard, so moving counts from there.
@@ -119,6 +129,11 @@ export class SpeechPlayer {
 
   get rate() {
     return this.#rate;
+  }
+
+  /** The speeds of the voice in use. */
+  get rates() {
+    return this.#levels();
   }
 
   get volume() {
@@ -216,30 +231,46 @@ export class SpeechPlayer {
 
   setRate(rate) {
     if (!isRate(rate)) return;
-    const next = nearestLevel(clamp(rate, MIN_RATE, MAX_RATE));
+    this.#wantedRate = rate;
+    const next = nearestLevel(rate, this.#levels());
     if (next === this.#rate) return;
     this.#rate = next;
-    this.#restartIfPlaying();
+    this.#changed();
   }
 
-  /** @param {number} volume From 0 to 1. What is not a number changes nothing; the sentence being said starts again. */
+  /** @param {number} volume From 0 to 1. What is not a number changes nothing. */
   setVolume(volume) {
     if (typeof volume !== 'number' || Number.isNaN(volume)) return;
     const next = clamp(volume, 0, FULL_VOLUME);
     if (next === this.#volume) return;
     this.#volume = next;
-    this.#restartIfPlaying();
+    this.#changed();
   }
 
   setVoice(voiceId) {
     if (voiceId === this.#voiceId) return;
     this.#voiceId = voiceId;
+    this.#rate = nearestLevel(this.#wantedRate, this.#levels());
     this.#restartIfPlaying();
   }
 
   /** The language given to the engine, from the next sentence on. */
   setLang(lang) {
     this.#lang = lang;
+  }
+
+  #levels() {
+    return this.#engine.rates?.(this.#voiceId) ?? RATE_LEVELS;
+  }
+
+  /** A voice that hears a new speed or volume while it speaks gets it there; any other says the sentence again. */
+  #changed() {
+    if (this.#engine.live?.(this.#voiceId)) {
+      this.#guarded(() => this.#engine.adjust({ voiceId: this.#voiceId, rate: this.#rate, volume: this.#volume }));
+      this.#rearmWatchdog();
+    } else {
+      this.#restartIfPlaying();
+    }
   }
 
   #setState(state) {
@@ -326,6 +357,7 @@ export class SpeechPlayer {
     this.#run += 1;
     this.#upcoming = null;
     clearTimeout(this.#watchdog);
+    this.#rearmWatchdog = noop;
   }
 
   /** During a gap nothing is being spoken, and what the engine says by then is not this player's to cut. */
@@ -373,7 +405,7 @@ export class SpeechPlayer {
       this.#notifySentence();
       if (run !== this.#run) return;
       const { block, sentence } = this.#position;
-      const outcome = await this.#speak(this.#blocks[block].sentences[sentence].text);
+      const outcome = await this.#speak(this.#blocks[block].sentences[sentence].text, this.#sentenceAfter());
       if (run !== this.#run) return;
       if (outcome !== 'end') {
         this.#interrupt(outcome);
@@ -396,20 +428,36 @@ export class SpeechPlayer {
     }
   }
 
-  /** An engine that throws, rejects or never answers counts as an engine error. */
-  async #speak(text) {
+  /**
+   * An engine that throws, rejects or never answers counts as an engine error. `next` is the place of the sentence
+   * after this one, which the engine may make ready meanwhile.
+   */
+  async #speak(text, next) {
+    let expire;
     let timer;
     const expired = new Promise((resolve) => {
-      timer = setTimeout(resolve, speakWatchdogMs(text, this.#rate), 'error');
+      expire = resolve;
     });
-    this.#watchdog = timer;
+    const arm = () => {
+      clearTimeout(timer);
+      timer = setTimeout(expire, speakWatchdogMs(text, this.#rate), 'error');
+      this.#watchdog = timer;
+    };
+    arm();
+    this.#rearmWatchdog = arm;
     const options = { voiceId: this.#voiceId, rate: this.#rate, volume: this.#volume, lang: this.#lang };
     try {
-      return await Promise.race([this.#engine.speak(text, options), expired]);
+      const said = this.#engine.speak(text, options);
+      if (next && this.#engine.prepare) {
+        const { voiceId, lang } = options;
+        this.#guarded(() => this.#engine.prepare(this.#blocks[next.block].sentences[next.sentence].text, { voiceId, lang }));
+      }
+      return await Promise.race([said, expired]);
     } catch {
       return 'error';
     } finally {
       clearTimeout(timer);
+      if (this.#rearmWatchdog === arm) this.#rearmWatchdog = noop;
     }
   }
 
