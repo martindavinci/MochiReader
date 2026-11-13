@@ -20,6 +20,8 @@ const RATE = [
   ['speech.faster', 'faster', 'speech.faster', '+'],
 ];
 const STOP = ['speech.stop', 'stop', 'speech.stop', null];
+/** The value of the last entry of the list of voices, which opens the voice manager. */
+const MORE_VOICES = '#more';
 // The speeds offered with one click, where the voice has them.
 const PRESET_RATES = [1, 1.5, 2, 2.5, 3, 3.5, 4];
 const PERCENT = 100;
@@ -130,10 +132,11 @@ function createSoundPanel({ onRate, onVolume }) {
 /**
  * The bar of a reading: only there while there is one.
  * @param {{onCommand: (action: string) => void, onVoice: (voiceId: string) => void, onRate?: (rate: number) => void,
- *   onVolume?: (volume: number) => void}} handlers
+ *   onVolume?: (volume: number) => void, onMoreVoices?: () => void}} handlers `onMoreVoices` adds a last entry to the
+ *   list of voices, which opens the voice manager instead of choosing a voice.
  * @returns {{show: (view: object) => void, hide: () => void}}
  */
-export function createSpeechBar({ onCommand, onVoice, onRate = () => {}, onVolume = () => {} }) {
+export function createSpeechBar({ onCommand, onVoice, onRate = () => {}, onVolume = () => {}, onMoreVoices = null }) {
   const bar = made('footer');
   bar.id = BAR_ID;
   bar.hidden = true;
@@ -184,8 +187,16 @@ export function createSpeechBar({ onCommand, onVoice, onRate = () => {}, onVolum
   voice.addEventListener('mousedown', () => {
     choosingByMouse = true;
   });
+  let currentVoice = null;
   voice.addEventListener('change', () => {
-    onVoice(voice.value);
+    if (voice.value === MORE_VOICES) {
+      const back = [...voice.querySelectorAll('option')].find((option) => option.value === currentVoice);
+      if (back) back.selected = true;
+      onMoreVoices?.();
+    } else {
+      currentVoice = voice.value;
+      onVoice(currentVoice);
+    }
     if (choosingByMouse) voice.blur();
     choosingByMouse = false;
   });
@@ -204,6 +215,7 @@ export function createSpeechBar({ onCommand, onVoice, onRate = () => {}, onVolum
   document.getElementById('panes').after(bar);
 
   const drawVoices = (voices, voiceId) => {
+    currentVoice = voiceId;
     voice.replaceChildren(...voices.map(({ id, name: voiceName }) => {
       const option = made('option', undefined, shortVoiceName(voiceName));
       option.setAttribute('value', id);
@@ -211,6 +223,11 @@ export function createSpeechBar({ onCommand, onVoice, onRate = () => {}, onVolum
       if (id === voiceId) option.setAttribute('selected', '');
       return option;
     }));
+    if (onMoreVoices) {
+      const more = made('option', 'speech-more-voices', t('voices.more'));
+      more.setAttribute('value', MORE_VOICES);
+      voice.append(more);
+    }
     named(voice, t('speech.voice'));
   };
 

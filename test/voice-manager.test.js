@@ -88,7 +88,7 @@ test('an installed voice can be deleted and says when it is in use', () => {
 test('languages of open documents come first', () => {
   const { host } = draw({ languages: ['de-DE', 'it', 'en'] });
   const sections = [...host.querySelectorAll('.voice-language')].map((part) => part.dataset.lang);
-  assert.deepEqual(sections, ['de', 'it', 'en', '']);
+  assert.deepEqual(sections, ['de', 'it', 'en']);
 });
 
 test('voices of other languages are under all languages', () => {
@@ -97,10 +97,11 @@ test('voices of other languages are under all languages', () => {
   assert.deepEqual(titles, ['Italian', en['voices.allLanguages']]);
 });
 
-test('japanese says no clean voice exists', () => {
+test('a language without voices to download is not named', () => {
   const { host } = draw({ languages: ['ja', 'en'] });
-  const japanese = host.querySelector('[data-lang="ja"]');
-  assert.equal(japanese.querySelector('.voice-none').textContent, en['voices.noCleanVoice'].replaceAll('{lang}', 'Japanese'));
+  assert.equal(host.querySelector('[data-lang="ja"]'), null);
+  assert.equal(host.querySelector('.voice-language').dataset.lang, 'en');
+  assert.ok(!host.textContent.includes('Japanese'));
 });
 
 test('a failed download says why on its row and offers to try again', () => {
@@ -122,9 +123,8 @@ test('the license opens its card and the play button its sample', () => {
 test('under all languages each language has its name over its voices', () => {
   const { host } = draw({ languages: ['it'] });
   const names = [...host.querySelectorAll('.voice-sublanguage h3')].map((title) => title.textContent);
-  assert.deepEqual(names, ['English', 'German', 'Japanese', 'ko', 'zh']);
+  assert.deepEqual(names, ['English', 'German']);
   assert.ok(host.querySelector('.voice-sublanguage[data-lang="de"] [data-voice="de_DE-thorsten-medium"]'));
-  assert.ok(host.querySelector('.voice-sublanguage[data-lang="ja"] .voice-none'));
 });
 
 test('the sample playing turns its play button into stop', () => {

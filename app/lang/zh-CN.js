@@ -151,7 +151,6 @@ export default {
   'voices.quality.medium': '良好音质',
   'voices.quality.high': '高音质',
   'voices.megabytes': '{size} MB',
-  'voices.noCleanVoice': '这里暂时没有许可允许提供的{lang}语音。{lang}仍可由 Windows 语音朗读。',
   'voices.networkError': '下载未完成。请检查网络连接后重试。',
   'voices.hashError': '下载的文件已损坏，未予保留。请重试。',
   'voices.engineError': '无法安装语音引擎。请重试。',

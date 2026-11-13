@@ -151,7 +151,6 @@ export default {
   'voices.quality.medium': '좋은 품질',
   'voices.quality.high': '높은 품질',
   'voices.megabytes': '{size}MB',
-  'voices.noCleanVoice': '{lang} 음성은 아직 제공이 허용된 라이선스의 것이 없습니다. {lang}는 계속 Windows 음성으로 읽습니다.',
   'voices.networkError': '내려받기가 끝나지 않았습니다. 연결을 확인하고 다시 시도하세요.',
   'voices.hashError': '내려받은 파일이 손상되어 저장하지 않았습니다. 다시 시도하세요.',
   'voices.engineError': '음성 엔진을 설치하지 못했습니다. 다시 시도하세요.',

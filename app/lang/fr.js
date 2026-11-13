@@ -151,7 +151,6 @@ export default {
   'voices.quality.medium': 'Bonne qualité',
   'voices.quality.high': 'Haute qualité',
   'voices.megabytes': '{size} Mo',
-  'voices.noCleanVoice': 'Aucune voix en {lang} ne peut encore être proposée ici avec une licence qui le permet. Les voix de Windows lisent toujours le {lang}.',
   'voices.networkError': 'Le téléchargement n’a pas abouti. Vérifiez la connexion et réessayez.',
   'voices.hashError': 'Le fichier téléchargé était endommagé et n’a pas été gardé. Réessayez.',
   'voices.engineError': 'Le moteur vocal n’a pas pu être installé. Réessayez.',

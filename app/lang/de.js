@@ -151,7 +151,6 @@ export default {
   'voices.quality.medium': 'Gute Qualität',
   'voices.quality.high': 'Hohe Qualität',
   'voices.megabytes': '{size} MB',
-  'voices.noCleanVoice': 'Für {lang} gibt es hier noch keine Stimme mit einer Lizenz, die das erlaubt. Die Windows-Stimmen lesen {lang} weiterhin vor.',
   'voices.networkError': 'Der Download wurde nicht abgeschlossen. Prüfe die Verbindung und versuche es erneut.',
   'voices.hashError': 'Die heruntergeladene Datei war beschädigt und wurde nicht behalten. Versuche es erneut.',
   'voices.engineError': 'Die Sprach-Engine konnte nicht installiert werden. Versuche es erneut.',

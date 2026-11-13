@@ -117,29 +117,24 @@ export function renderVoiceManager(host, view, handlers) {
     return item;
   };
 
-  const voicesOf = (language) => catalog.voices.filter((voice) => languageOf(voice.lang) === language);
-
-  /** The voices of one language, or why it has none. */
+  /** The voices of one language. A language without any is not named at all: the voices of Windows read it. */
   const listOf = (language) => {
-    const voices = voicesOf(language);
-    if (voices.length === 0) return [element('p', 'voice-none', t('voices.noCleanVoice', { lang: nameOf(language) }))];
     const list = element('ul', 'voice-list');
-    list.append(...voices.map(row));
-    return [list];
+    list.append(...catalog.voices.filter((voice) => languageOf(voice.lang) === language).map(row));
+    return list;
   };
 
   const section = (language) => {
     const part = element('section', 'voice-language');
     part.dataset.lang = language;
-    part.append(element('h2', 'option-group', nameOf(language)), ...listOf(language));
+    part.append(element('h2', 'option-group', nameOf(language)), listOf(language));
     return part;
   };
 
-  const first = [...new Set(view.languages.map(languageOf))].filter((language) => (
-    catalog.unavailable.includes(language) || catalog.voices.some((voice) => languageOf(voice.lang) === language)
-  ));
+  const voiced = new Set(catalog.voices.map((voice) => languageOf(voice.lang)));
+  const first = [...new Set(view.languages.map(languageOf))].filter((language) => voiced.has(language));
   const shown = new Set(first);
-  const rest = [...new Set([...catalog.voices.map((voice) => languageOf(voice.lang)), ...catalog.unavailable])]
+  const rest = [...voiced]
     .filter((language) => !shown.has(language))
     .sort((one, other) => nameOf(one).localeCompare(nameOf(other)));
 
@@ -166,7 +161,7 @@ export function renderVoiceManager(host, view, handlers) {
     for (const language of rest) {
       const part = element('div', 'voice-sublanguage');
       part.dataset.lang = language;
-      part.append(element('h3', 'voice-language-name', nameOf(language)), ...listOf(language));
+      part.append(element('h3', 'voice-language-name', nameOf(language)), listOf(language));
       all.append(part);
     }
     body.append(all);

@@ -455,6 +455,7 @@ function loadSpeech() {
       nameOf: ({ path }) => fileName(path),
       showMessage: showToast,
       showVoiceHelp,
+      showVoices: () => showPanel(PANEL_VOICES),
       sourceMode: () => options.sourceMode,
       showEntry: (entry) => {
         const tab = tabs.all().find(({ id }) => entries.get(id) === entry);

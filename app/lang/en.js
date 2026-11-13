@@ -151,7 +151,6 @@ export default {
   'voices.quality.medium': 'Good quality',
   'voices.quality.high': 'High quality',
   'voices.megabytes': '{size} MB',
-  'voices.noCleanVoice': 'No {lang} voice with a license that allows it can be offered here yet. The Windows voices still read {lang}.',
   'voices.networkError': 'The download did not finish. Check the connection and try again.',
   'voices.hashError': 'The downloaded file was damaged, so it was not kept. Try again.',
   'voices.engineError': 'The voice engine could not be installed. Try again.',

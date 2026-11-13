@@ -151,7 +151,6 @@ export default {
   'voices.quality.medium': '標準品質',
   'voices.quality.high': '高品質',
   'voices.megabytes': '{size} MB',
-  'voices.noCleanVoice': '{lang}の音声は、提供を許すライセンスのものがまだありません。{lang}は引き続き Windows の音声で読み上げます。',
   'voices.networkError': 'ダウンロードが完了しませんでした。接続を確認して、もう一度お試しください。',
   'voices.hashError': 'ダウンロードしたファイルが壊れていたため、保存しませんでした。もう一度お試しください。',
   'voices.engineError': '音声エンジンをインストールできませんでした。もう一度お試しください。',

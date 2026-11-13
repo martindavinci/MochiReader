@@ -94,6 +94,7 @@ class SpeechSession {
     nameOf,
     showMessage,
     showVoiceHelp,
+    showVoices = null,
     showEntry = () => {},
     onReading = () => {},
     sourceMode,
@@ -128,6 +129,7 @@ class SpeechSession {
       onVoice: (voiceId) => this.#chooseVoice(voiceId),
       onRate: (rate) => this.active() && this.#setRate(rate),
       onVolume: (volume) => this.active() && this.#setVolume(volume),
+      onMoreVoices: showVoices,
     });
   }
 

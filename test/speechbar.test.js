@@ -165,3 +165,26 @@ test('a voice chosen with the mouse leaves the keys to the text; with the keyboa
   assert.equal(blurs, 1);
 });
 
+test('the last entry of the voices opens the voice manager and keeps the voice', () => {
+  setLang('en');
+  const { document, window } = parseHTML(PAGE);
+  globalThis.document = document;
+  const chosen = [];
+  let more = 0;
+  const bar = createSpeechBar({
+    onCommand: () => {},
+    onVoice: (id) => chosen.push(id),
+    onMoreVoices: () => {
+      more += 1;
+    },
+  });
+  bar.show(VIEW);
+  const select = document.querySelector('.speech-voice');
+  const last = select.querySelector('option:last-child');
+  assert.equal(last.textContent, en['voices.more']);
+  select.querySelectorAll('option').forEach((option) => option.toggleAttribute('selected', option === last));
+  select.dispatchEvent(new window.Event('change'));
+  assert.equal(more, 1);
+  assert.deepEqual(chosen, []);
+  assert.equal(select.querySelector('option[selected]').getAttribute('value'), 'cosimo');
+});
