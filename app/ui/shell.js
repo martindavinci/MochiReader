@@ -114,7 +114,7 @@ let speech = null;
 let speechLoading = null;
 /** The downloads of voices this run has heard of, by voice: what the manager draws on each row. */
 const downloads = new Map();
-/** What plays the sample of a voice, so that a second one stops the first. */
+/** The sample playing, `{id, stop}`, so that a second one stops the first and its button can stop it. */
 let preview = null;
 
 const twoFrames = () => new Promise((resolve) => {
@@ -1028,6 +1028,7 @@ async function drawVoicesPanel() {
     languages: voiceLanguages(),
     inUse,
     nameOf: languageName,
+    previewing: preview?.id ?? null,
   }, {
     onDownload: (voiceId) => {
       downloads.set(voiceId, { phase: 'queued' });
@@ -1046,32 +1047,61 @@ async function drawVoicesPanel() {
   refocus();
 }
 
+/** Stops the sample playing, if any, and gives its button back its play sign. */
+function stopPreview() {
+  const playing = preview;
+  preview = null;
+  if (!playing) return;
+  playing.stop();
+  if (panels.current() === PANEL_VOICES) drawVoicesPanel();
+}
+
 /**
  * A voice not downloaded plays its published sample, which Rust fetches and the page plays from memory. A voice on
- * this PC says one sentence in its own language.
+ * this PC says one sentence in its own language. Pressed again while it plays, the button stops it.
  */
 async function previewVoice(voice) {
-  preview?.stop();
+  const again = preview?.id === voice.id;
+  stopPreview();
+  if (again) return;
+  const playing = { id: voice.id, stop: () => {} };
+  preview = playing;
+  const over = () => {
+    if (preview !== playing) return;
+    preview = null;
+    if (panels.current() === PANEL_VOICES) drawVoicesPanel();
+  };
+  if (panels.current() === PANEL_VOICES) drawVoicesPanel();
   if (voice.installed) {
     const [{ AudioEngine }, { PREVIEW_TEXT }] = await Promise.all([
       import('../speech/engine-audio.js'),
       import('./voice-manager.js'),
     ]);
+    if (preview !== playing) return;
     const engine = new AudioEngine({ invoke });
     const language = voice.lang.split('-')[0];
-    preview = engine;
-    engine.speak(PREVIEW_TEXT[language] ?? PREVIEW_TEXT.en, { voiceId: `${PIPER_PREFIX}${voice.id}` });
+    playing.stop = () => engine.stop();
+    engine.speak(PREVIEW_TEXT[language] ?? PREVIEW_TEXT.en, { voiceId: `${PIPER_PREFIX}${voice.id}` }).finally(over);
     return;
   }
   try {
     const bytes = await invoke('tts_sample', { voiceId: voice.id });
+    if (preview !== playing) return;
     const url = URL.createObjectURL(new Blob([bytes], { type: 'audio/mpeg' }));
     const audio = new Audio(url);
     const release = () => URL.revokeObjectURL(url);
-    audio.addEventListener('ended', release, { once: true });
-    preview = { stop: () => { audio.pause(); release(); } };
+    audio.addEventListener('ended', () => {
+      release();
+      over();
+    }, { once: true });
+    playing.stop = () => {
+      audio.pause();
+      release();
+    };
     await audio.play();
   } catch {
+    if (preview !== playing) return;
+    over();
     showToast(t('voices.networkError'), { glyph: 'alert' });
   }
 }
@@ -1093,14 +1123,15 @@ async function onDownload({ voiceId, phase, received, total, error }) {
 }
 
 /** Progress moves only the bar and the number of its row: the rest of the panel, and its focus, stay as they are. */
-function updateDownloadRow(voiceId) {
+async function updateDownloadRow(voiceId) {
+  const { progressText } = await import('./voice-manager.js');
   const state = downloads.get(voiceId);
   const row = panelHost.querySelector(`[data-voice="${voiceId}"]`);
   if (!state?.total || !row) return;
   const share = Math.floor(((state.received ?? 0) * 100) / state.total);
   row.querySelector('progress')?.setAttribute('value', String(share));
   const status = row.querySelector('.voice-status');
-  if (status) status.textContent = t('voices.downloading', { percent: share });
+  if (status) status.textContent = progressText(state);
 }
 
 function drawOptionsPanel() {

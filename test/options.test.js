@@ -225,7 +225,7 @@ test('voices are grouped on this pc and online, with a way to manage them', () =
   });
   const labels = [...field('voice-it').querySelectorAll('optgroup')].map((group) => group.getAttribute('label'));
   assert.deepEqual(labels, [en['voices.onThisPc'], en['voices.online']]);
-  assert.deepEqual(values(field('voice-it')), ['elsa', 'piper:it_IT-paola-medium', 'edge:it-IT-ElsaNeural']);
+  assert.deepEqual(values(field('voice-it')), ['elsa', 'piper:it_IT-paola-medium', 'edge:it-IT-ElsaNeural', '#more']);
   assert.ok(field('voice-it').querySelector('[value^="edge:"]').textContent.includes(en['edge.online']));
   host.querySelector('.voice-manage').click();
   assert.equal(managed, 1);
@@ -236,4 +236,24 @@ test('without online voices the list has no groups', () => {
   renderVoiceOptions(host, GROUPS, () => {});
   assert.equal(field('voice-it').querySelectorAll('optgroup').length, 0);
   assert.equal(host.querySelector('.voice-manage'), null);
+});
+
+test('the last entry of a list of voices opens the voice manager and chooses no voice', () => {
+  setLang('en');
+  const { host, field, choose } = draw();
+  const chosen = [];
+  let managed = 0;
+  renderVoiceOptions(host, GROUPS, (lang, id) => chosen.push([lang, id]), {
+    onManage: () => {
+      managed += 1;
+    },
+  });
+  const more = field('voice-it').querySelector('option:last-child');
+  assert.equal(more.textContent, en['voices.more']);
+  choose('voice-it', '#more');
+  assert.equal(managed, 1);
+  assert.equal(selected(field('voice-it')), 'cosimo');
+  assert.deepEqual(chosen, []);
+  choose('voice-it', 'elsa');
+  assert.deepEqual(chosen, [['it', 'elsa']]);
 });

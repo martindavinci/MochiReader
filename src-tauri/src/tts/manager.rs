@@ -152,6 +152,7 @@ impl Voices {
     pub fn view(&self) -> CatalogView {
         let engine = engine_pack::state(&self.places.engine);
         let (state, engine_bytes) = match engine {
+            EngineState::Missing if !self.engine_published() => ("unpublished", 0),
             EngineState::Missing => ("missing", 0),
             EngineState::Ready { bytes } => ("ready", bytes),
             EngineState::Broken(_) => ("broken", 0),
@@ -313,6 +314,16 @@ impl Voices {
             voice.name, voice.id, voice.license, voice.card, voice.model.url
         );
         std::fs::write(dir.join(LICENSE_FILE), license).map_err(voice_error)
+    }
+
+    /// Whether the catalog names an engine pack that can be downloaded. A build made before the pack was released
+    /// carries no hash for it, and so no voice can be downloaded with it.
+    fn engine_published(&self) -> bool {
+        #[cfg(feature = "smoke")]
+        if std::env::var_os(SMOKE_ENGINE_ZIP).is_some() {
+            return true;
+        }
+        self.catalog.engine.sha256 != super::ENGINE_PENDING
     }
 
     fn install_engine(&self, cancel: &AtomicBool, report: &Report) -> Result<(), TtsError> {
@@ -506,6 +517,15 @@ mod tests {
                 lang: "it-IT".into()
             }]
         );
+    }
+
+    #[test]
+    fn an_engine_not_released_yet_says_so() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut catalog = catalog_with(b"model", b"{}");
+        catalog.engine.sha256 = crate::tts::ENGINE_PENDING.into();
+        let voices = voices_in(dir.path(), catalog);
+        assert_eq!(voices.view().engine.state, "unpublished");
     }
 
     #[test]

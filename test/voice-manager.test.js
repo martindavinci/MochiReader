@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { parseHTML } from 'linkedom';
 import { setLang } from '../app/core/i18n.js';
 import en from '../app/lang/en.js';
-import { renderVoiceManager } from '../app/ui/voice-manager.js';
+import { progressText, renderVoiceManager } from '../app/ui/voice-manager.js';
 
 const NAMES = { it: 'Italian', de: 'German', en: 'English', ja: 'Japanese' };
 const voice = (id, lang, extra = {}) => ({
@@ -88,7 +88,7 @@ test('an installed voice can be deleted and says when it is in use', () => {
 test('languages of open documents come first', () => {
   const { host } = draw({ languages: ['de-DE', 'it', 'en'] });
   const sections = [...host.querySelectorAll('.voice-language')].map((part) => part.dataset.lang);
-  assert.deepEqual(sections, ['de', 'it', 'en']);
+  assert.deepEqual(sections, ['de', 'it', 'en', '']);
 });
 
 test('voices of other languages are under all languages', () => {
@@ -117,4 +117,39 @@ test('the license opens its card and the play button its sample', () => {
   assert.deepEqual(calls[0], ['onCard', 'https://example.invalid/it_IT-paola-medium']);
   assert.equal(calls[1][0], 'onPreview');
   assert.equal(calls[1][1].id, 'it_IT-paola-medium');
+});
+
+test('under all languages each language has its name over its voices', () => {
+  const { host } = draw({ languages: ['it'] });
+  const names = [...host.querySelectorAll('.voice-sublanguage h3')].map((title) => title.textContent);
+  assert.deepEqual(names, ['English', 'German', 'Japanese', 'ko', 'zh']);
+  assert.ok(host.querySelector('.voice-sublanguage[data-lang="de"] [data-voice="de_DE-thorsten-medium"]'));
+  assert.ok(host.querySelector('.voice-sublanguage[data-lang="ja"] .voice-none'));
+});
+
+test('the sample playing turns its play button into stop', () => {
+  const { row, calls } = draw({ previewing: 'it_IT-paola-medium' });
+  const playing = row('it_IT-paola-medium').querySelector('.voice-preview');
+  assert.equal(playing.getAttribute('aria-label'), en['voices.stopPreview']);
+  assert.equal(playing.getAttribute('aria-pressed'), 'true');
+  assert.equal(row('de_DE-thorsten-medium').querySelector('.voice-preview').getAttribute('aria-label'), en['voices.preview']);
+  playing.click();
+  assert.equal(calls[0][0], 'onPreview');
+});
+
+test('without a released engine no voice can be downloaded, and the panel says why', () => {
+  const { host, row } = draw({ catalog: catalog({ engine: 'unpublished' }) });
+  const button = lastButton(row('it_IT-paola-medium'));
+  assert.equal(button.textContent, en['voices.notYet']);
+  assert.ok(button.hasAttribute('disabled'));
+  assert.equal(host.querySelector('.voice-engine').textContent, en['voices.engineUnpublished']);
+  assert.ok(row('it_IT-paola-medium').querySelector('.voice-preview'));
+});
+
+test('the engine download says it is the engine', () => {
+  const progress = new Map([['it_IT-paola-medium', { phase: 'engine', received: 1, total: 4 }]]);
+  const { row } = draw({ progress });
+  assert.equal(row('it_IT-paola-medium').querySelector('.voice-status').textContent, en['voices.engineDownloading'].replace('{percent}', '25'));
+  assert.equal(progressText({ phase: 'queued' }), en['voices.waiting']);
+  assert.equal(progressText({ phase: 'voice', received: 1, total: 2 }), '50%');
 });

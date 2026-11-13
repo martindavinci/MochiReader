@@ -21,6 +21,13 @@ export const PREVIEW_TEXT = {
 const languageOf = (tag) => tag.split('-')[0].toLowerCase();
 const megabytes = (bytes) => Math.max(1, Math.round(bytes / BYTES_PER_MB));
 
+/** What the row of a download under way says: the share once its size is known, and whether it is the engine. */
+export function progressText(state) {
+  if (!state?.total) return t('voices.waiting');
+  const percent = Math.floor(((state.received ?? 0) * PERCENT) / state.total);
+  return t(state.phase === 'engine' ? 'voices.engineDownloading' : 'voices.downloading', { percent });
+}
+
 const ERROR_KEYS = {
   network: 'voices.networkError',
   voice: 'voices.hashError',
@@ -38,7 +45,9 @@ const ERROR_KEYS = {
  *   languages: string[],
  *   inUse: Set<string>,
  *   nameOf: (language: string) => string,
- * }} view `languages` are those of the open documents and of the interface, which come first.
+ *   previewing?: string|null,
+ * }} view `languages` are those of the open documents and of the interface, which come first. `previewing` is the
+ *   voice whose sample is playing, whose play button stops it.
  * @param {{onDownload: (id: string) => void, onCancel: (id: string) => void, onDelete: (id: string) => void,
  *   onPreview: (voice: object) => void, onCard: (url: string) => void}} handlers
  */
@@ -46,6 +55,7 @@ export function renderVoiceManager(host, view, handlers) {
   const element = elementIn(host);
   const { catalog, progress, inUse, nameOf } = view;
   const engineMissing = catalog.engine.state !== 'ready';
+  const engineUnpublished = catalog.engine.state === 'unpublished';
 
   const button = (className, text, action) => {
     const made = element('button', `btn ${className}`, text);
@@ -55,15 +65,17 @@ export function renderVoiceManager(host, view, handlers) {
 
   const actionsOf = (voice) => {
     const actions = element('div', 'voice-actions');
-    const preview = element('button', 'btn btn-secondary voice-preview');
-    named(preview, t('voices.preview'));
-    preview.append(icon(host.ownerDocument, 'play', 12));
+    const playing = view.previewing === voice.id;
+    const preview = element('button', `btn btn-secondary voice-preview${playing ? ' is-playing' : ''}`);
+    named(preview, t(playing ? 'voices.stopPreview' : 'voices.preview'));
+    preview.setAttribute('aria-pressed', String(playing));
+    preview.append(icon(host.ownerDocument, playing ? 'stop' : 'play', 12));
     preview.addEventListener('click', () => handlers.onPreview(voice));
     actions.append(preview);
     const state = progress.get(voice.id);
     if ((state && BUSY.has(state.phase)) || (!state && voice.busy)) {
       const share = state?.total ? Math.floor(((state.received ?? 0) * PERCENT) / state.total) : null;
-      const text = share === null ? t('voices.waiting') : t('voices.downloading', { percent: share });
+      const text = progressText(state);
       const bar = element('progress', 'voice-progress');
       bar.setAttribute('max', String(PERCENT));
       if (share !== null) bar.setAttribute('value', String(share));
@@ -71,6 +83,10 @@ export function renderVoiceManager(host, view, handlers) {
     } else if (voice.installed) {
       if (inUse.has(voice.id)) actions.append(element('span', 'voice-badge', t('voices.inUse')));
       actions.append(button('btn-secondary', t('voices.delete'), () => handlers.onDelete(voice.id)));
+    } else if (engineUnpublished) {
+      const waiting = element('button', 'btn btn-neutral', t('voices.notYet'));
+      waiting.setAttribute('disabled', '');
+      actions.append(waiting);
     } else {
       const text = engineMissing
         ? t('voices.withEngine', { size: megabytes(catalog.engine.download) })
@@ -101,18 +117,21 @@ export function renderVoiceManager(host, view, handlers) {
     return item;
   };
 
-  const section = (title, voices, language) => {
+  const voicesOf = (language) => catalog.voices.filter((voice) => languageOf(voice.lang) === language);
+
+  /** The voices of one language, or why it has none. */
+  const listOf = (language) => {
+    const voices = voicesOf(language);
+    if (voices.length === 0) return [element('p', 'voice-none', t('voices.noCleanVoice', { lang: nameOf(language) }))];
+    const list = element('ul', 'voice-list');
+    list.append(...voices.map(row));
+    return [list];
+  };
+
+  const section = (language) => {
     const part = element('section', 'voice-language');
-    part.dataset.lang = language ?? '';
-    part.append(element('h2', 'option-group', title));
-    if (language && catalog.unavailable.includes(language) && voices.length === 0) {
-      part.append(element('p', 'voice-none', t('voices.noCleanVoice', { lang: nameOf(language) })));
-    }
-    if (voices.length > 0) {
-      const list = element('ul', 'voice-list');
-      list.append(...voices.map(row));
-      part.append(list);
-    }
+    part.dataset.lang = language;
+    part.append(element('h2', 'option-group', nameOf(language)), ...listOf(language));
     return part;
   };
 
@@ -120,11 +139,14 @@ export function renderVoiceManager(host, view, handlers) {
     catalog.unavailable.includes(language) || catalog.voices.some((voice) => languageOf(voice.lang) === language)
   ));
   const shown = new Set(first);
-  const rest = catalog.voices.filter((voice) => !shown.has(languageOf(voice.lang)));
+  const rest = [...new Set([...catalog.voices.map((voice) => languageOf(voice.lang)), ...catalog.unavailable])]
+    .filter((language) => !shown.has(language))
+    .sort((one, other) => nameOf(one).localeCompare(nameOf(other)));
 
   const summary = element('div', 'voice-summary');
   const engineText = {
     missing: () => t('voices.engineMissing', { size: megabytes(catalog.engine.download) }),
+    unpublished: () => t('voices.engineUnpublished'),
     ready: () => t('voices.engineReady', { size: megabytes(catalog.engine.bytes) }),
     broken: () => t('voices.engineBroken'),
   }[catalog.engine.state] ?? (() => t('voices.engineBroken'));
@@ -136,9 +158,18 @@ export function renderVoiceManager(host, view, handlers) {
 
   const body = element('div', 'panel-body voice-manager');
   body.append(summary);
-  for (const language of first) {
-    body.append(section(nameOf(language), catalog.voices.filter((voice) => languageOf(voice.lang) === language), language));
+  body.append(...first.map(section));
+  if (rest.length > 0) {
+    const all = element('section', 'voice-language');
+    all.dataset.lang = '';
+    all.append(element('h2', 'option-group', t('voices.allLanguages')));
+    for (const language of rest) {
+      const part = element('div', 'voice-sublanguage');
+      part.dataset.lang = language;
+      part.append(element('h3', 'voice-language-name', nameOf(language)), ...listOf(language));
+      all.append(part);
+    }
+    body.append(all);
   }
-  if (rest.length > 0) body.append(section(t('voices.allLanguages'), rest, null));
   host.replaceChildren(panelHead(host, { glyph: 'speaker', title: t('voices.title') }), body);
 }

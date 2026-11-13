@@ -9,6 +9,8 @@ const THEME_ATTRIBUTE = 'data-theme';
 const TEXT_SIZE_VARIABLE = '--text-size';
 const SYSTEM = 'system';
 const VOICE_OPTIONS_CLASS = 'voice-options';
+/** The value of the last entry of each list of voices, which opens the voice manager instead. */
+const MORE_VOICES = '#more';
 const ABOUT_CLASS = 'about';
 const ABOUT_MASCOT_PX = 32;
 const FOCUS_KEY = 'data-key';
@@ -156,7 +158,24 @@ export function renderVoiceOptions(host, groups, onVoice, { onManage } = {}) {
         select.append(group);
       }
     }
-    select.addEventListener('change', () => onVoice(lang, select.value));
+    if (onManage) {
+      const more = document.createElement('option');
+      more.setAttribute('value', MORE_VOICES);
+      more.textContent = t('voices.more');
+      select.append(more);
+    }
+    let current = voices.some((voice) => voice.id === selected) ? selected : [...local, ...online][0]?.id;
+    select.addEventListener('change', () => {
+      if (select.value !== MORE_VOICES) {
+        current = select.value;
+        onVoice(lang, current);
+        return;
+      }
+      // The entry opens the voice manager and is never the voice of the language.
+      const back = [...select.querySelectorAll('option')].find((option) => option.value === current);
+      if (back) back.selected = true;
+      onManage();
+    });
     const caption = document.createElement('span');
     caption.textContent = t('options.voice', { lang: name });
     const row = document.createElement('label');
