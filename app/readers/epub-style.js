@@ -5,8 +5,8 @@ const LIGHT = 'light';
 const SYSTEM = 'system';
 // The colours of app.css, which a frame cannot read from the page.
 const COLORS = {
-  [LIGHT]: { text: '#24231f', link: '#1f5fa8', line: '#e2dfd6', lineStrong: '#8e8a7f', surface: '#f2f0ea', mark: '#fde6a6', markText: '#24231f' },
-  [DARK]: { text: '#dddbd4', link: '#8ab8ec', line: '#3b3a36', lineStrong: '#7c786e', surface: '#252523', mark: '#5a4819', markText: '#f6f1e4' },
+  [LIGHT]: { text: '#24231f', link: '#1f5fa8', line: '#e2dfd6', lineStrong: '#8e8a7f', surface: '#f2f0ea', mark: '#fde6a6', markText: '#24231f', word: '#f5c451', wordText: '#24231f' },
+  [DARK]: { text: '#dddbd4', link: '#8ab8ec', line: '#3b3a36', lineStrong: '#7c786e', surface: '#252523', mark: '#5a4819', markText: '#f6f1e4', word: '#8a6d22', wordText: '#fffaf0' },
 };
 const BOOK_FACE = '"Sitka Text", Sitka, Cambria, Georgia, serif';
 const HEADING_FACE = '"Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif';
@@ -45,7 +45,8 @@ const LINE_HEIGHT = 'line-height';
 const STYLES_OF_DOCUMENT = /<style\b[^>]*>[\s\S]*?<\/style\s*>|<[^<>]*\sstyle\s*=\s*(?:"[^"]*"|'[^']*')[^<>]*>/gi;
 
 /** The sentence being read aloud on a fixed page, which keeps its own colours whatever the theme of the app. */
-export const HIGHLIGHT_RULE = '::highlight(mochi-tts) { background-color: rgb(255 200 60 / 45%); }';
+export const HIGHLIGHT_RULE = `::highlight(mochi-tts) { background-color: rgb(255 200 60 / 45%); }
+::highlight(mochi-tts-word) { background-color: rgb(240 170 20 / 75%); text-decoration: underline; }`;
 
 /**
  * A dark page cannot keep the colours of a book: it may set a dark text and no background, or a white page that would
@@ -74,8 +75,9 @@ h1, h2, h3, h4, h5, h6 { font-family: ${HEADING_FACE} !important; font-weight: 6
 :where(table) { border-collapse: collapse; font-size: .92em; }
 :where(th, td) { padding: .4em .8em .4em 0; border-bottom: 1px solid ${line}; text-align: left; }`;
 
-const themedHighlight = ({ mark, markText }) => `::highlight(mochi-tts) { background-color: ${mark}; color: ${markText}; }
-@media (forced-colors: active) { ::highlight(mochi-tts) { background-color: Mark; color: MarkText; } }`;
+const themedHighlight = ({ mark, markText, word, wordText }) => `::highlight(mochi-tts) { background-color: ${mark}; color: ${markText}; }
+::highlight(mochi-tts-word) { background-color: ${word}; color: ${wordText}; text-decoration: underline; }
+@media (forced-colors: active) { ::highlight(mochi-tts) { background-color: Mark; color: MarkText; } ::highlight(mochi-tts-word) { background-color: Highlight; color: HighlightText; } }`;
 
 const toRem = (px) => `${Number((px / DEFAULT_ROOT_PX).toFixed(REM_DIGITS))}rem`;
 

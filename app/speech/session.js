@@ -5,10 +5,10 @@ import { AudioEngine } from './engine-audio.js';
 import { engineOf, listVoices, RoutedEngine } from './engine-router.js';
 import { closestVoice, languageName, WebSpeechEngine } from './engine-web.js';
 import { extractBlocks } from './extract.js';
-import { createHighlighter, HIGHLIGHT_NAME } from './highlight.js';
+import { createHighlighter, HIGHLIGHT_NAME, WORD_HIGHLIGHT_NAME } from './highlight.js';
 import { detectLang, parseLangTag } from './lang.js';
 import { createMediaKeys } from './media-keys.js';
-import { lineOfPlace, placeOfLine, sentenceAt, sentenceFrom, sentenceRange } from './place.js';
+import { lineOfPlace, placeOfLine, sentenceAt, sentenceFrom, sentenceRange, wordRange } from './place.js';
 import { ERROR_ENGINE, nextRate, prevRate, SpeechPlayer } from './player.js';
 import { caretAt } from '../core/caret.js';
 import { createSpeechBar } from '../ui/speechbar.js';
@@ -80,6 +80,8 @@ class SpeechSession {
   #toldFallback = false;
   /** Lists the voices: injected by tests, every engine of the app otherwise. */
   #listVoices;
+  /** Whether the word being said is marked, as the options say now. */
+  #wordsOn;
 
   constructor({
     engine = null,
@@ -96,7 +98,9 @@ class SpeechSession {
     onReading = () => {},
     sourceMode,
     edgeOn = () => false,
+    wordsOn = () => true,
   }) {
+    this.#wordsOn = wordsOn;
     const web = new WebSpeechEngine();
     this.#engine = engine ?? new RoutedEngine({ web, audio: new AudioEngine({ invoke }) });
     this.#listVoices = engine ? () => engine.voices() : () => listVoices({ web, invoke, edgeOn: edgeOn() });
@@ -114,6 +118,7 @@ class SpeechSession {
       engine: this.#engine,
       sleep,
       onSentence: (at, sentence) => this.#onSentence(at, sentence),
+      onWord: (at, word) => this.#onWord(at, word),
       onState: (state) => this.#onState(state),
       onError: (code) => this.#onError(code),
     });
@@ -259,6 +264,7 @@ class SpeechSession {
     const { block, sentence } = this.#player.current;
     const window = this.#blocks[block]?.sentences[sentence]?.start?.node.ownerDocument.defaultView;
     const highlight = window?.CSS.highlights.get(HIGHLIGHT_NAME);
+    const word = window?.CSS.highlights.get(WORD_HIGHLIGHT_NAME);
     return {
       state: this.#player.state,
       current: { block, sentence },
@@ -272,6 +278,7 @@ class SpeechSession {
       following: this.#following,
       audioPlaying: this.#media.audioPlaying(),
       highlight: highlight ? [...(highlight.ranges ?? highlight)].map(String) : [],
+      word: word ? [...(word.ranges ?? word)].map(String) : [],
     };
   }
 
@@ -516,6 +523,13 @@ class SpeechSession {
     if (range) this.#highlighter.show(range);
     else this.#highlighter.clear();
     this.#save(this.#entry);
+  }
+
+  /** The word being said is marked over the tint of its sentence; a word that is not on the page leaves only the tint. */
+  #onWord({ block, sentence }, word) {
+    const range = word && this.#wordsOn() ? wordRange(this.#blocks[block]?.sentences[sentence], word.start, word.end) : null;
+    if (range) this.#highlighter.showWord(range);
+    else this.#highlighter.clearWord();
   }
 
   #onState(state) {

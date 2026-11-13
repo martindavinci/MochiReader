@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { closestVoice, voiceGroups, WebSpeechEngine, VOICES_WAIT_MS } from '../app/speech/engine-web.js';
+import { boundaryWord, closestVoice, voiceGroups, WebSpeechEngine, VOICES_WAIT_MS } from '../app/speech/engine-web.js';
 import { SpeechPlayer } from '../app/speech/player.js';
 
 const voice = (name, lang, localService = true) => ({ voiceURI: `uri:${name}`, name, lang, localService });
@@ -793,4 +793,24 @@ test('voices are grouped by language, with the one to use marked', () => {
 test('a page with no speech has no voices to list', async () => {
   const engine = new WebSpeechEngine({ synth: undefined, Utterance: FakeUtterance });
   assert.deepEqual(await engine.voices(), []);
+});
+
+test('windows word boundaries become words', async () => {
+  const { engine, synth } = setup();
+  const words = [];
+  const done = engine.speak('Ciao a tutti.', { voiceId: 'uri:Elsa', onWord: (word) => words.push(word) });
+  const [utterance] = synth.spoken;
+  utterance.onboundary({ name: 'word', charIndex: 0, charLength: 4 });
+  utterance.onboundary({ name: 'sentence', charIndex: 0, charLength: 13 });
+  utterance.onboundary({ name: 'word', charIndex: 7, charLength: 5 });
+  utterance.onend();
+  assert.equal(await done, 'end');
+  assert.deepEqual(words, [{ start: 0, end: 4 }, { start: 7, end: 12 }, null]);
+});
+
+test('a boundary without length takes the word at its index', () => {
+  assert.deepEqual(boundaryWord("Dell'acqua fresca", 0, 0), { start: 0, end: 10 });
+  assert.deepEqual(boundaryWord('uno 1999 due', 4, undefined), { start: 4, end: 8 });
+  assert.equal(boundaryWord('uno', 9, 0), null);
+  assert.equal(boundaryWord('— uno', 0, 0), null);
 });

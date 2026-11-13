@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { parseHTML } from 'linkedom';
 import { getLang, setLang } from '../app/core/i18n.js';
 import en from '../app/lang/en.js';
-import { HIGHLIGHT_NAME } from '../app/speech/highlight.js';
+import { HIGHLIGHT_NAME, WORD_HIGHLIGHT_NAME } from '../app/speech/highlight.js';
 import { caretAt } from '../app/core/caret.js';
 import { createSession } from '../app/speech/session.js';
 import { RATE_LEVELS } from '../app/speech/player.js';
@@ -100,7 +100,7 @@ afterEach(() => {
   setLang('en');
 });
 
-function setup({ voices, state = {}, sourceMode = 'skip', inFront = () => true, engine: given } = {}) {
+function setup({ voices, state = {}, sourceMode = 'skip', inFront = () => true, engine: given, wordsOn } = {}) {
   const engine = given ?? fakeEngine(voices);
   const kept = { voices: {}, options: {}, ...state };
   kept.voices = { ...kept.voices };
@@ -159,6 +159,7 @@ function setup({ voices, state = {}, sourceMode = 'skip', inFront = () => true, 
     showMessage: (text) => messages.push(text),
     showVoiceHelp: (paragraphs) => helps.push(paragraphs),
     sourceMode: () => sourceMode,
+    wordsOn,
   });
   sessions.push(session);
   return { session, engine, bar, media, saved, messages, helps, commands, handlers: () => barHandlers };
@@ -858,4 +859,39 @@ test('a piper voice that fails a sentence hands the reading to windows, which sa
   await flush();
   assert.equal(engine.calls.at(-1).voiceId, 'elsa');
   assert.equal(session.active(), true);
+});
+
+/** An engine that says the words it is given for each sentence, as the voices of the app do. */
+function wordyEngine(words) {
+  const engine = fakeEngine();
+  const speak = engine.speak.bind(engine);
+  engine.speak = (text, options) => {
+    const said = speak(text, options);
+    for (const word of words) options.onWord?.(word);
+    return said;
+  };
+  return engine;
+}
+
+test('the word is marked and the sentence stays tinted', async () => {
+  const engine = wordyEngine([{ start: 4, end: 5 }]);
+  const { session } = setupWith(engine);
+  const tab = fakeTab(TWO);
+  await session.start(tab.entry);
+  await flush();
+  const { CSS } = tab.document().defaultView;
+  assert.deepEqual(CSS.highlights.get(HIGHLIGHT_NAME).ranges.map(String), ['Uno è qui.']);
+  assert.deepEqual(CSS.highlights.get(WORD_HIGHLIGHT_NAME).ranges.map(String), ['è']);
+  assert.deepEqual(session.report(tab.entry).word, ['è']);
+});
+
+test('with words off only the sentence is tinted', async () => {
+  const engine = wordyEngine([{ start: 4, end: 5 }]);
+  const { session } = setup({ engine, wordsOn: () => false });
+  const tab = fakeTab(TWO);
+  await session.start(tab.entry);
+  await flush();
+  const { CSS } = tab.document().defaultView;
+  assert.ok(CSS.highlights.get(HIGHLIGHT_NAME));
+  assert.equal(CSS.highlights.get(WORD_HIGHLIGHT_NAME), undefined);
 });

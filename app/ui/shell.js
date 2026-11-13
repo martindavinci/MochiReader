@@ -463,6 +463,7 @@ function loadSpeech() {
         refresh();
       },
       onReading: () => drawTabBar(),
+      wordsOn: () => options.speechWords !== 'off',
     });
     return speech;
   });

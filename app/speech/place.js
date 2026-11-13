@@ -53,6 +53,28 @@ export function sentenceRange({ start, end }) {
   return range;
 }
 
+/**
+ * @param {{pointAt?: (index: number) => {node: Node, offset: number}|null}} sentence
+ * @param {number} start
+ * @param {number} end UTF-16 units of the text of the sentence, as an engine tells a word.
+ * @returns {Range|null} The word on the page: from its first unit that is on it to its last. Null for a word the app
+ *   added, which is nowhere on the page.
+ */
+export function wordRange(sentence, start, end) {
+  if (!sentence?.pointAt || !(start < end)) return null;
+  let first = null;
+  let from = start;
+  for (; from < end && !first; from += 1) first = sentence.pointAt(from);
+  let last = null;
+  let to = end - 1;
+  for (; to >= start && !last; to -= 1) last = sentence.pointAt(to);
+  if (!first || !last || from - 1 > to + 1) return null;
+  const range = first.node.ownerDocument.createRange();
+  range.setStart(first.node, first.offset);
+  range.setEnd(last.node, last.offset + 1);
+  return range;
+}
+
 /** @returns {{block: number, sentence: number}|null} The sentence around a point, or the next one; null past the last. */
 export function sentenceAt(blocks, node, offset) {
   const point = toLeaf(node, offset);

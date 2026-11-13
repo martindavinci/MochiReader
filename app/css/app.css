@@ -893,6 +893,13 @@ sup a, a.footnote-ref, .footnote-ref a { padding: 0 .15em; text-decoration: none
   color: light-dark(#24231f, #f6f1e4);
 }
 
+/* The word being said, over its sentence: deeper, and underlined, so it shows without colour too. */
+::highlight(mochi-tts-word) {
+  background-color: light-dark(#f5c451, #8a6d22);
+  color: light-dark(#24231f, #fffaf0);
+  text-decoration: underline;
+}
+
 /* The menu of the text. */
 .text-menu {
   position: fixed;
@@ -938,6 +945,7 @@ sup a, a.footnote-ref, .footnote-ref a { padding: 0 .15em; text-decoration: none
 @media (forced-colors: active) {
   :focus-visible, #panel :focus-visible, #speechbar :focus-visible { outline-color: Highlight; }
   ::highlight(mochi-tts) { background-color: Mark; color: MarkText; }
+  ::highlight(mochi-tts-word) { background-color: Highlight; color: HighlightText; text-decoration: underline; }
   .tab.active { border-color: CanvasText; }
   #speechbar .speech-play { border: 1px solid ButtonText; }
 }

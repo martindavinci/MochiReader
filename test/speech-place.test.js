@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { parseHTML } from 'linkedom';
 import { extractBlocks } from '../app/speech/extract.js';
 import { createHighlighter, HIGHLIGHT_NAME } from '../app/speech/highlight.js';
-import { lineOfPlace, placeOfLine, sentenceAt, sentenceFrom, sentenceRange } from '../app/speech/place.js';
+import { lineOfPlace, placeOfLine, sentenceAt, sentenceFrom, sentenceRange, wordRange } from '../app/speech/place.js';
 import { withHighlights } from './speech-fakes.js';
 
 const blocksOf = (html, opts = {}) => {
@@ -135,4 +135,24 @@ test('a frame closed under the highlight does not stop the reading', () => {
   };
   assert.doesNotThrow(() => highlighter.clear());
   console.warn = warn;
+});
+
+test('word range skips added spaces', () => {
+  const { blocks } = blocksOf('<p>Read the <b>bold</b>word and more.</p>');
+  const [sentence] = blocks[0].sentences;
+  const start = sentence.text.indexOf('bold');
+  assert.equal(wordRange(sentence, start, start + 4).toString(), 'bold');
+  const second = sentence.text.indexOf('more');
+  assert.equal(wordRange(sentence, second, second + 4).toString(), 'more');
+});
+
+test('word range of a word the app added is null', () => {
+  assert.equal(wordRange({ text: 'Fonte: x', start: null, end: null }, 0, 5), null);
+  const added = { text: 'Fonte', pointAt: () => null };
+  assert.equal(wordRange(added, 0, 5), null);
+});
+
+test('a sentence still compares by its text and its ends', () => {
+  const { blocks } = blocksOf('<p>One is here.</p>');
+  assert.deepEqual(Object.keys(blocks[0].sentences[0]), ['text', 'start', 'end']);
 });

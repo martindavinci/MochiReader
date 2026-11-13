@@ -109,3 +109,9 @@ test('in a document only its styles change, never its text', () => {
     '<p style="color: red; font-size: 1rem">font-size: 12pt</p><style>a{font-size:1.5rem}</style><code>font-size: 12pt</code>',
   );
 });
+
+test('book style sheets draw the word highlight', () => {
+  assert.match(bookStyle({ theme: 'light', textSize: 20 }, false), /::highlight\(mochi-tts-word\) \{ background-color: #f5c451;/);
+  assert.match(bookStyle({ theme: 'dark', textSize: 20 }, false), /::highlight\(mochi-tts-word\) \{ background-color: #8a6d22;/);
+  assert.match(HIGHLIGHT_RULE, /::highlight\(mochi-tts-word\)/);
+});

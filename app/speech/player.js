@@ -15,6 +15,7 @@
  *
  * Callbacks:
  *   onSentence({block, sentence}, sentence)  a sentence starts, or the position moved while silent
+ *   onWord({block, sentence}, {start, end}|null)  a word of it is said; null when no word is
  *   onState(state)                           'idle'|'playing'|'paused'|'ended'
  *   onError(code)                            ERROR_ENGINE or ERROR_NOTHING_TO_READ
  * A callback that throws is logged: it stops neither the reading nor whoever moved the position.
@@ -89,6 +90,7 @@ export class SpeechPlayer {
   #engine;
   #sleep;
   #onSentence;
+  #onWord;
   #onState;
   #onError;
   #blocks = [];
@@ -111,10 +113,11 @@ export class SpeechPlayer {
    */
   #upcoming = null;
 
-  constructor({ engine, sleep = defaultSleep, onSentence = noop, onState = noop, onError = noop }) {
+  constructor({ engine, sleep = defaultSleep, onSentence = noop, onWord = null, onState = noop, onError = noop }) {
     this.#engine = engine;
     this.#sleep = sleep;
     this.#onSentence = onSentence;
+    this.#onWord = onWord;
     this.#onState = onState;
     this.#onError = onError;
   }
@@ -446,8 +449,14 @@ export class SpeechPlayer {
     arm();
     this.#rearmWatchdog = arm;
     const options = { voiceId: this.#voiceId, rate: this.#rate, volume: this.#volume, lang: this.#lang };
+    const run = this.#run;
+    const place = { ...this.#position };
+    const tell = this.#onWord;
+    const onWord = tell && ((word) => {
+      if (run === this.#run) this.#guarded(tell, place, word);
+    });
     try {
-      const said = this.#engine.speak(text, options);
+      const said = this.#engine.speak(text, onWord ? { ...options, onWord } : options);
       if (next && this.#engine.prepare) {
         const { voiceId, lang } = options;
         this.#guarded(() => this.#engine.prepare(this.#blocks[next.block].sentences[next.sentence].text, { voiceId, lang }));

@@ -264,17 +264,32 @@ function takeSources(clean, run) {
   return hrefs;
 }
 
+/**
+ * Where each UTF-16 unit of a sentence is on the page, for the word being read. Not enumerable: a sentence compares
+ * by its text and its two ends.
+ */
+function withPoints(sentence, run, units) {
+  Object.defineProperty(sentence, 'pointAt', {
+    value: (index) => {
+      const at = units[index];
+      const node = at === undefined ? undefined : run.nodes[at];
+      return node ? { node, offset: run.offsets[at] } : null;
+    },
+  });
+  return sentence;
+}
+
 function toSentences(clean, run, lang) {
   return splitSentences(clean.text, lang)
     .filter(({ start, end }) => READABLE.test(clean.text.slice(start, end)))
     .map(({ start, end }) => {
       const first = clean.map[start];
       const last = clean.map[end - 1];
-      return {
+      return withPoints({
         text: clean.text.slice(start, end),
         start: { node: run.nodes[first], offset: run.offsets[first] },
         end: { node: run.nodes[last], offset: run.offsets[last] + 1 },
-      };
+      }, run, Int32Array.from(clean.map.slice(start, end)));
     });
 }
 

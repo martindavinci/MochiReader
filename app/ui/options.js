@@ -56,6 +56,12 @@ const FIELDS = [
     choices: [keyed('skip', 'options.sourceSkip'), keyed('name', 'options.sourceName')],
   },
   {
+    name: 'speechWords',
+    label: 'options.speechWords',
+    group: 'options.groupSpeech',
+    choices: [keyed('on', 'options.speechWordsOn'), keyed('off', 'options.speechWordsOff')],
+  },
+  {
     name: 'language',
     label: 'options.language',
     hint: 'options.languageHint',

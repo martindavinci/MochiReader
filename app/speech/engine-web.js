@@ -9,6 +9,15 @@ import { parseLangTag, regionsInOrder } from './lang.js';
 export const VOICES_WAIT_MS = 2000;
 
 const CANCEL_ERRORS = new Set(['canceled', 'interrupted']);
+/** A word from where a voice says it starts, when the voice does not say how long it is. */
+const WORD_AT = /^[\p{L}\p{N}\p{M}]+(?:['’-][\p{L}\p{N}\p{M}]+)*/u;
+
+/** @returns {{start: number, end: number}|null} The word a `boundary` event points at, in UTF-16 units of `text`. */
+export function boundaryWord(text, charIndex, charLength) {
+  if (!Number.isInteger(charIndex) || charIndex < 0 || charIndex >= text.length) return null;
+  const length = charLength > 0 ? charLength : (WORD_AT.exec(text.slice(charIndex))?.[0].length ?? 0);
+  return length > 0 ? { start: charIndex, end: Math.min(charIndex + length, text.length) } : null;
+}
 
 /** The name of a language, for the interface. The app has its own for two, and the browser knows the others. */
 export function languageName(language) {
@@ -66,14 +75,16 @@ export class WebSpeechEngine {
     return this.#localVoices().map((voice) => ({ id: voice.voiceURI, name: voice.name, lang: voice.lang }));
   }
 
-  speak(text, { voiceId = null, rate = 1, volume = 1, lang = null } = {}) {
+  speak(text, { voiceId = null, rate = 1, volume = 1, lang = null, onWord = null } = {}) {
     if (this.#settle) this.stop();
 
     return new Promise((resolve) => {
+      let toldWord = false;
       const settle = (outcome) => {
         if (this.#settle !== settle) return;
         this.#utterance = null;
         this.#settle = null;
+        if (toldWord) onWord?.(null);
         resolve(outcome);
       };
       this.#settle = settle;
@@ -91,6 +102,16 @@ export class WebSpeechEngine {
         utterance.volume = this.volume ?? volume;
         const trace = this.onTrace;
         if (trace) utterance.onstart = () => trace('start', text);
+        // Only some voices of Windows tell their words: the others leave the sentence tinted, as before.
+        if (onWord) {
+          utterance.onboundary = (event) => {
+            if (this.#settle !== settle || event.name !== 'word') return;
+            const word = boundaryWord(text, event.charIndex, event.charLength);
+            if (!word) return;
+            toldWord = true;
+            onWord(word);
+          };
+        }
         utterance.onend = () => {
           trace?.('end', text);
           settle('end');
