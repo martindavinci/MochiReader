@@ -88,6 +88,7 @@ async function startBookShell({ bookmarks = [], makeBook = async () => goodBook(
     state_get_options: () => ({ language: 'en' }),
     state_get: () => ({ recents: [], bookmarks: state.bookmarks }),
     state_move_bookmarks: (args) => state.moved.push(args),
+    state_bookmark_count: ({ key }) => state.bookmarks.filter((kept) => kept.key === key).length,
     state_check_recents: () => [],
     state_get_position: () => null,
     state_save_position: (args) => state.saved.push(args),

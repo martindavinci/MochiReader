@@ -92,6 +92,9 @@ export default {
   'bookmarks.added': '책갈피를 추가했습니다',
   'bookmarks.removed': '책갈피를 제거했습니다',
   'bookmarks.missingFile': '이 책갈피의 파일을 더 이상 사용할 수 없습니다: {name}',
+  'bookmarks.removeHere': '여기의 책갈피 제거',
+  'bookmarks.none': '이 문서에는 아직 책갈피가 없습니다.',
+  'bookmarks.all': '모든 책갈피',
 
   'toc.title': '목차',
   'toc.empty': '목차 없음',

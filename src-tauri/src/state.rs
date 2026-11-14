@@ -352,6 +352,15 @@ impl Store {
         added
     }
 
+    /// How many bookmarks the document with this key has.
+    pub fn bookmark_count(&self, key: &str) -> usize {
+        self.state()
+            .bookmarks
+            .iter()
+            .filter(|bookmark| bookmark.key == key)
+            .count()
+    }
+
     /// A book is known by its key wherever its file is: its bookmarks go to the file it was last opened from.
     pub fn move_bookmarks(&self, key: &str, path: &str) {
         let mut changed = false;
@@ -708,6 +717,17 @@ mod tests {
             excerpt: "Brano".to_string(),
             created_at: NOW,
         }
+    }
+
+    #[test]
+    fn the_bookmarks_of_a_document_are_counted_by_its_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_in(dir.path());
+        store.toggle_bookmark(bookmark("k", 3));
+        store.toggle_bookmark(bookmark("k", 9));
+        store.toggle_bookmark(bookmark("other", 1));
+        assert_eq!(store.bookmark_count("k"), 2);
+        assert_eq!(store.bookmark_count("none"), 0);
     }
 
     #[test]

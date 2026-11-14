@@ -28,7 +28,7 @@ Double-click a file and read it, or have it read aloud. What you read never leav
 - Skips what sounds wrong when spoken: link addresses, source citations and frontmatter.
 - Remembers the last voice used for each language.
 - Books show their chapter, page and progress, with arrows to turn the page, in pages or in one long scroll.
-- Table of contents, bookmarks with undo, and recent files, each a click away beside the tabs.
+- Table of contents, bookmarks with undo, and recent files, each a click away beside the tabs. The bookmark button lists the bookmarks of the document being read and adds one where you are.
 - Light and dark themes, or the one Windows uses. Nine languages: English, Italian, German, Spanish, French, Portuguese (Brazil), Japanese, Korean and Simplified Chinese. Every action has a key, and F1 lists them.
 - The speed and the volume of the voice from the reading bar, kept between sessions.
 

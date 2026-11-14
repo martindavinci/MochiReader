@@ -94,10 +94,11 @@ export function watchTabOverflow(bar, onOverflow) {
  * What sits beside the tabs, always in the same place, so nothing has to be remembered as a key.
  * @param {HTMLElement} row Where the tabs are.
  * @param {{onOpen: () => void, onCount: (opener: Element) => void, onContents: (opener: Element) => void,
- *   onBookmark: () => void, onRead: () => void, onMore: (opener: Element) => void}} handlers
- * @returns {{setCount: (count: number|null) => void, setReading: (reading: boolean) => void}}
+ *   onBookmarks: (opener: Element) => void, onRead: () => void, onMore: (opener: Element) => void}} handlers
+ * @returns {{setCount: (count: number|null) => void, setBookmarks: (count: number) => void,
+ *   setReading: (reading: boolean) => void}}
  */
-export function createTabTools(row, { onOpen, onCount, onContents, onBookmark, onRead, onMore }) {
+export function createTabTools(row, { onOpen, onCount, onContents, onBookmarks, onRead, onMore }) {
   const document = row.ownerDocument;
   const tool = (className, glyph, label, keys, action) => {
     const button = document.createElement('button');
@@ -120,11 +121,17 @@ export function createTabTools(row, { onOpen, onCount, onContents, onBookmark, o
   readLabel.textContent = t('tools.read');
   read.append(readLabel);
   read.setAttribute('aria-pressed', 'false');
+  // Where the bookmarks of the document are, so it stays on a narrow window too.
+  const bookmarks = tool('tool tool-bookmarks', 'bookmark', t('tools.bookmarks'), null, onBookmarks);
+  const marks = document.createElement('span');
+  marks.className = 'tool-count';
+  marks.hidden = true;
+  bookmarks.append(marks);
   const tools = document.createElement('div');
   tools.className = 'toolbar';
   tools.append(
     tool('tool optional', 'contents', t('tools.contents'), 'Ctrl+T', onContents),
-    tool('tool optional', 'bookmark', t('tools.bookmark'), 'Ctrl+D', onBookmark),
+    bookmarks,
     read,
     tool('tool', 'more', t('tools.more'), null, onMore),
   );
@@ -133,6 +140,10 @@ export function createTabTools(row, { onOpen, onCount, onContents, onBookmark, o
     setCount(value) {
       count.hidden = value === null;
       if (value !== null) number.textContent = String(value);
+    },
+    setBookmarks(value) {
+      marks.hidden = value === 0;
+      marks.textContent = value === 0 ? '' : String(value);
     },
     setReading(reading) {
       read.setAttribute('aria-pressed', String(reading));

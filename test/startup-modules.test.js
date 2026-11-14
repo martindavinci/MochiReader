@@ -21,6 +21,7 @@ const NOT_AT_START = [
   'speech/extract.js',
   'speech/media-keys.js',
   'speech/test-hooks.js',
+  'core/places.js',
   'ui/speechbar.js',
   'readers/epub.js',
   'vendor/foliate/view.js',

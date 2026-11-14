@@ -121,6 +121,7 @@ async function startShell(openDocument, {
       state.bookmarks = added ? [...state.bookmarks, bookmark] : state.bookmarks.filter((kept) => !same(kept));
       return added;
     },
+    state_bookmark_count: ({ key }) => state.bookmarks.filter((kept) => kept.key === key).length,
     state_check_recents: () => state.checked ?? state.recents,
     state_touch_recent: (args) => {
       state.touched.push(args);
@@ -899,6 +900,40 @@ test('ctrl+b groups the bookmarks by file, and a click goes to the point', async
   assert.equal(shell.panel().hidden, true);
   assert.deepEqual(shell.calls, [PATH_A]);
   assert.equal(shell.scrolled.at(-1).getAttribute('data-sourcepos'), '5:1-5:9');
+});
+
+test('the bookmark button lists the bookmarks of the open file in the order of its text, and shows how many', async () => {
+  const bookmarks = [bookmarkOf(PATH_A, 9), bookmarkOf(PATH_B, 1), bookmarkOf(PATH_A, 5)];
+  const shell = await startShell(async (path) => longDoc(path), { pending: [PATH_A], bookmarks });
+  await shell.settled();
+  const button = shell.document.querySelector('.tool-bookmarks');
+  assert.equal(button.querySelector('.tool-count').textContent, '2');
+  await shell.click(button);
+  assert.equal(shell.panel().hidden, false);
+  assert.equal(shell.panel().querySelector('.bookmark-file'), null);
+  assert.deepEqual(
+    [...shell.panel().querySelectorAll('.bookmark-excerpt')].map((excerpt) => excerpt.textContent),
+    ['Brano 5', 'Brano 9'],
+  );
+  await shell.click(shell.panel().querySelectorAll('.bookmark-open')[1]);
+  assert.equal(shell.panel().hidden, true);
+  assert.equal(shell.scrolled.at(-1).getAttribute('data-sourcepos'), '9:1-9:9');
+});
+
+test('the button in the bookmarks of the file adds one where the reading is, and the count follows', async () => {
+  const shell = await startShell(async (path) => markdownDoc(path, 'Il brano'), { pending: [PATH_A] });
+  await shell.settled();
+  const button = shell.document.querySelector('.tool-bookmarks');
+  assert.equal(button.querySelector('.tool-count').hidden, true);
+  await shell.click(button);
+  await shell.click(shell.panel().querySelector('.bookmark-add'));
+  await shell.settled();
+  assert.equal(shell.state.bookmarks.length, 1);
+  assert.equal(shell.panel().querySelectorAll('.bookmark').length, 1);
+  assert.equal(button.querySelector('.tool-count').textContent, '1');
+  assert.equal(shell.panel().querySelector('.bookmark-add').textContent, 'Togli il segnalibro da qui');
+  await shell.click(shell.panel().querySelector('.bookmark-all'));
+  assert.equal(shell.panel().getAttribute('data-panel'), 'bookmarks');
 });
 
 test('a bookmark in a file already open goes there without reading it again', async () => {

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { t } from '../core/i18n.js';
-import { icon } from './icons.js';
+import { icon, named } from './icons.js';
 import { elementIn, panelEmpty, panelFoot, panelHead } from './panel-parts.js';
 import { fileBesideTitle } from './recents.js';
 
@@ -148,36 +148,46 @@ export function groupBookmarks(bookmarks) {
 }
 
 /**
+ * A bookmark in a list: its passage and date open it, its mark takes it away.
+ * @param {HTMLElement} host
+ * @param {object} bookmark
+ * @param {{labels: {remove: string}, dateOf: (ms: number) => string, onOpen: (bookmark: object) => void,
+ *   onRemove: (bookmark: object, row: HTMLElement) => void}} options
+ * @returns {HTMLElement}
+ */
+function bookmarkRow(host, bookmark, { labels, dateOf, onOpen, onRemove }) {
+  const element = elementIn(host);
+  const open = element('button', 'bookmark-open');
+  open.addEventListener('click', () => onOpen(bookmark));
+  open.append(
+    element('span', 'bookmark-excerpt', bookmark.excerpt || bookmark.title),
+    element('span', 'bookmark-date', dateOf(bookmark.createdAt)),
+  );
+  const remove = element('button', 'bookmark-remove', REMOVE_MARK);
+  remove.setAttribute('aria-label', labels.remove);
+  remove.setAttribute('title', labels.remove);
+  const row = element('li', 'bookmark');
+  remove.addEventListener('click', () => onRemove(bookmark, row));
+  row.append(open, remove);
+  return row;
+}
+
+/**
  * @param {HTMLElement} host
  * @param {object[]} bookmarks As the state keeps them.
  * @param {{labels: {title: string, empty: string, remove: string}, dateOf: (ms: number) => string,
  *   onOpen: (bookmark: object) => void, onRemove: (bookmark: object, row: HTMLElement) => void}} options
  */
-export function renderBookmarks(host, bookmarks, { labels, dateOf, onOpen, onRemove }) {
+export function renderBookmarks(host, bookmarks, options) {
   const element = elementIn(host);
-
-  const item = (bookmark) => {
-    const open = element('button', 'bookmark-open');
-    open.addEventListener('click', () => onOpen(bookmark));
-    open.append(
-      element('span', 'bookmark-excerpt', bookmark.excerpt || bookmark.title),
-      element('span', 'bookmark-date', dateOf(bookmark.createdAt)),
-    );
-    const remove = element('button', 'bookmark-remove', REMOVE_MARK);
-    remove.setAttribute('aria-label', labels.remove);
-    remove.setAttribute('title', labels.remove);
-    const row = element('li', 'bookmark');
-    remove.addEventListener('click', () => onRemove(bookmark, row));
-    row.append(open, remove);
-    return row;
-  };
+  const { labels } = options;
 
   const group = ({ path, title, bookmarks: inGroup }) => {
     const file = element('h2', 'bookmark-file', title);
     file.setAttribute('title', path);
     file.append(...fileBesideTitle(title, path).map((name) => element('span', 'bookmark-file-name', name)));
     const list = element('ul', 'panel-list');
-    list.append(...inGroup.map(item));
+    list.append(...inGroup.map((bookmark) => bookmarkRow(host, bookmark, options)));
     const section = element('section', 'bookmark-group');
     section.append(file, list);
     return section;
@@ -193,6 +203,42 @@ export function renderBookmarks(host, bookmarks, { labels, dateOf, onOpen, onRem
     title: labels.title,
     count: bookmarks.length || '',
   }), ...parts);
+}
+
+/**
+ * The bookmarks of the document being read, under the button that adds one where the reading is.
+ * @param {HTMLElement} host
+ * @param {object[]} bookmarks Of that document only, in the order they should show.
+ * @param {{here: boolean, labels: {title: string, add: string, removeHere: string, none: string, all: string,
+ *   remove: string}, dateOf: (ms: number) => string, onAdd: () => void, onOpen: (bookmark: object) => void,
+ *   onRemove: (bookmark: object, row: HTMLElement) => void, onAll: () => void}} options `here` says a bookmark is
+ *   already where the reading is, so the button takes it away.
+ */
+export function renderDocumentBookmarks(host, bookmarks, options) {
+  const { here, labels, onAdd, onAll } = options;
+  const element = elementIn(host);
+  const document = host.ownerDocument;
+  const add = element('button', 'bookmark-add');
+  const addLabel = here ? labels.removeHere : labels.add;
+  named(add, addLabel, 'Ctrl+D');
+  add.append(icon(document, 'bookmark'), element('span', undefined, addLabel));
+  add.addEventListener('click', () => onAdd());
+  const body = element('div', 'panel-body');
+  if (bookmarks.length > 0) {
+    const list = element('ul', 'panel-list');
+    list.append(...bookmarks.map((bookmark) => bookmarkRow(host, bookmark, options)));
+    body.append(add, list);
+  } else {
+    body.append(add, element('p', 'bookmark-none', labels.none));
+  }
+  const all = element('button', 'link-button bookmark-all', labels.all);
+  named(all, labels.all, 'Ctrl+B');
+  all.addEventListener('click', () => onAll());
+  host.replaceChildren(
+    panelHead(host, { glyph: 'bookmark', title: labels.title, count: bookmarks.length || '' }),
+    body,
+    panelFoot(host, all),
+  );
 }
 
 /**

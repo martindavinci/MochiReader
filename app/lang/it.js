@@ -92,6 +92,9 @@ export default {
   'bookmarks.added': 'Segnalibro aggiunto',
   'bookmarks.removed': 'Segnalibro tolto',
   'bookmarks.missingFile': 'Il file di questo segnalibro non è più disponibile: {name}',
+  'bookmarks.removeHere': 'Togli il segnalibro da qui',
+  'bookmarks.none': 'Ancora nessun segnalibro in questo documento.',
+  'bookmarks.all': 'Tutti i segnalibri',
 
   'toc.title': 'Indice',
   'toc.empty': 'Nessun indice',

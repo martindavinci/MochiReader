@@ -202,6 +202,11 @@ fn state_toggle_bookmark(bookmark: Bookmark, store: State<'_, Store>) -> bool {
 }
 
 #[tauri::command(async)]
+fn state_bookmark_count(key: String, store: State<'_, Store>) -> usize {
+    store.bookmark_count(&key)
+}
+
+#[tauri::command(async)]
 fn state_move_bookmarks(key: String, path: String, store: State<'_, Store>) {
     store.move_bookmarks(&key, &path);
 }
@@ -560,6 +565,7 @@ pub fn run() {
             state_set_voice,
             state_toggle_bookmark,
             state_move_bookmarks,
+            state_bookmark_count,
             close_ready,
             licenses_text,
             tts::tts_speak,

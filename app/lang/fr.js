@@ -92,6 +92,9 @@ export default {
   'bookmarks.added': 'Signet ajouté',
   'bookmarks.removed': 'Signet retiré',
   'bookmarks.missingFile': 'Le fichier de ce signet n’est plus disponible : {name}',
+  'bookmarks.removeHere': 'Retirer le signet ici',
+  'bookmarks.none': 'Pas encore de signet dans ce document.',
+  'bookmarks.all': 'Tous les signets',
 
   'toc.title': 'Sommaire',
   'toc.empty': 'Pas de sommaire',

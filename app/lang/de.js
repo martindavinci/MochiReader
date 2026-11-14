@@ -92,6 +92,9 @@ export default {
   'bookmarks.added': 'Lesezeichen gesetzt',
   'bookmarks.removed': 'Lesezeichen entfernt',
   'bookmarks.missingFile': 'Die Datei dieses Lesezeichens ist nicht mehr verfügbar: {name}',
+  'bookmarks.removeHere': 'Lesezeichen hier entfernen',
+  'bookmarks.none': 'Noch keine Lesezeichen in diesem Dokument.',
+  'bookmarks.all': 'Alle Lesezeichen',
 
   'toc.title': 'Inhalt',
   'toc.empty': 'Kein Inhaltsverzeichnis',

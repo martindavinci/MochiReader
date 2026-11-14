@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseHTML } from 'linkedom';
-import { renderTabBar } from '../app/ui/tabbar.js';
+import { createTabTools, renderTabBar } from '../app/ui/tabbar.js';
 
 const TABS = [{ id: 1, path: 'C:\\x\\a.md' }, { id: 2, path: 'C:\\x\\b è, c.epub' }];
 
@@ -63,4 +63,35 @@ test('a click activates, and the close button closes without activating', () => 
 test('the close button has a translated name', () => {
   const { bar } = setup(TABS);
   assert.equal(bar.querySelector('.tab-close').getAttribute('aria-label'), 'Close tab');
+});
+
+function tools() {
+  const { document, Event } = parseHTML('<!doctype html><html><body><div id="row"></div></body></html>');
+  const row = document.getElementById('row');
+  const calls = [];
+  const handlers = Object.fromEntries(['onOpen', 'onCount', 'onContents', 'onBookmarks', 'onRead', 'onMore']
+    .map((name) => [name, (opener) => calls.push([name, opener])]));
+  const made = createTabTools(row, handlers);
+  return { row, calls, made, click: (element) => element.dispatchEvent(new Event('click')) };
+}
+
+test('the bookmark button opens the bookmarks of the document under itself, and stays on narrow windows', () => {
+  const { row, calls, click } = tools();
+  const button = row.querySelector('.tool-bookmarks');
+  assert.equal(button.getAttribute('aria-label'), 'Bookmarks');
+  assert.ok(!button.classList.contains('optional'));
+  click(button);
+  assert.equal(calls[0][0], 'onBookmarks');
+  assert.ok(calls[0][1] === button);
+});
+
+test('the bookmark button shows how many bookmarks the document has, and nothing for none', () => {
+  const { row, made } = tools();
+  const count = row.querySelector('.tool-bookmarks .tool-count');
+  assert.ok(count.hidden);
+  made.setBookmarks(3);
+  assert.ok(!count.hidden);
+  assert.equal(count.textContent, '3');
+  made.setBookmarks(0);
+  assert.ok(count.hidden);
 });

@@ -10,7 +10,7 @@ import { caretAt } from '../core/caret.js';
 import { renderHome, mascot } from './home.js';
 import { icon } from './icons.js';
 import { applyOptions, focusedOption, focusOption, interfaceLang, nextTextSize, readOptions, renderOptions, renderVoiceOptions } from './options.js';
-import { createClickShield, createPanels, createRowGuard, keepFocus, renderBookmarks, renderLicenses, renderShortcuts, renderTabList, renderToc, renderVoiceHelp } from './panels.js';
+import { createClickShield, createPanels, createRowGuard, keepFocus, renderBookmarks, renderDocumentBookmarks, renderLicenses, renderShortcuts, renderTabList, renderToc, renderVoiceHelp } from './panels.js';
 import { renderRecents } from './recents.js';
 import { loadingPage, statePage } from './states.js';
 import { createTabTools, renderTabBar, watchTabOverflow } from './tabbar.js';
@@ -44,6 +44,7 @@ const RETRIED_STATUSES = [STATUS_ERROR, STATUS_MISSING];
 const PANE_TAB_INDEX = '-1';
 const PANEL_RECENTS = 'recents';
 const PANEL_BOOKMARKS = 'bookmarks';
+const PANEL_DOCUMENT_BOOKMARKS = 'document-bookmarks';
 const PANEL_TOC = 'toc';
 const PANEL_OPTIONS = 'options';
 const PANEL_LICENSES = 'licenses';
@@ -168,7 +169,7 @@ function drawTabTools() {
     onOpen: pickFiles,
     onCount: (opener) => togglePanel(PANEL_TABS, opener),
     onContents: (opener) => togglePanel(PANEL_TOC, opener),
-    onBookmark: toggleBookmark,
+    onBookmarks: (opener) => togglePanel(PANEL_DOCUMENT_BOOKMARKS, opener),
     onRead: toggleReading,
     onMore: openMoreMenu,
   });
@@ -208,6 +209,7 @@ function refresh() {
   home.classList.toggle('active', !active);
   if (!panels.current()) focusText();
   drawTabBar();
+  showBookmarkCount();
   const title = active ? `${fileName(active.path)} — ${APP_NAME}` : APP_NAME;
   if (title !== shownTitle) {
     shownTitle = title;
@@ -592,7 +594,7 @@ function adoptBook(doc, entry, reader) {
   reader.onMove((position) => savePosition(entry, position));
   entry.status = STATUS_OK;
   entry.restored = true;
-  invoke('state_move_bookmarks', { key: entry.key, path: entry.path });
+  invoke('state_move_bookmarks', { key: entry.key, path: entry.path }).then(showBookmarkCount);
   dressBook(entry, reader);
   if (activeEntry() === entry && !panels.current()) focusText();
 }
@@ -798,6 +800,7 @@ async function load(id, entry, path) {
   await mount(doc, id, entry, savedPositionOf);
   if (entries.get(id) === entry && entry.status === STATUS_OK) {
     invoke('state_touch_recent', { path: doc.path, kind: doc.kind, title: entry.title });
+    showBookmarkCount();
     await restorePosition(id, entry);
   }
 }
@@ -871,20 +874,67 @@ async function openBookmark({ key, path, position, title }) {
   await speech?.readerMoved(entry);
 }
 
+const bookmarkDate = (ms) => new Date(ms).toLocaleDateString(getLang(), { day: 'numeric', month: 'short', year: new Date(ms).getFullYear() === new Date().getFullYear() ? undefined : 'numeric' });
+
 async function drawBookmarksPanel(row) {
   const { bookmarks } = await invoke('state_get');
   if (panels.current() !== PANEL_BOOKMARKS) return;
   const refocus = keepFocus(panelHost, row);
   renderBookmarks(panelHost, bookmarks, {
     labels: { title: t('bookmarks.title'), empty: t('bookmarks.empty'), remove: t('recents.remove') },
-    dateOf: (ms) => new Date(ms).toLocaleDateString(getLang(), { day: 'numeric', month: 'short', year: new Date(ms).getFullYear() === new Date().getFullYear() ? undefined : 'numeric' }),
+    dateOf: bookmarkDate,
     onOpen: openingRow(openBookmark),
     onRemove: rowGuard.remove(async (bookmark, removed) => {
       await invoke('state_toggle_bookmark', { bookmark });
       await drawBookmarksPanel(removed);
+      showBookmarkCount();
     }),
   });
   refocus();
+}
+
+/** The bookmarks of the tab in front, in the order of its text, and whether one is where the reading is. */
+async function drawDocumentBookmarksPanel(row) {
+  const entry = activeEntry();
+  const [{ bookmarks }, { bookmarksOf, comparePlaces }] = await Promise.all([invoke('state_get'), import('../core/places.js')]);
+  if (panels.current() !== PANEL_DOCUMENT_BOOKMARKS || activeEntry() !== entry) return;
+  const mine = entry?.key ? bookmarksOf(bookmarks, entry.key) : [];
+  const at = entry?.reader && entry.restored ? entry.reader.position() : null;
+  const here = Boolean(at) && mine.some(({ position }) => position.kind === at.kind && comparePlaces(position, at) === 0);
+  const refocus = keepFocus(panelHost, row);
+  renderDocumentBookmarks(panelHost, mine, {
+    here,
+    labels: {
+      title: t('bookmarks.title'),
+      add: t('menu.bookmarkHere'),
+      removeHere: t('bookmarks.removeHere'),
+      none: t('bookmarks.none'),
+      all: t('bookmarks.all'),
+      remove: t('recents.remove'),
+    },
+    dateOf: bookmarkDate,
+    onAdd: toggleBookmark,
+    onOpen: openingRow(openBookmark),
+    onRemove: rowGuard.remove(async (bookmark, removed) => {
+      await invoke('state_toggle_bookmark', { bookmark });
+      await drawDocumentBookmarksPanel(removed);
+      showBookmarkCount();
+    }),
+    onAll: () => showPanel(PANEL_BOOKMARKS),
+  });
+  refocus();
+}
+
+/** On the bookmark button: how many bookmarks the tab in front has. */
+async function showBookmarkCount() {
+  const entry = activeEntry();
+  if (!tabTools) return;
+  if (!entry?.key) {
+    tabTools.setBookmarks(0);
+    return;
+  }
+  const count = await invoke('state_bookmark_count', { key: entry.key });
+  if (activeEntry() === entry) tabTools.setBookmarks(count);
 }
 
 function drawTabsPanel() {
@@ -1166,6 +1216,7 @@ function stepTextSize(delta) {
 const PANELS = {
   [PANEL_RECENTS]: drawRecentsPanel,
   [PANEL_BOOKMARKS]: drawBookmarksPanel,
+  [PANEL_DOCUMENT_BOOKMARKS]: drawDocumentBookmarksPanel,
   [PANEL_TOC]: drawTocPanel,
   [PANEL_OPTIONS]: drawOptionsPanel,
   [PANEL_LICENSES]: drawLicensesPanel,
@@ -1196,6 +1247,8 @@ async function switchBookmark(bookmark) {
     action: { label: t('action.undo'), run: () => switchBookmark(bookmark) },
   });
   if (panels.current() === PANEL_BOOKMARKS) await drawBookmarksPanel();
+  if (panels.current() === PANEL_DOCUMENT_BOOKMARKS) await drawDocumentBookmarksPanel();
+  showBookmarkCount();
 }
 
 const bookmarkOf = (entry, position, excerpt) => ({

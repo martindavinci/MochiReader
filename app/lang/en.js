@@ -92,6 +92,9 @@ export default {
   'bookmarks.added': 'Bookmark added',
   'bookmarks.removed': 'Bookmark removed',
   'bookmarks.missingFile': 'The file of this bookmark is no longer available: {name}',
+  'bookmarks.removeHere': 'Remove the bookmark here',
+  'bookmarks.none': 'No bookmarks in this document yet.',
+  'bookmarks.all': 'All bookmarks',
 
   'toc.title': 'Contents',
   'toc.empty': 'No contents',

@@ -92,6 +92,9 @@ export default {
   'bookmarks.added': '已添加书签',
   'bookmarks.removed': '已删除书签',
   'bookmarks.missingFile': '此书签的文件已不可用：{name}',
+  'bookmarks.removeHere': '移除此处的书签',
+  'bookmarks.none': '此文档还没有书签。',
+  'bookmarks.all': '所有书签',
 
   'toc.title': '目录',
   'toc.empty': '没有目录',

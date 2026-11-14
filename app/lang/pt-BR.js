@@ -92,6 +92,9 @@ export default {
   'bookmarks.added': 'Marcador adicionado',
   'bookmarks.removed': 'Marcador removido',
   'bookmarks.missingFile': 'O arquivo deste marcador não está mais disponível: {name}',
+  'bookmarks.removeHere': 'Remover o marcador daqui',
+  'bookmarks.none': 'Ainda não há marcadores neste documento.',
+  'bookmarks.all': 'Todos os marcadores',
 
   'toc.title': 'Sumário',
   'toc.empty': 'Sem sumário',

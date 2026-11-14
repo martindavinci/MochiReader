@@ -92,6 +92,9 @@ export default {
   'bookmarks.added': 'しおりを追加しました',
   'bookmarks.removed': 'しおりを削除しました',
   'bookmarks.missingFile': 'このしおりのファイルはもう使えません: {name}',
+  'bookmarks.removeHere': 'ここのしおりを削除',
+  'bookmarks.none': 'この文書にはまだしおりがありません。',
+  'bookmarks.all': 'すべてのしおり',
 
   'toc.title': '目次',
   'toc.empty': '目次はありません',

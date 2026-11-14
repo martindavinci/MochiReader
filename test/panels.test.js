@@ -3,7 +3,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseHTML } from 'linkedom';
 import {
-  createClickShield, createPanels, createRowGuard, groupBookmarks, keepFocus, renderBookmarks, renderLicenses, renderToc,
+  createClickShield, createPanels, createRowGuard, groupBookmarks, keepFocus, renderBookmarks, renderDocumentBookmarks,
+  renderLicenses, renderToc,
 } from '../app/ui/panels.js';
 
 const atLine = (line) => ({ kind: 'md', line, sentence: 0 });
@@ -118,6 +119,66 @@ test('the mark says which row it was pressed in', () => {
   });
   click(host.querySelectorAll('.bookmark-remove')[1]);
   assert.ok(rows[0] === host.querySelectorAll('.bookmark')[1]);
+});
+
+const HERE_LABELS = {
+  title: 'Bookmarks', add: 'Add a bookmark here', removeHere: 'Remove the bookmark here', none: 'None in this document',
+  all: 'All bookmarks', remove: 'Remove',
+};
+
+function drawHere(bookmarks, here = false) {
+  const { host, click } = page();
+  const calls = [];
+  renderDocumentBookmarks(host, bookmarks, {
+    here,
+    labels: HERE_LABELS,
+    dateOf: (ms) => `day ${ms}`,
+    onAdd: () => calls.push(['add']),
+    onOpen: (bookmark) => calls.push(['open', bookmark]),
+    onRemove: (bookmark, row) => calls.push(['remove', bookmark, row]),
+    onAll: () => calls.push(['all']),
+  });
+  return { host, click, calls };
+}
+
+test('the bookmarks of the document come as given, with no file headings, under a button that adds one', () => {
+  const { host, click, calls } = drawHere([mark('k1', 'a.md', 1), mark('k1', 'a.md', 7)]);
+  assert.equal(host.querySelector('.panel-title').textContent, 'Bookmarks');
+  assert.equal(host.querySelector('.panel-head .count').textContent, '2');
+  assert.equal(host.querySelector('.bookmark-file'), null);
+  assert.deepEqual([...host.querySelectorAll('.bookmark-excerpt')].map((e) => e.textContent), ['Brano 1', 'Brano 7']);
+  const add = host.querySelector('.bookmark-add');
+  assert.ok(add.textContent.includes('Add a bookmark here'));
+  click(add);
+  assert.deepEqual(calls, [['add']]);
+});
+
+test('where a bookmark already is, the button takes it away', () => {
+  const { host } = drawHere([mark('k1', 'a.md', 1)], true);
+  assert.ok(host.querySelector('.bookmark-add').textContent.includes('Remove the bookmark here'));
+});
+
+test('a row opens or removes its bookmark, and the foot opens them all', () => {
+  const bookmark = mark('k1', 'a.md', 1);
+  const { host, click, calls } = drawHere([bookmark]);
+  click(host.querySelector('.bookmark-open'));
+  click(host.querySelector('.bookmark-remove'));
+  click(host.querySelector('.bookmark-all'));
+  assert.equal(calls[0][0], 'open');
+  assert.ok(calls[0][1] === bookmark);
+  assert.equal(calls[1][0], 'remove');
+  assert.ok(calls[1][2] === host.querySelector('.bookmark'));
+  assert.deepEqual(calls[2], ['all']);
+  assert.ok(host.querySelector('.bookmark-all').textContent.includes('All bookmarks'));
+});
+
+test('a document with no bookmarks says so, and still has the button and the way to all of them', () => {
+  const { host } = drawHere([]);
+  assert.equal(host.querySelector('.bookmark'), null);
+  assert.ok(host.textContent.includes('None in this document'));
+  assert.ok(host.querySelector('.bookmark-add'));
+  assert.ok(host.querySelector('.bookmark-all'));
+  assert.equal(host.querySelector('.panel-head .count'), null);
 });
 
 test('the contents list their entries and a click goes to the target', () => {
