@@ -147,6 +147,26 @@
       }
     },
     {
+      "id": "it_IT-serena-high",
+      "name": "Serena HD",
+      "lang": "it-IT",
+      "quality": "high",
+      "license": "CC-BY-4.0",
+      "card": "https://huggingface.co/rhasspy/piper-voices/blob/6b9cfaacb4fb2e02a9621227e3c1a48bec9710c3/it/it_IT/serena/high/MODEL_CARD",
+      "sample": "https://huggingface.co/rhasspy/piper-voices/resolve/6b9cfaacb4fb2e02a9621227e3c1a48bec9710c3/it/it_IT/serena/high/samples/speaker_0.mp3",
+      "speaker": 0,
+      "model": {
+        "url": "https://huggingface.co/rhasspy/piper-voices/resolve/6b9cfaacb4fb2e02a9621227e3c1a48bec9710c3/it/it_IT/serena/high/it_IT-serena-high.onnx",
+        "sha256": "7462fbdf03727fb4c0c161286ad538fe6436b7e4b1c3059ef52930032475955f",
+        "bytes": 114204024
+      },
+      "config": {
+        "url": "https://huggingface.co/rhasspy/piper-voices/resolve/6b9cfaacb4fb2e02a9621227e3c1a48bec9710c3/it/it_IT/serena/high/it_IT-serena-high.onnx.json",
+        "sha256": "60597bac737a20766591fe24d1315df9a3811dc3509e69bc394cdee19eccbae7",
+        "bytes": 5252
+      }
+    },
+    {
       "id": "de_DE-thorsten-medium",
       "name": "Thorsten",
       "lang": "de-DE",

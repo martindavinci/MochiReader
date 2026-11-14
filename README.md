@@ -58,7 +58,7 @@ The installer registers MochiReader for `.md`, `.markdown` and `.epub`. Windows 
 
 MochiReader reads with the voices installed in Windows, and never sends text anywhere. To add one, open Settings, Time & Language, Speech, and choose "Add voices". If the app tells you a language has no voice, it also explains what to do.
 
-For more natural voices, open Options with Ctrl+, and choose "Manage voices…". Each voice is about 60 MB; the engine that makes them speak comes with the app. Press the play button of a voice to hear a sample first. A voice you download becomes the voice of its language, unless you already chose one. English, Italian, German, Spanish, French and Portuguese have voices there; Japanese, Korean and Chinese have none yet with a license that allows it, so the Windows voices read them.
+For more natural voices, open Options with Ctrl+, and choose "Manage voices…". Each voice is about 60 MB, Serena HD about 115 MB; the engine that makes them speak comes with the app. Press the play button of a voice to hear a sample first. A voice you download becomes the voice of its language, unless you already chose one. English, Italian, German, Spanish, French and Portuguese have voices there; Japanese, Korean and Chinese have none yet with a license that allows it, so the Windows voices read them.
 
 The voices are kept in `%LOCALAPPDATA%\io.github.martindavinci.mochireader\voices`; a portable copy keeps them in its `data` folder. The voice engine, ONNX Runtime and eSpeak NG, is in the `engine` folder of the app.
 

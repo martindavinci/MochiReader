@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Serena HD, the Italian voice Serena in high quality: more natural, about 115 MB, and slower to make each sentence.
+
 ### Changed
 
 - The bookmark button beside the tabs lists the bookmarks of the document being read, in the order of its text, with a button that adds one where the reading is and a way to all the others. It shows how many the document has, and it stays on a narrow window. Ctrl+D still adds one at once.

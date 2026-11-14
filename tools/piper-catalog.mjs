@@ -30,6 +30,8 @@ export const VOICES = [
   { id: 'en_GB-alba-medium', name: 'Alba', license: 'CC-BY-4.0' },
   { id: 'it_IT-paola-medium', name: 'Paola', license: 'CC0-1.0' },
   { id: 'it_IT-serena-medium', name: 'Serena', license: 'CC-BY-4.0' },
+  // The same voice, larger and more natural, and slower to make: the name tells it apart in the lists of voices.
+  { id: 'it_IT-serena-high', name: 'Serena HD', license: 'CC-BY-4.0' },
   { id: 'de_DE-thorsten-medium', name: 'Thorsten', license: 'CC0-1.0' },
   { id: 'de_DE-kerstin-medium', name: 'Kerstin', license: 'CC0-1.0' },
   { id: 'es_ES-davefx-medium', name: 'David', license: 'CC0-1.0' },
