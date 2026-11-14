@@ -501,9 +501,12 @@ mod tests {
     #[test]
     #[ignore]
     fn engine_piper_says_a_sentence_and_its_words() {
+        // Canonical, as the app finds its own folder: on Windows a path that starts with `\\?\`.
         let engine_dir = std::path::PathBuf::from(
             std::env::var_os("MOCHIREADER_ENGINE_DIR").expect("the engine"),
-        );
+        )
+        .canonicalize()
+        .unwrap();
         let dir = tempfile::tempdir().unwrap();
         let catalog = Catalog::embedded().unwrap();
         let places = Places::resolve(Some(dir.path()), dir.path(), &engine_dir);

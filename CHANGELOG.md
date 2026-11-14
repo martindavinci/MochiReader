@@ -6,6 +6,10 @@
 
 - When a downloaded voice cannot read and a Windows voice takes over, the message also says what went wrong.
 
+### Fixed
+
+- The downloaded voices read in an installed copy: eSpeak NG could not find its data in the folder of the app, so a Windows voice always took over.
+
 ## [0.4.0] - 2026-11-14
 
 ### Added

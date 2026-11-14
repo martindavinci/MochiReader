@@ -185,12 +185,20 @@ pub fn nfd(text: &str) -> String {
     }
 }
 
-/// The path as ASCII, for a library that only reads narrow paths: as it is, or in its short 8.3 form.
+/// The path as ASCII, for a library that only reads narrow paths: as it is, or in its short 8.3 form. A `\\?\` path,
+/// which is what a canonical path is on Windows, loses that prefix: the library adds `/` to it, and in such a path a
+/// `/` is not a separator.
 pub fn ascii_path(path: &std::path::Path) -> Option<String> {
     let text = path.to_str()?;
+    let text = if let Some(share) = text.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{share}")
+    } else {
+        text.strip_prefix(r"\\?\").unwrap_or(text).to_owned()
+    };
     if text.is_ascii() {
-        return Some(text.to_owned());
+        return Some(text);
     }
+    let path = std::path::Path::new(&text);
     let long = HSTRING::from(path.as_os_str());
     let needed = unsafe { GetShortPathNameW(&long, None) };
     let mut short = vec![0u16; usize::try_from(needed).ok()?.max(1)];
@@ -252,6 +260,23 @@ mod tests {
     use super::*;
 
     const LONG_INPUT_BYTES: usize = 1_000_000;
+
+    #[test]
+    fn a_narrow_path_has_no_verbatim_prefix() {
+        let narrow = |text: &str| ascii_path(std::path::Path::new(text));
+        assert_eq!(
+            narrow(r"\\?\C:\Users\x\engine").as_deref(),
+            Some(r"C:\Users\x\engine")
+        );
+        assert_eq!(
+            narrow(r"\\?\UNC\server\share\engine").as_deref(),
+            Some(r"\\server\share\engine")
+        );
+        assert_eq!(
+            narrow(r"C:\Users\x\engine").as_deref(),
+            Some(r"C:\Users\x\engine")
+        );
+    }
 
     #[test]
     fn nfd_takes_accents_apart() {
