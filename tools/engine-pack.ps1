@@ -68,7 +68,13 @@ if ($Redist) {
   }
 }
 Set-Content -Encoding utf8 (Join-Path $Out 'SOURCES.txt') $sources
-Set-Content -Encoding ascii -NoNewline (Join-Path $Out 'VERSION') '1'
+# Named parameters: with -NoNewline before a positional path, Set-Content writes nothing and says nothing.
+Set-Content -LiteralPath (Join-Path $Out 'VERSION') -Value '1' -Encoding ascii -NoNewline
+
+# The files the app looks for before it calls the engine ready (src-tauri/src/tts/engine_pack.rs).
+foreach ($file in 'onnxruntime.dll', 'espeak-ng.dll', 'espeak-ng-data/phontab', 'VERSION') {
+  if (-not (Test-Path -LiteralPath (Join-Path $Out $file) -PathType Leaf)) { throw "the engine has no $file" }
+}
 
 $bytes = (Get-ChildItem $Out -Recurse -File | Measure-Object -Sum Length).Sum
 Write-Output "engine in $Out, $bytes bytes"
