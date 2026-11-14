@@ -927,7 +927,7 @@ test('the bookmark button lists the bookmarks of the open file in the order of i
 });
 
 test('the button in the bookmarks of the file adds one where the reading is, and the count follows', async () => {
-  const shell = await startShell(async (path) => markdownDoc(path, 'Il brano'), { pending: [PATH_A] });
+  const shell = await startShell(async (path) => markdownDoc(path, 'Il brano'), { pending: [PATH_A], options: { language: 'it' } });
   await shell.settled();
   const button = shell.document.querySelector('.tool-bookmarks');
   assert.equal(button.querySelector('.tool-count').hidden, true);
@@ -937,7 +937,7 @@ test('the button in the bookmarks of the file adds one where the reading is, and
   assert.equal(shell.state.bookmarks.length, 1);
   assert.equal(shell.panel().querySelectorAll('.bookmark').length, 1);
   assert.equal(button.querySelector('.tool-count').textContent, '1');
-  assert.equal(shell.panel().querySelector('.bookmark-add').textContent, 'Togli il segnalibro da qui');
+  assert.equal(shell.panel().querySelector('.bookmark-add').textContent, it['bookmarks.removeHere']);
   await shell.click(shell.panel().querySelector('.bookmark-all'));
   assert.equal(shell.panel().getAttribute('data-panel'), 'bookmarks');
 });
