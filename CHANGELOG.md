@@ -1,18 +1,13 @@
 # Changelog
 
-## [Unreleased]
-
-### Changed
-
-- The voice engine comes with the app, in the installer and in the portable zip: the natural voices no longer wait for a second download, and nothing is downloaded but the voices themselves.
-- In the voice manager, the play button of a sample stops it while it plays, each language has its name over its voices, and languages without voices to download are not listed.
-- The list of voices in Options and in the reading bar ends with an entry that opens the voice manager.
-
-## [0.4.0] - 2026-11-13
+## [0.4.0] - 2026-11-14
 
 ### Added
 
-- Natural voices that read offline, in English, Italian, German, Spanish, French and Portuguese, downloaded on request from a voice manager in Options. Each shows its quality, size and license, can be heard first, and can be deleted. The first one also brings the voice engine. Only voices whose license allows it are offered.
+- Natural voices that read offline, in English, Italian, German, Spanish, French and Portuguese, downloaded on request from a voice manager in Options. Each shows its quality, size and license, can be heard first, and can be deleted. Only voices whose license allows it are offered.
+- The voice engine comes with the app, in the installer and in the portable zip: nothing is downloaded but the voices themselves.
+- The voice manager lists the voices under the name of their language, and only the languages that have voices to download. The play button of a sample stops it while it plays.
+- The list of voices in Options and in the reading bar ends with an entry that opens the voice manager.
 - A downloaded voice becomes the voice of its language, unless one was already chosen by hand.
 - Speeds from 0.5× to 4× for the downloaded voices, without changing their pitch. A new speed or volume reaches the sentence being read instead of starting it again.
 - The word being said is marked over its sentence, for the downloaded voices and for the Windows voices that tell their words. "Follow word by word" in Options turns it off.
