@@ -42,8 +42,8 @@ export class RoutedEngine {
   #audio;
   #last = null;
   /**
-   * Told when a voice of the app fails on a sentence, with the options of that sentence. When it answers true it
-   * has moved the reading to another voice, and this sentence is over for whoever asked.
+   * Told when a voice of the app fails on a sentence, with the options of that sentence and why it failed. When it
+   * answers true it has moved the reading to another voice, and this sentence is over for whoever asked.
    */
   onLiveError = null;
 
@@ -66,7 +66,9 @@ export class RoutedEngine {
     if (this.#last && this.#last !== target) this.#last.stop();
     this.#last = target;
     const outcome = await target.speak(text, options);
-    if (outcome === 'error' && target === this.#audio && this.onLiveError?.(options)) return 'stopped';
+    if (outcome === 'error' && target === this.#audio && this.onLiveError?.(options, this.#audio.lastError)) {
+      return 'stopped';
+    }
     return outcome;
   }
 

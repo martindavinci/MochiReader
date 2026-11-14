@@ -34,6 +34,8 @@ export class AudioEngine {
   volume = null;
   /** Called with 'start', 'end' or 'error:<kind>' and the text, in a test run that logs what it hears. */
   onTrace = null;
+  /** Why the last sentence failed, as Rust says it (`{kind, message}`), until the next one begins. */
+  lastError = null;
 
   constructor({ invoke, AudioContext = globalThis.AudioContext, timers = defaultTimers } = {}) {
     this.#invoke = invoke;
@@ -56,6 +58,7 @@ export class AudioEngine {
 
   speak(text, { voiceId = null, rate = 1, volume = 1, onWord = null } = {}) {
     if (this.#play) this.stop();
+    this.lastError = null;
     this.setVolume(volume);
     return new Promise((resolve) => {
       const play = {
@@ -93,7 +96,10 @@ export class AudioEngine {
           if (sound.rate !== play.rate) this.#restretch(play, 0);
           else this.#begin(play, sound, 0);
         })
-        .catch(() => play.settle('error'));
+        .catch((error) => {
+          if (this.#play === play) this.lastError = error;
+          play.settle('error');
+        });
     });
   }
 

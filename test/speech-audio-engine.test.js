@@ -198,6 +198,11 @@ test('a failed invoke is an error', async () => {
   const said = engine.speak('Ciao.', { voiceId: 'piper:x' });
   calls[0].reject({ kind: 'voice', message: 'gone' });
   assert.equal(await said, 'error');
+  assert.deepEqual(engine.lastError, { kind: 'voice', message: 'gone' });
+  const again = engine.speak('Ciao.', { voiceId: 'piper:x' });
+  assert.equal(engine.lastError, null);
+  engine.stop();
+  await again;
 });
 
 test('rates are half to four by tenths', () => {

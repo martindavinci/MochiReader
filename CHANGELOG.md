@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- When a downloaded voice cannot read and a Windows voice takes over, the message also says what went wrong.
+
 ## [0.4.0] - 2026-11-14
 
 ### Added

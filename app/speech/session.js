@@ -105,7 +105,7 @@ class SpeechSession {
     const web = new WebSpeechEngine();
     this.#engine = engine ?? new RoutedEngine({ web, audio: new AudioEngine({ invoke }) });
     this.#listVoices = engine ? () => engine.voices() : () => listVoices({ web, invoke, edgeOn: edgeOn() });
-    if ('onLiveError' in this.#engine) this.#engine.onLiveError = (options) => this.#liveFailed(options);
+    if ('onLiveError' in this.#engine) this.#engine.onLiveError = (options, error) => this.#liveFailed(options, error);
     this.#invoke = invoke;
     this.#save = save;
     this.#isInFront = isInFront;
@@ -380,10 +380,11 @@ class SpeechSession {
     return true;
   }
 
-  #tellFallback(key, { always = false } = {}) {
+  /** `reason` is what the engine said went wrong, in its own words: shown as it is, so that it can be reported. */
+  #tellFallback(key, { always = false, reason = null } = {}) {
     if (this.#toldFallback && !always) return;
     this.#toldFallback = true;
-    this.#showMessage(t(key));
+    this.#showMessage(reason ? `${t(key)} (${reason})` : t(key));
   }
 
   /**
@@ -391,7 +392,7 @@ class SpeechSession {
    * of this reading. After Edge that is a downloaded voice if there is one, after Piper a voice of Windows.
    * @returns {boolean} Whether another voice took over.
    */
-  #liveFailed({ voiceId }) {
+  #liveFailed({ voiceId }, error = null) {
     if (!this.active() || this.#switching || voiceId !== this.#voiceId) return false;
     const failed = engineOf(voiceId);
     if (failed === 'sapi') return false;
@@ -404,8 +405,9 @@ class SpeechSession {
       .map((voices) => voices.find((voice) => voice.id === saved) ?? closestVoice(voices, this.#lang))
       .find(Boolean);
     if (!replacement) return false;
-    if (failed === 'edge') this.#tellFallback('speech.edgeFailed', { always: true });
-    else this.#tellFallback('speech.offlineFallback');
+    const reason = typeof error?.message === 'string' && error.message ? error.message : null;
+    if (failed === 'edge') this.#tellFallback('speech.edgeFailed', { always: true, reason });
+    else this.#tellFallback('speech.offlineFallback', { reason });
     this.#voiceId = replacement.id;
     this.#player.setVoice(replacement.id);
     this.#draw();

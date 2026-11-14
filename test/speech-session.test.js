@@ -843,7 +843,8 @@ test('a piper voice that fails a sentence hands the reading to windows, which sa
   engine.speak = (text, options) => {
     if (options.voiceId === PAOLA.id) {
       engine.calls.push({ text, ...options });
-      return Promise.resolve(engine.onLiveError?.(options) ? 'stopped' : 'error');
+      const error = { kind: 'engine', message: 'ONNX Runtime did not load' };
+      return Promise.resolve(engine.onLiveError?.(options, error) ? 'stopped' : 'error');
     }
     return speak(text, options);
   };
@@ -854,7 +855,8 @@ test('a piper voice that fails a sentence hands the reading to windows, which sa
     ['Uno è qui.', PAOLA.id],
     ['Uno è qui.', 'elsa'],
   ]);
-  assert.deepEqual(messages, [en['speech.offlineFallback']]);
+  // What went wrong is said too, so that it can be reported.
+  assert.deepEqual(messages, [`${en['speech.offlineFallback']} (ONNX Runtime did not load)`]);
   engine.finish();
   await flush();
   assert.equal(engine.calls.at(-1).voiceId, 'elsa');

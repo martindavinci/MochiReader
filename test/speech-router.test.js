@@ -81,3 +81,18 @@ test('a change of engine stops the one that spoke, and only then', async () => {
   await engine.speak('Tre.', { voiceId: 'Microsoft Elsa' });
   assert.equal(audio.stops, 1);
 });
+
+test('a voice of the app that fails tells why to whoever takes over', async () => {
+  const web = fake('web');
+  const audio = fake('audio');
+  audio.speak = () => Promise.resolve('error');
+  audio.lastError = { kind: 'engine', message: 'ONNX Runtime did not load' };
+  const engine = new RoutedEngine({ web, audio });
+  const told = [];
+  engine.onLiveError = (options, error) => {
+    told.push([options.voiceId, error]);
+    return true;
+  };
+  assert.equal(await engine.speak('Uno.', { voiceId: 'piper:paola' }), 'stopped');
+  assert.deepEqual(told, [['piper:paola', { kind: 'engine', message: 'ONNX Runtime did not load' }]]);
+});
