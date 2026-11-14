@@ -125,6 +125,7 @@ export default {
   'options.voiceSound': 'Sound of the downloaded voices',
   'options.voiceSoundHint': 'The Windows voices keep their own.',
   'options.sound.natural': 'Natural',
+  'options.sound.original': 'Original',
   'options.sound.warm': 'Warm',
   'options.sound.clear': 'Clear',
   'options.sound.soft': 'Soft',

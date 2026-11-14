@@ -125,6 +125,7 @@ export default {
   'options.voiceSound': 'ダウンロードした音声の音質',
   'options.voiceSoundHint': 'Windows の音声は変わりません。',
   'options.sound.natural': 'ナチュラル',
+  'options.sound.original': 'オリジナル',
   'options.sound.warm': 'ウォーム',
   'options.sound.clear': 'クリア',
   'options.sound.soft': 'ソフト',

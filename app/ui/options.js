@@ -69,7 +69,7 @@ const FIELDS = [
     hint: 'options.voiceSoundHint',
     group: 'options.groupSpeech',
     list: true,
-    choices: ['natural', 'warm', 'clear', 'soft', 'radio', 'night'].map((style) => keyed(style, `options.sound.${style}`)),
+    choices: ['natural', 'original', 'warm', 'clear', 'soft', 'radio', 'night'].map((style) => keyed(style, `options.sound.${style}`)),
   },
   {
     name: 'language',

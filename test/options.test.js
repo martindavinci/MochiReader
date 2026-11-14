@@ -198,11 +198,11 @@ test('the voices come before the notices at the bottom of the panel, and drawing
   assert.ok(parts.indexOf(host.querySelector('.voice-options')) < parts.indexOf(host.querySelector('.about')));
 });
 
-test('the sound of the downloaded voices is natural unless chosen, and offers six styles', () => {
+test('the sound of the downloaded voices is natural unless chosen, and offers the original sound and six styles', () => {
   setLang('en');
   assert.equal(DEFAULT_OPTIONS.voiceSound, 'natural');
   const { field, choose, changes } = draw();
-  assert.deepEqual(values(field('voiceSound')), ['natural', 'warm', 'clear', 'soft', 'radio', 'night']);
+  assert.deepEqual(values(field('voiceSound')), ['natural', 'original', 'warm', 'clear', 'soft', 'radio', 'night']);
   choose('voiceSound', 'radio');
   assert.deepEqual(changes, [['voiceSound', 'radio']]);
 });

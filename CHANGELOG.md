@@ -5,11 +5,11 @@
 ### Added
 
 - Serena HD, the Italian voice Serena in high quality: more natural, about 115 MB, and slower to make each sentence.
-- A sound for the downloaded voices, in Options: natural, warm, clear, soft, radio or night, with a button to hear it. A new sound reaches the sentence being read.
+- A sound for the downloaded voices, in Options: natural, warm, clear, soft, radio or night, or the original sound of the voice untouched, with a button to hear it. A new sound reaches the sentence being read.
 
 ### Changed
 
-- Every sentence of a downloaded voice comes at the same loudness, whatever the voice, and its peaks are kept under a ceiling.
+- Every sentence of a downloaded voice comes at the same loudness, whatever the voice, and its peaks are kept under a ceiling, unless the original sound is chosen.
 - The bookmark button beside the tabs lists the bookmarks of the document being read, in the order of its text, with a button that adds one where the reading is and a way to all the others. It shows how many the document has, and it stays on a narrow window. Ctrl+D still adds one at once.
 
 ## [0.4.1] - 2026-11-14

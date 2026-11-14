@@ -125,6 +125,7 @@ export default {
   'options.voiceSound': '下载语音的音色',
   'options.voiceSoundHint': 'Windows 语音保持不变。',
   'options.sound.natural': '自然',
+  'options.sound.original': '原声',
   'options.sound.warm': '温暖',
   'options.sound.clear': '清晰',
   'options.sound.soft': '柔和',

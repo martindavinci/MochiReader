@@ -125,6 +125,7 @@ export default {
   'options.voiceSound': '다운로드한 음성의 소리',
   'options.voiceSoundHint': 'Windows 음성은 그대로입니다.',
   'options.sound.natural': '자연스럽게',
+  'options.sound.original': '원래대로',
   'options.sound.warm': '따뜻하게',
   'options.sound.clear': '선명하게',
   'options.sound.soft': '부드럽게',

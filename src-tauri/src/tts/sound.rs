@@ -19,6 +19,8 @@ const LIMITER_RELEASE_S: f64 = 0.05;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Style {
     Natural,
+    /// The sound as the voice makes it: no filter, no loudness, no limiter.
+    Original,
     Warm,
     Clear,
     Soft,
@@ -30,6 +32,7 @@ impl Style {
     /// The style the page names; any other name is the natural one.
     pub fn named(name: &str) -> Self {
         match name {
+            "original" => Self::Original,
             "warm" => Self::Warm,
             "clear" => Self::Clear,
             "soft" => Self::Soft,
@@ -39,14 +42,16 @@ impl Style {
         }
     }
 
-    fn preset(self) -> &'static Preset {
+    /// None for the original sound, which is left as it is.
+    fn preset(self) -> Option<&'static Preset> {
         match self {
-            Self::Natural => &NATURAL,
-            Self::Warm => &WARM,
-            Self::Clear => &CLEAR,
-            Self::Soft => &SOFT,
-            Self::Radio => &RADIO,
-            Self::Night => &NIGHT,
+            Self::Natural => Some(&NATURAL),
+            Self::Original => None,
+            Self::Warm => Some(&WARM),
+            Self::Clear => Some(&CLEAR),
+            Self::Soft => Some(&SOFT),
+            Self::Radio => Some(&RADIO),
+            Self::Night => Some(&NIGHT),
         }
     }
 }
@@ -207,7 +212,9 @@ const NIGHT: Preset = Preset {
 /// `part` of a sentence, as `style` wants it. The gains come from the whole sentence, `full`, so that every part of it
 /// sounds the same, whatever speed it was stretched to.
 pub fn shape(full: &[f32], part: &[f32], sample_rate: u32, style: Style) -> Vec<f32> {
-    let preset = style.preset();
+    let Some(preset) = style.preset() else {
+        return part.to_vec();
+    };
     let rate = f64::from(sample_rate);
     let mut whole = equalize(full, rate, preset.bands);
     let before = gain_to(preset.loudness, loudness(&whole, rate));
@@ -555,7 +562,7 @@ mod tests {
     #[test]
     fn every_style_brings_a_quiet_and_a_loud_sentence_to_its_loudness() {
         for style in STYLES {
-            let target = style.preset().loudness;
+            let target = style.preset().unwrap().loudness;
             for amplitude in [0.1, 0.6] {
                 let voice = speechlike(amplitude, 3.0);
                 let shaped = shape(&voice, &voice, RATE, style);
@@ -572,7 +579,7 @@ mod tests {
     fn no_style_lets_a_sample_past_its_ceiling() {
         for style in STYLES {
             let voice = speechlike(0.95, 2.0);
-            let ceiling = 10f32.powf(style.preset().ceiling_db as f32 / 20.0);
+            let ceiling = 10f32.powf(style.preset().unwrap().ceiling_db as f32 / 20.0);
             let shaped = shape(&voice, &voice, RATE, style);
             assert!(
                 peak(&shaped) <= ceiling * 1.001,
@@ -601,9 +608,20 @@ mod tests {
     }
 
     #[test]
+    fn the_original_sound_is_left_as_the_voice_made_it() {
+        let loud = sine(440.0, 0.99, 2.0);
+        let quiet = sine(440.0, 0.01, 2.0);
+        for samples in [&loud, &quiet] {
+            let part = &samples[RATE as usize / 2..];
+            assert_eq!(shape(samples, part, RATE, Style::Original), part);
+        }
+    }
+
+    #[test]
     fn a_style_is_found_by_its_name_and_any_other_name_is_natural() {
         assert_eq!(Style::named("warm"), Style::Warm);
         assert_eq!(Style::named("night"), Style::Night);
+        assert_eq!(Style::named("original"), Style::Original);
         assert_eq!(Style::named(""), Style::Natural);
         assert_eq!(Style::named("loud"), Style::Natural);
     }
