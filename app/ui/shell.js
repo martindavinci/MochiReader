@@ -113,6 +113,8 @@ let dropZone = null;
 /** Reading aloud, once it has been asked for: everything it needs stays out of the first frame. */
 let speech = null;
 let speechLoading = null;
+/** What says a sentence when the sound of the voices is listened to in the options. */
+let soundSample = null;
 /** The downloads of voices this run has heard of, by voice: what the manager draws on each row. */
 const downloads = new Map();
 /** The sample playing, `{id, stop}`, so that a second one stops the first and its button can stop it. */
@@ -467,6 +469,7 @@ function loadSpeech() {
       },
       onReading: () => drawTabBar(),
       wordsOn: () => options.speechWords !== 'off',
+      soundOf: () => options.voiceSound,
     });
     return speech;
   });
@@ -1022,6 +1025,10 @@ async function changeOption(name, value) {
   else useOptions({ ...options, [name]: value });
   invoke('state_set_option', { name, value });
   if (name === 'epubView') openBooks().forEach(({ reader }) => reader.setFlow(value));
+  if (name === 'voiceSound') {
+    speech?.soundChanged();
+    soundSample?.resound();
+  }
   if (name === 'language') {
     speech?.redraw();
     refresh();
@@ -1052,7 +1059,29 @@ async function drawVoiceOptions() {
   if (!panelHost.querySelector('.voice-options')) return;
   if (panels.current() !== PANEL_OPTIONS) return;
   const groups = voiceGroups(voices, saved).map((group) => ({ ...group, name: languageName(group.lang) }));
-  renderVoiceOptions(panelHost, groups, chooseDefaultVoice, { onManage: () => showPanel(PANEL_VOICES) });
+  renderVoiceOptions(panelHost, groups, chooseDefaultVoice, {
+    onManage: () => showPanel(PANEL_VOICES),
+    onListen: () => listenToSound(groups),
+  });
+}
+
+/**
+ * A sentence in the sound chosen, said by a downloaded voice of the language of the interface: the one of that language
+ * if it is downloaded. While a document is read aloud it already has the sound, so nothing more is said.
+ */
+async function listenToSound(groups) {
+  if (speech?.reading()) return;
+  const group = groups.find(({ lang }) => lang === getLang().split('-')[0]);
+  const downloaded = (group?.voices ?? []).filter(({ id }) => id.startsWith(PIPER_PREFIX));
+  const voice = downloaded.find(({ id }) => id === group.selected) ?? downloaded[0];
+  if (!voice) {
+    showToast(t('voices.listenNone'), { glyph: 'info' });
+    return;
+  }
+  const { AudioEngine } = await import('../speech/engine-audio.js');
+  soundSample ??= new AudioEngine({ invoke, sound: () => options.voiceSound });
+  soundSample.stop();
+  soundSample.speak(t('voices.listenText'), { voiceId: voice.id });
 }
 
 /** The languages the manager shows first: of the documents open, then of the interface. */

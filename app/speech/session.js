@@ -100,10 +100,11 @@ class SpeechSession {
     sourceMode,
     edgeOn = () => false,
     wordsOn = () => true,
+    soundOf = () => 'natural',
   }) {
     this.#wordsOn = wordsOn;
     const web = new WebSpeechEngine();
-    this.#engine = engine ?? new RoutedEngine({ web, audio: new AudioEngine({ invoke }) });
+    this.#engine = engine ?? new RoutedEngine({ web, audio: new AudioEngine({ invoke, sound: soundOf }) });
     this.#listVoices = engine ? () => engine.voices() : () => listVoices({ web, invoke, edgeOn: edgeOn() });
     if ('onLiveError' in this.#engine) this.#engine.onLiveError = (options, error) => this.#liveFailed(options, error);
     this.#invoke = invoke;
@@ -131,6 +132,11 @@ class SpeechSession {
       onVolume: (volume) => this.active() && this.#setVolume(volume),
       onMoreVoices: showVoices,
     });
+  }
+
+  /** The sound of the voices of the app changed in the options: the sentence being said takes it. */
+  soundChanged() {
+    this.#engine.resound?.();
   }
 
   /** What a test run needs to reach. */

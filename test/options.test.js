@@ -57,7 +57,9 @@ test('nothing saved means the defaults, which follow Windows', () => {
 });
 
 test('saved options come back', () => {
-  const saved = { theme: 'dark', textSize: 22, sourceMode: 'name', speechWords: 'off', epubView: 'scrolled', language: 'it' };
+  const saved = {
+    theme: 'dark', textSize: 22, sourceMode: 'name', speechWords: 'off', voiceSound: 'warm', epubView: 'scrolled', language: 'it',
+  };
   assert.deepEqual(readOptions(saved), saved);
 });
 
@@ -194,6 +196,28 @@ test('the voices come before the notices at the bottom of the panel, and drawing
   assert.ok(host.querySelector('.about').previousElementSibling.closest('.panel-body') === host.querySelector('.voice-options').parentElement);
   const parts = [...host.querySelector('.panel-body').children];
   assert.ok(parts.indexOf(host.querySelector('.voice-options')) < parts.indexOf(host.querySelector('.about')));
+});
+
+test('the sound of the downloaded voices is natural unless chosen, and offers six styles', () => {
+  setLang('en');
+  assert.equal(DEFAULT_OPTIONS.voiceSound, 'natural');
+  const { field, choose, changes } = draw();
+  assert.deepEqual(values(field('voiceSound')), ['natural', 'warm', 'clear', 'soft', 'radio', 'night']);
+  choose('voiceSound', 'radio');
+  assert.deepEqual(changes, [['voiceSound', 'radio']]);
+});
+
+test('the voices end with a button that plays the sound chosen, when asked for', () => {
+  setLang('en');
+  const { host, click } = draw();
+  let heard = 0;
+  renderVoiceOptions(host, GROUPS, () => {}, { onManage: () => {}, onListen: () => { heard += 1; } });
+  const listen = host.querySelector('.voice-listen');
+  assert.equal(listen.textContent, en['voices.listen']);
+  click(listen);
+  assert.equal(heard, 1);
+  renderVoiceOptions(host, GROUPS, () => {});
+  assert.equal(host.querySelector('.voice-listen'), null);
 });
 
 test('choosing a voice says for which language', () => {

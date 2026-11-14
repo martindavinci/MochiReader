@@ -106,7 +106,7 @@ test('speak plays one buffer and ends', async () => {
   const { audio, calls, engine } = setup();
   const said = engine.speak('Ciao.', { voiceId: 'piper:x', rate: 1 });
   assert.equal(calls[0].command, 'tts_speak');
-  assert.deepEqual(calls[0].args, { voiceId: 'piper:x', text: 'Ciao.', rate: 1 });
+  assert.deepEqual(calls[0].args, { voiceId: 'piper:x', text: 'Ciao.', rate: 1, sound: 'natural' });
   calls[0].resolve(pack({ samples: seconds(1) }));
   await flush();
   assert.equal(audio.sources.length, 1);
@@ -143,6 +143,34 @@ test('set rate while playing restretches from where it is', async () => {
   assert.equal(audio.sources[1].stopped, false);
   audio.sources[1].onended();
   assert.equal(await said, 'end');
+});
+
+test('the sound the reader chose goes with each sentence', async () => {
+  const audio = fakeAudio();
+  const { calls, invoke } = controlledInvoke();
+  let chosen = 'warm';
+  const engine = new AudioEngine({ invoke, AudioContext: audio.FakeContext, timers: fakeTimers(), sound: () => chosen });
+  engine.speak('Ciao.', { voiceId: 'piper:x', rate: 1 });
+  assert.equal(calls[0].args.sound, 'warm');
+  calls[0].resolve(pack({ id: '3', samples: seconds(1) }));
+  await flush();
+  chosen = 'radio';
+  audio.context.currentTime = 0.5;
+  engine.resound();
+  assert.equal(calls[1].command, 'tts_restretch');
+  assert.equal(calls[1].args.sound, 'radio');
+  assert.equal(calls[1].args.rate, 1);
+  assert.ok(Math.abs(calls[1].args.from - 11025) <= 64, `from ${calls[1].args.from}`);
+  calls[1].resolve(pack({ id: '3', from: calls[1].args.from, samples: seconds(0.5) }));
+  await flush();
+  assert.equal(audio.sources.length, 2);
+  assert.equal(audio.sources[0].stopped, true);
+});
+
+test('a new sound with nothing being said asks for nothing', () => {
+  const { calls, engine } = setup();
+  engine.resound();
+  assert.equal(calls.length, 0);
 });
 
 test('five rate changes in a row leave one source at the last rate', async () => {

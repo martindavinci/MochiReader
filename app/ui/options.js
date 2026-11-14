@@ -64,6 +64,14 @@ const FIELDS = [
     choices: [keyed('on', 'options.speechWordsOn'), keyed('off', 'options.speechWordsOff')],
   },
   {
+    name: 'voiceSound',
+    label: 'options.voiceSound',
+    hint: 'options.voiceSoundHint',
+    group: 'options.groupSpeech',
+    list: true,
+    choices: ['natural', 'warm', 'clear', 'soft', 'radio', 'night'].map((style) => keyed(style, `options.sound.${style}`)),
+  },
+  {
     name: 'language',
     label: 'options.language',
     hint: 'options.languageHint',
@@ -87,7 +95,8 @@ const FIELDS = [
 
 /**
  * @param {Record<string, *>} saved The options as the state keeps them.
- * @returns {{theme: string, textSize: number, sourceMode: string, epubView: string, language: string}}
+ * @returns {{theme: string, textSize: number, sourceMode: string, speechWords: string, voiceSound: string, epubView: string,
+ *   language: string}}
  *   Each one the saved value if the app knows it, or its default.
  */
 export function readOptions(saved) {
@@ -130,9 +139,9 @@ export function interfaceLang({ language }, systemLang) {
  * @param {{lang: string, name: string, voices: {id: string, name: string, group?: 'local'|'online'}[], selected: string}[]} groups
  *   The voices of each language: those of this PC first, then the online ones.
  * @param {(lang: string, voiceId: string) => void} onVoice
- * @param {{onManage?: () => void}} [more]
+ * @param {{onManage?: () => void, onListen?: () => void}} [more] `onListen` plays a sentence in the sound chosen.
  */
-export function renderVoiceOptions(host, groups, onVoice, { onManage } = {}) {
+export function renderVoiceOptions(host, groups, onVoice, { onManage, onListen } = {}) {
   const document = host.ownerDocument;
   const optionOf = (voice, selected) => {
     const option = document.createElement('option');
@@ -183,15 +192,22 @@ export function renderVoiceOptions(host, groups, onVoice, { onManage } = {}) {
     row.append(caption, select);
     return row;
   });
-  if (onManage) {
-    const manage = document.createElement('button');
-    manage.className = 'btn btn-secondary voice-manage';
-    manage.setAttribute(FOCUS_KEY, 'voice-manage');
-    manage.textContent = t('voices.manage');
-    manage.addEventListener('click', () => onManage());
+  const action = (className, text, run) => {
+    const button = document.createElement('button');
+    button.className = `btn btn-secondary ${className}`;
+    button.setAttribute(FOCUS_KEY, className);
+    button.textContent = text;
+    button.addEventListener('click', () => run());
+    return button;
+  };
+  const actions = [
+    onListen && action('voice-listen', t('voices.listen'), onListen),
+    onManage && action('voice-manage', t('voices.manage'), onManage),
+  ].filter(Boolean);
+  if (actions.length > 0) {
     const row = document.createElement('div');
     row.className = 'option option-action';
-    row.append(manage);
+    row.append(...actions);
     rows.push(row);
   }
   host.querySelector(`.${VOICE_OPTIONS_CLASS}`).replaceChildren(...rows);

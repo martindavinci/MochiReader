@@ -25,6 +25,7 @@ Double-click a file and read it, or have it read aloud. What you read never leav
 - Reads aloud with the Windows voices, or with natural voices that work offline once downloaded, sentence by sentence, highlighting the sentence and following it down the page. It goes on with the window minimised.
 - Marks the word being said, for the downloaded voices and for the Windows voices that tell their words. It can be turned off in Options.
 - The downloaded voices read from 0.5× to 4× without changing their pitch, and a new speed or volume reaches the sentence being read instead of starting it again.
+- The downloaded voices can sound natural, warm, clear, soft, like a radio or quiet for the night, and every sentence comes at the same loudness. The sound is chosen and heard in Options.
 - Skips what sounds wrong when spoken: link addresses, source citations and frontmatter.
 - Remembers the last voice used for each language.
 - Books show their chapter, page and progress, with arrows to turn the page, in pages or in one long scroll.

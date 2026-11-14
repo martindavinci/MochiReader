@@ -95,6 +95,11 @@ export class RoutedEngine {
     this.#audio.setVolume(volume);
   }
 
+  /** The sound the reader chose, for the sentence being said by a voice of the app. Windows voices have their own. */
+  resound() {
+    this.#audio.resound();
+  }
+
   /** How loud a test run speaks: both engines hear it. */
   get volume() {
     return this.#web.volume;

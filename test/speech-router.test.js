@@ -28,6 +28,9 @@ function fake(name, voices = []) {
     setVolume(volume) {
       this.adjusted.push(['volume', volume]);
     },
+    resound() {
+      this.adjusted.push(['sound']);
+    },
   };
 }
 
@@ -61,6 +64,14 @@ test('the speeds and the live changes follow the engine of the voice', () => {
   assert.equal(engine.live('Microsoft Elsa'), false);
   engine.adjust({ voiceId: 'piper:x', rate: 2.5, volume: 0.5 });
   assert.deepEqual(audio.adjusted, [['rate', 2.5], ['volume', 0.5]]);
+});
+
+test('a new sound reaches the voices of the app, and only them', () => {
+  const web = fake('web');
+  const audio = fake('audio');
+  new RoutedEngine({ web, audio }).resound();
+  assert.deepEqual(audio.adjusted, [['sound']]);
+  assert.deepEqual(web.adjusted, []);
 });
 
 test('the voices of both engines are listed', async () => {

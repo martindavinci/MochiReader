@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Voices the app says itself: it makes the sound of a sentence at its own speed, keeps it, stretches it to the speed
-//! asked, and hands it to the page as samples. The page plays them with Web Audio.
+//! asked, shapes it in the style the reader chose, and hands it to the page as samples. The page plays them with Web
+//! Audio.
 
 pub mod cache;
 pub mod catalog;
@@ -12,6 +13,7 @@ pub mod onnx_patch;
 pub mod paths;
 pub mod piper;
 mod router;
+pub mod sound;
 pub mod stretch;
 #[cfg(any(test, feature = "smoke"))]
 pub mod tone;
@@ -19,6 +21,7 @@ pub mod tone;
 use cache::{Cache, CacheKey, CACHE_SENTENCES};
 use serde::ser::SerializeStruct;
 use serde::{Serialize, Serializer};
+use sound::Style;
 use std::fmt;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
@@ -226,10 +229,17 @@ impl Service {
         Ok((id, synthesis))
     }
 
-    pub fn speak(&self, voice: &str, text: &str, rate: f32) -> Result<Vec<u8>, TtsError> {
+    pub fn speak(
+        &self,
+        voice: &str,
+        text: &str,
+        rate: f32,
+        style: Style,
+    ) -> Result<Vec<u8>, TtsError> {
         let (id, synthesis) = self.sound(voice, text)?;
         let rate = clamp_rate(rate);
         let samples = stretch::stretch(&synthesis.samples, synthesis.sample_rate, rate);
+        let samples = sound::shape(&synthesis.samples, &samples, synthesis.sample_rate, style);
         Ok(pack(id, &synthesis, 0, rate, &samples))
     }
 
@@ -237,14 +247,21 @@ impl Service {
         self.sound(voice, text).map(|_| ())
     }
 
-    /// The rest of a sentence still kept, from the sample `from` of its own sound, at a new speed.
-    pub fn restretch(&self, id: u64, from: usize, rate: f32) -> Result<Vec<u8>, TtsError> {
+    /// The rest of a sentence still kept, from the sample `from` of its own sound, at a new speed or in a new style.
+    pub fn restretch(
+        &self,
+        id: u64,
+        from: usize,
+        rate: f32,
+        style: Style,
+    ) -> Result<Vec<u8>, TtsError> {
         let synthesis = lock(&self.cache)
             .get(id)
             .ok_or_else(|| TtsError::Refused("the sentence is no longer kept".into()))?;
         let rate = clamp_rate(rate);
         let from = from.min(synthesis.samples.len());
         let samples = stretch::stretch(&synthesis.samples[from..], synthesis.sample_rate, rate);
+        let samples = sound::shape(&synthesis.samples, &samples, synthesis.sample_rate, style);
         Ok(pack(id, &synthesis, from, rate, &samples))
     }
 
@@ -266,10 +283,12 @@ pub async fn tts_speak(
     voice_id: String,
     text: String,
     rate: f32,
+    sound: Option<String>,
     service: tauri::State<'_, Arc<Service>>,
 ) -> Result<tauri::ipc::Response, TtsError> {
     let service = Arc::clone(&service);
-    let bytes = off_the_workers(move || service.speak(&voice_id, &text, rate)).await?;
+    let style = Style::named(sound.as_deref().unwrap_or_default());
+    let bytes = off_the_workers(move || service.speak(&voice_id, &text, rate, style)).await?;
     Ok(tauri::ipc::Response::new(bytes))
 }
 
@@ -288,13 +307,15 @@ pub async fn tts_restretch(
     id: String,
     from: usize,
     rate: f32,
+    sound: Option<String>,
     service: tauri::State<'_, Arc<Service>>,
 ) -> Result<tauri::ipc::Response, TtsError> {
+    let style = Style::named(sound.as_deref().unwrap_or_default());
     let id: u64 = id
         .parse()
         .map_err(|_| TtsError::Refused("no such sentence".into()))?;
     let service = Arc::clone(&service);
-    let bytes = off_the_workers(move || service.restretch(id, from, rate)).await?;
+    let bytes = off_the_workers(move || service.restretch(id, from, rate, style)).await?;
     Ok(tauri::ipc::Response::new(bytes))
 }
 
@@ -425,31 +446,61 @@ mod tests {
             calls: AtomicUsize::new(0),
         });
         let service = Service::with(counting.clone());
-        service.speak("piper:x", "Ciao a tutti.", 1.0).unwrap();
-        service.speak("piper:x", "Ciao a tutti.", 2.0).unwrap();
+        service
+            .speak("piper:x", "Ciao a tutti.", 1.0, Style::Natural)
+            .unwrap();
+        service
+            .speak("piper:x", "Ciao a tutti.", 2.0, Style::Natural)
+            .unwrap();
         assert_eq!(counting.calls.load(Ordering::SeqCst), 1);
     }
 
     #[test]
     fn restretch_from_the_middle_returns_the_rest() {
         let service = Service::with(Arc::new(Fixed));
-        let (header, _) = unpack(&service.speak("piper:x", "one", 1.0).unwrap());
+        let (header, _) = unpack(
+            &service
+                .speak("piper:x", "one", 1.0, Style::Natural)
+                .unwrap(),
+        );
         let id: u64 = header["id"].as_str().unwrap().parse().unwrap();
-        let (header, samples) = unpack(&service.restretch(id, 11025, 1.0).unwrap());
+        let (header, samples) = unpack(&service.restretch(id, 11025, 1.0, Style::Natural).unwrap());
         assert_eq!(header["from"], 11025);
         assert_eq!(samples.len(), 11025);
     }
 
     #[test]
+    fn the_sound_comes_in_the_style_asked_under_its_ceiling() {
+        let service = Service::with(Arc::new(Counting {
+            calls: AtomicUsize::new(0),
+        }));
+        let (header, natural) = unpack(
+            &service
+                .speak("piper:x", "one", 1.0, Style::Natural)
+                .unwrap(),
+        );
+        let (_, radio) = unpack(&service.speak("piper:x", "one", 1.0, Style::Radio).unwrap());
+        assert_ne!(natural, radio);
+        assert!(natural.iter().all(|sample| sample.abs() <= 0.892));
+        let id: u64 = header["id"].as_str().unwrap().parse().unwrap();
+        let (_, rest) = unpack(&service.restretch(id, 0, 1.0, Style::Radio).unwrap());
+        assert_eq!(rest, radio);
+    }
+
+    #[test]
     fn restretch_of_a_forgotten_sentence_is_refused() {
         let service = Service::with(Arc::new(Fixed));
-        let (header, _) = unpack(&service.speak("piper:x", "first", 1.0).unwrap());
+        let (header, _) = unpack(
+            &service
+                .speak("piper:x", "first", 1.0, Style::Natural)
+                .unwrap(),
+        );
         let id: u64 = header["id"].as_str().unwrap().parse().unwrap();
         for i in 0..CACHE_SENTENCES + 1 {
             service.prepare("piper:x", &format!("other {i}")).unwrap();
         }
         assert!(matches!(
-            service.restretch(id, 0, 1.0),
+            service.restretch(id, 0, 1.0, Style::Natural),
             Err(TtsError::Refused(_))
         ));
     }
@@ -457,11 +508,11 @@ mod tests {
     #[test]
     fn rate_is_kept_between_half_and_four() {
         let service = Service::with(Arc::new(Fixed));
-        let (header, fast) = unpack(&service.speak("piper:x", "a", 9.0).unwrap());
+        let (header, fast) = unpack(&service.speak("piper:x", "a", 9.0, Style::Natural).unwrap());
         assert_eq!(header["rate"], 4.0);
-        let (_, four) = unpack(&service.speak("piper:x", "a", 4.0).unwrap());
+        let (_, four) = unpack(&service.speak("piper:x", "a", 4.0, Style::Natural).unwrap());
         assert_eq!(fast.len(), four.len());
-        let (header, _) = unpack(&service.speak("piper:x", "a", 0.1).unwrap());
+        let (header, _) = unpack(&service.speak("piper:x", "a", 0.1, Style::Natural).unwrap());
         assert_eq!(header["rate"], 0.5);
     }
 

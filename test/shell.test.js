@@ -50,6 +50,7 @@ let run = 0;
 /** Starts a fresh copy of the real shell on the real page, with a fake Tauri around it. */
 async function startShell(openDocument, {
   pending = [], positions = {}, recents = [], fileModified, bookmarks = [], options = {}, picked = null, voices = {},
+  appVoices = [],
 } = {}) {
   const { window, document, HTMLElement } = parseHTML(INDEX_HTML);
   const focused = [];
@@ -91,6 +92,7 @@ async function startShell(openDocument, {
     dialogs: [],
     picked,
     themeAtFirstPaint: undefined,
+    spoken: [],
   };
   const commands = {
     take_pending_paths: () => pending,
@@ -107,6 +109,10 @@ async function startShell(openDocument, {
       return { recents: state.recents, bookmarks: state.bookmarks, voices, options: state.options };
     },
     state_get_options: () => state.options,
+    tts_voices: () => appVoices,
+    tts_speak: (args) => {
+      state.spoken.push(args);
+    },
     licenses_text: () => 'the license text',
     state_set_voice: (args) => {
       state.voiceWrites.push(args);
@@ -1202,6 +1208,39 @@ const changeOption = async (shell, name, value) => {
   await shell.settled();
   await shell.settled();
 };
+
+const SERENA = { id: 'piper:it_IT-serena-medium', name: 'Serena', lang: 'it-IT' };
+
+test('listen says a sentence with the downloaded voice of the interface language, in the sound chosen', async () => {
+  const shell = await startShell(async (path) => markdownDoc(path, 'Testo'), {
+    options: { language: 'it', voiceSound: 'warm' },
+    appVoices: [{ id: 'piper:en_US-john-medium', name: 'John', lang: 'en-US' }, SERENA],
+  });
+  await shell.press(',', CTRL);
+  await shell.settled();
+  await shell.settled();
+  await shell.click(shell.panel().querySelector('.voice-listen'));
+  await shell.settled();
+  assert.equal(shell.state.spoken.length, 1);
+  assert.equal(shell.state.spoken[0].voiceId, SERENA.id);
+  assert.equal(shell.state.spoken[0].sound, 'warm');
+  assert.equal(shell.state.spoken[0].text, 'Ecco come la voce leggerà i tuoi libri.');
+});
+
+test('listen with no downloaded voice of the interface language says to download one', async () => {
+  const shell = await startShell(async (path) => markdownDoc(path, 'Testo'), {
+    options: { language: 'it' },
+    appVoices: [{ id: 'piper:en_US-john-medium', name: 'John', lang: 'en-US' }],
+  });
+  await shell.press(',', CTRL);
+  await shell.settled();
+  await shell.settled();
+  await shell.click(shell.panel().querySelector('.voice-listen'));
+  await shell.settled();
+  assert.deepEqual(shell.state.spoken, []);
+  assert.equal(shell.toast().hidden, false);
+  assert.ok(shell.toast().textContent.includes('Prima scarica una voce per questa lingua.'));
+});
 
 test('a theme chosen in the options applies at once and is saved', async () => {
   const shell = await startShell(async (path) => markdownDoc(path, 'Testo'));

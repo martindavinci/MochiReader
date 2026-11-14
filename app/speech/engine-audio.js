@@ -9,12 +9,15 @@ import { decodePcm } from './pcm.js';
  * Besides voices/speak/stop of every engine:
  *   prepare(text, {voiceId})   makes the sound of the next sentence while this one is said
  *   setRate(rate), setVolume(volume)
+ *   resound()                  the sound the reader chose reaches the sentence being said
  *   rates()                    the speeds it has
  *   speak(..., {onWord})       onWord({start, end}) as each word begins, in UTF-16 units of the text; onWord(null) at the end
  */
 
 /** 0.5 to 4 by tenths, built from whole numbers so that none drifts. */
 export const AUDIO_RATES = Object.freeze(Array.from({ length: 36 }, (_, i) => (i + 5) / 10));
+
+const NATURAL = 'natural';
 
 const defaultTimers = {
   set: (callback, ms) => setTimeout(callback, ms),
@@ -25,6 +28,7 @@ export class AudioEngine {
   #invoke;
   #AudioContext;
   #timers;
+  #sound;
   #context = null;
   #gain = null;
   #volume = 1;
@@ -37,8 +41,13 @@ export class AudioEngine {
   /** Why the last sentence failed, as Rust says it (`{kind, message}`), until the next one begins. */
   lastError = null;
 
-  constructor({ invoke, AudioContext = globalThis.AudioContext, timers = defaultTimers } = {}) {
+  /**
+   * @param {{invoke: Function, AudioContext?: Function, timers?: object, sound?: () => string}} parts `sound` names the
+   *   style Rust shapes each sentence in, asked again for every sentence.
+   */
+  constructor({ invoke, AudioContext = globalThis.AudioContext, timers = defaultTimers, sound = () => NATURAL } = {}) {
     this.#invoke = invoke;
+    this.#sound = sound;
     this.#AudioContext = AudioContext;
     this.#timers = timers;
   }
@@ -86,7 +95,7 @@ export class AudioEngine {
         resolve(outcome);
       };
       this.#play = play;
-      this.#invoke('tts_speak', { voiceId, text, rate })
+      this.#invoke('tts_speak', { voiceId, text, rate, sound: this.#sound() })
         .then((data) => {
           if (this.#play !== play) return;
           const sound = decodePcm(data);
@@ -120,6 +129,12 @@ export class AudioEngine {
     this.#restretch(play, this.#rawPosition(play));
   }
 
+  resound() {
+    const play = this.#play;
+    if (play?.id == null) return;
+    this.#restretch(play, this.#rawPosition(play));
+  }
+
   setVolume(volume) {
     if (typeof volume === 'number' && !Number.isNaN(volume)) this.#volume = volume;
     if (this.#gain) this.#gain.gain.value = this.volume ?? this.#volume;
@@ -148,7 +163,7 @@ export class AudioEngine {
   #restretch(play, from) {
     play.stretches += 1;
     const token = play.stretches;
-    this.#invoke('tts_restretch', { id: play.id, from, rate: play.rate })
+    this.#invoke('tts_restretch', { id: play.id, from, rate: play.rate, sound: this.#sound() })
       .then((data) => {
         if (this.#play !== play || play.stretches !== token) return;
         this.#begin(play, decodePcm(data), this.#rawPosition(play));

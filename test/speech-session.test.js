@@ -167,6 +167,13 @@ function setup({ voices, state = {}, sourceMode = 'skip', inFront = () => true, 
 
 const setupWith = (engine, options = {}) => setup({ ...options, engine });
 
+test('a new sound for the voices of the app reaches the engine', () => {
+  const engine = { ...fakeEngine(), resounds: 0, resound() { this.resounds += 1; } };
+  const { session } = setupWith(engine);
+  session.soundChanged();
+  assert.equal(engine.resounds, 1);
+});
+
 test('reading starts where the reader says, and each sentence is shown, followed and saved', async () => {
   const { session, engine, bar, media, saved } = setup();
   const tab = fakeTab(TWO, { start: { line: 1, sentence: 1 } });
