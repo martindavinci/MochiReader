@@ -21,8 +21,16 @@ const WIRE_FIXED64: u64 = 1;
 const WIRE_LEN: u64 = 2;
 const WIRE_FIXED32: u64 = 5;
 const CEIL: &[u8] = b"Ceil";
-/// TypeProto { tensor_type: { elem_type: FLOAT } }.
-const FLOAT_TENSOR_TYPE: [u8; 4] = [0x0A, 0x02, 0x08, 0x01];
+/// TensorProto.DataType of the outputs added here.
+pub const FLOAT: u8 = 1;
+pub const INT64: u8 = 7;
+/// The length of each token of a Kokoro model, in frames of 600 samples: computed by its graph, not one of its outputs.
+pub const KOKORO_DURATIONS: &str = "/encoder/Cast_output_0";
+
+/// TypeProto { tensor_type: { elem_type } }.
+fn tensor_type(elem_type: u8) -> [u8; 4] {
+    [0x0A, 0x02, 0x08, elem_type]
+}
 
 fn bad(message: &str) -> TtsError {
     TtsError::Voice(format!(
@@ -105,54 +113,58 @@ fn strings(bytes: &[u8], number: u64) -> Result<Vec<&[u8]>, TtsError> {
         .collect())
 }
 
-/// The model with the output of its one `Ceil` node added to the outputs of the graph. A model that has it already
-/// comes back unchanged.
-pub fn add_durations_output(model: &[u8]) -> Result<Vec<u8>, TtsError> {
+/// The graph of a model: where its field is in the model, and its own fields.
+fn graph_of(model: &[u8]) -> Result<(Field, Vec<Field>), TtsError> {
     let top = fields(model)?;
     let graph_field = top
-        .iter()
+        .into_iter()
         .find(|field| field.number == MODEL_GRAPH && field.wire == WIRE_LEN)
         .ok_or_else(|| bad("no graph"))?;
-    let graph = &model[graph_field.payload.clone()];
-    let graph_fields = fields(graph)?;
-    let mut ceil_outputs = Vec::new();
+    let graph_fields = fields(&model[graph_field.payload.clone()])?;
+    Ok((graph_field, graph_fields))
+}
+
+/// The nodes of a graph as (operator, first output).
+type Nodes<'a> = Vec<(&'a [u8], &'a [u8])>;
+
+fn nodes<'a>(graph: &'a [u8], graph_fields: &[Field]) -> Result<Nodes<'a>, TtsError> {
+    let mut out = Vec::new();
     for node in graph_fields
         .iter()
         .filter(|field| field.number == GRAPH_NODE && field.wire == WIRE_LEN)
     {
         let node = &graph[node.payload.clone()];
-        if strings(node, NODE_OP_TYPE)?.first() == Some(&CEIL) {
-            let outputs = strings(node, NODE_OUTPUT)?;
-            ceil_outputs.push(
-                outputs
-                    .first()
-                    .copied()
-                    .ok_or_else(|| bad("a Ceil with no output"))?,
-            );
+        let op = strings(node, NODE_OP_TYPE)?
+            .first()
+            .copied()
+            .unwrap_or_default();
+        if let Some(output) = strings(node, NODE_OUTPUT)?.first() {
+            out.push((op, *output));
         }
     }
-    let [name] = ceil_outputs.as_slice() else {
-        return Err(bad(if ceil_outputs.is_empty() {
-            "no Ceil"
-        } else {
-            "more than one Ceil"
-        }));
-    };
+    Ok(out)
+}
+
+/// The model with `name` among the outputs of its graph, as a tensor of `elem_type`; unchanged when it is one already.
+fn with_output(model: &[u8], name: &[u8], elem_type: u8) -> Result<Vec<u8>, TtsError> {
+    let (graph_field, graph_fields) = graph_of(model)?;
+    let graph = &model[graph_field.payload.clone()];
     for output in graph_fields
         .iter()
         .filter(|field| field.number == GRAPH_OUTPUT && field.wire == WIRE_LEN)
     {
-        if strings(&graph[output.payload.clone()], VALUE_INFO_NAME)?.first() == Some(name) {
+        if strings(&graph[output.payload.clone()], VALUE_INFO_NAME)?.first() == Some(&name) {
             return Ok(model.to_vec());
         }
     }
+    let kind = tensor_type(elem_type);
     let mut value_info = Vec::with_capacity(name.len() + 16);
     put_varint(&mut value_info, (VALUE_INFO_NAME << 3) | WIRE_LEN);
     put_varint(&mut value_info, name.len() as u64);
     value_info.extend_from_slice(name);
     put_varint(&mut value_info, (VALUE_INFO_TYPE << 3) | WIRE_LEN);
-    put_varint(&mut value_info, FLOAT_TENSOR_TYPE.len() as u64);
-    value_info.extend_from_slice(&FLOAT_TENSOR_TYPE);
+    put_varint(&mut value_info, kind.len() as u64);
+    value_info.extend_from_slice(&kind);
 
     let mut new_graph = Vec::with_capacity(graph.len() + value_info.len() + 8);
     new_graph.extend_from_slice(graph);
@@ -169,13 +181,64 @@ pub fn add_durations_output(model: &[u8]) -> Result<Vec<u8>, TtsError> {
     Ok(out)
 }
 
+/// The model with the output of its one `Ceil` node added to the outputs of the graph. A model that has it already
+/// comes back unchanged.
+pub fn add_durations_output(model: &[u8]) -> Result<Vec<u8>, TtsError> {
+    let (graph_field, graph_fields) = graph_of(model)?;
+    let graph = &model[graph_field.payload.clone()];
+    let ceils: Vec<&[u8]> = nodes(graph, &graph_fields)?
+        .into_iter()
+        .filter(|(op, _)| *op == CEIL)
+        .map(|(_, output)| output)
+        .collect();
+    let [name] = ceils.as_slice() else {
+        return Err(bad(if ceils.is_empty() {
+            "no Ceil"
+        } else {
+            "more than one Ceil"
+        }));
+    };
+    with_output(model, name, FLOAT)
+}
+
+/// The model with `name` added to the outputs of the graph, as a tensor of `elem_type`, when exactly one node of
+/// `op_type` makes it. A model that has it already comes back unchanged.
+pub fn add_output(
+    model: &[u8],
+    name: &[u8],
+    op_type: &[u8],
+    elem_type: u8,
+) -> Result<Vec<u8>, TtsError> {
+    let (graph_field, graph_fields) = graph_of(model)?;
+    let graph = &model[graph_field.payload.clone()];
+    let makers = nodes(graph, &graph_fields)?
+        .into_iter()
+        .filter(|(op, output)| *op == op_type && *output == name)
+        .count();
+    if makers != 1 {
+        return Err(bad("no node makes the output"));
+    }
+    with_output(model, name, elem_type)
+}
+
 /// Adds the output to the model file in place. If it cannot, the model stays as it was: the voice speaks, and only
 /// the sentence is marked.
 pub fn patch_file(path: &Path) -> bool {
+    patch_with(path, add_durations_output)
+}
+
+/// `patch_file` for a Kokoro model: the length of each token becomes an output.
+pub fn patch_kokoro_file(path: &Path) -> bool {
+    patch_with(path, |model| {
+        add_output(model, KOKORO_DURATIONS.as_bytes(), b"Cast", INT64)
+    })
+}
+
+fn patch_with(path: &Path, patch: impl Fn(&[u8]) -> Result<Vec<u8>, TtsError>) -> bool {
     let Ok(model) = std::fs::read(path) else {
         return false;
     };
-    let Ok(patched) = add_durations_output(&model) else {
+    let Ok(patched) = patch(&model) else {
         return false;
     };
     if patched.len() == model.len() {
@@ -262,5 +325,66 @@ mod tests {
     fn patch_refuses_a_graph_without_ceil() {
         assert!(add_durations_output(&model(&[node("Exp", "w")])).is_err());
         assert!(add_durations_output(&model(&[node("Ceil", "a"), node("Ceil", "b")])).is_err());
+    }
+
+    fn type_of(model: &[u8], name: &str) -> Vec<u8> {
+        let top = fields(model).unwrap();
+        let graph = top
+            .iter()
+            .find(|field| field.number == MODEL_GRAPH)
+            .unwrap();
+        let graph = &model[graph.payload.clone()];
+        fields(graph)
+            .unwrap()
+            .into_iter()
+            .filter(|field| field.number == GRAPH_OUTPUT)
+            .map(|field| &graph[field.payload])
+            .find(|info| strings(info, VALUE_INFO_NAME).unwrap()[0] == name.as_bytes())
+            .map(|info| strings(info, VALUE_INFO_TYPE).unwrap()[0].to_vec())
+            .unwrap()
+    }
+
+    fn kokoro_model() -> Vec<u8> {
+        model(&[
+            node("Round", "/encoder/Round_output_0"),
+            node("Clip", "/encoder/Clip_output_0"),
+            node("Cast", KOKORO_DURATIONS),
+            node("Cast", "/other/Cast_output_0"),
+        ])
+    }
+
+    #[test]
+    fn kokoro_durations_become_an_output() {
+        let patched =
+            add_output(&kokoro_model(), KOKORO_DURATIONS.as_bytes(), b"Cast", INT64).unwrap();
+        assert_eq!(outputs_of(&patched), ["output", KOKORO_DURATIONS]);
+        assert_eq!(
+            type_of(&patched, KOKORO_DURATIONS),
+            [0x0A, 0x02, 0x08, 0x07]
+        );
+    }
+
+    #[test]
+    fn a_second_patch_changes_nothing() {
+        let once =
+            add_output(&kokoro_model(), KOKORO_DURATIONS.as_bytes(), b"Cast", INT64).unwrap();
+        let twice = add_output(&once, KOKORO_DURATIONS.as_bytes(), b"Cast", INT64).unwrap();
+        assert_eq!(once, twice);
+    }
+
+    #[test]
+    fn no_such_node_is_an_error() {
+        let other = model(&[
+            node("Cast", "/other/Cast_output_0"),
+            node("Round", KOKORO_DURATIONS),
+        ]);
+        assert!(add_output(&other, KOKORO_DURATIONS.as_bytes(), b"Cast", INT64).is_err());
+        let dir = std::env::temp_dir().join(format!("mochi-kokoro-patch-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("model.onnx");
+        std::fs::write(&path, &other).unwrap();
+        assert!(!patch_kokoro_file(&path));
+        assert_eq!(std::fs::read(&path).unwrap(), other);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

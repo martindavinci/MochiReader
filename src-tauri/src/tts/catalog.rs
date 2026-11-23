@@ -77,7 +77,11 @@ impl Catalog {
     }
 
     pub fn kokoro_voice(&self, id: &str) -> Option<&KokoroVoice> {
-        self.kokoro.as_ref()?.voices.iter().find(|voice| voice.id == id)
+        self.kokoro
+            .as_ref()?
+            .voices
+            .iter()
+            .find(|voice| voice.id == id)
     }
 }
 
