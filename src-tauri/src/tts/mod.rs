@@ -8,6 +8,7 @@ pub mod catalog;
 pub mod download;
 pub mod engine_pack;
 pub mod espeak;
+pub mod kokoro;
 pub mod manager;
 pub mod onnx_patch;
 pub mod paths;
