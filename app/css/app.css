@@ -542,6 +542,19 @@ article:empty { display: none; }
 .voice-actions .voice-preview { width: 30px; padding: 0; }
 .voice-actions .voice-preview.is-playing { border-color: var(--accent); color: var(--accent); }
 .voice-actions .btn:disabled { opacity: .55; cursor: default; }
+.voice-kokoro-model { margin: 0; color: var(--muted); font: 12px/1.5 var(--font-ui-s); }
+/* the reader's own voices: the kept ones like the voices above, the one being made as a small form */
+.mix-row.is-disabled .voice-name { opacity: .55; }
+.mix-create { margin: var(--space-2) var(--space-3); }
+.mix-form { display: flex; flex-direction: column; gap: var(--space-2); padding: 0 var(--space-3); }
+.mix-field { display: flex; align-items: center; gap: var(--space-2); }
+.mix-label { min-width: 72px; color: var(--muted); font: 13px/1.4 var(--font-ui-s); }
+.mix-name { flex: 1; }
+.mix-part { display: flex; align-items: center; gap: var(--space-2); }
+.mix-weight { flex: 1; accent-color: var(--accent); }
+.mix-weight-value { min-width: 3ch; text-align: right; font: 13px/1.4 var(--font-ui-s); }
+.mix-add { align-self: flex-start; }
+.mix-form .voice-actions { margin-left: 0; }
 .voice-language-name { margin: var(--space-3) var(--space-3) var(--space-1); color: var(--fg); font: 600 13px/1.3 var(--font-ui); }
 .voice-status { color: var(--muted); font: 12px/1 var(--font-ui-s); font-variant-numeric: tabular-nums; }
 .voice-progress { width: 88px; height: 6px; accent-color: var(--accent); }

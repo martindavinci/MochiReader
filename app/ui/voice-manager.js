@@ -3,6 +3,7 @@ import { t } from '../core/i18n.js';
 import { icon, named } from './icons.js';
 import { elementIn, panelHead } from './panel-parts.js';
 import { KOKORO_PREFIX, PIPER_PREFIX } from '../speech/engine-router.js';
+import { renderMixer, renderMixes } from './voice-mixer.js';
 
 /** The phases of a download still under way, as `tts-download` names them. */
 const BUSY = new Set(['queued', 'voice']);
@@ -50,8 +51,11 @@ const ERROR_KEYS = {
  *   inUse: Set<string>,
  *   nameOf: (language: string) => string,
  *   previewing?: string|null,
+ *   mixes?: {mix: object, missing: string[]}[],
+ *   draft?: object|null,
  * }} view `languages` are those of the open documents and of the interface, which come first. `previewing` is the
- *   voice whose sample is playing, whose play button stops it.
+ *   voice whose sample is playing, whose play button stops it. `mixes` (with `draft`, the one being made) ends the
+ *   panel with the reader's own voices; their handlers are those of `renderMixes` and `renderMixer`.
  * @param {{onDownload: (id: string) => void, onCancel: (id: string) => void, onDelete: (id: string) => void,
  *   onPreview: (voice: object) => void, onCard: (url: string) => void}} handlers
  */
@@ -172,6 +176,16 @@ export function renderVoiceManager(host, view, handlers) {
       all.append(part);
     }
     body.append(all);
+  }
+  // The reader's own voices, when the shell gives them: the kept ones, or the form of the one being made.
+  if (Array.isArray(view.mixes)) {
+    const mixes = element('section', 'voice-language voice-mixes');
+    const kokoroVoices = catalog.voices
+      .filter((voice) => voice.engine === 'kokoro' && voice.installed)
+      .map(({ id, name, lang }) => ({ id, name, lang }));
+    if (view.draft) renderMixer(mixes, { draft: view.draft, kokoroVoices, nameOf }, handlers);
+    else renderMixes(mixes, { mixes: view.mixes, kokoroVoices, nameOf }, handlers);
+    body.append(mixes);
   }
   host.replaceChildren(panelHead(host, { glyph: 'speaker', title: t('voices.title') }), body);
 }

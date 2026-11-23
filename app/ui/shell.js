@@ -1093,13 +1093,23 @@ function voiceLanguages() {
   return [...ofDocuments, getLang()];
 }
 
+/** The voice being made in the mixer, while its form is open. */
+let mixDraft = null;
+
 async function drawVoicesPanel() {
-  const [{ languageName }, { renderVoiceManager }, catalog, { voices: saved }] = await Promise.all([
+  const [{ languageName }, { renderVoiceManager }, mixer, catalog, { voices: saved }, mixes] = await Promise.all([
     import('../speech/engine-web.js'),
     import('./voice-manager.js'),
+    import('./voice-mixer.js'),
     invoke('tts_catalog'),
     invoke('state_get'),
+    invoke('tts_mixes').catch(() => []),
   ]);
+  const kokoroVoices = catalog.voices.filter((voice) => voice.engine === 'kokoro' && voice.installed);
+  const redrawWith = (draft) => {
+    mixDraft = draft;
+    drawVoicesPanel();
+  };
   if (panels.current() !== PANEL_VOICES) return;
   const inUse = new Set(Object.values(saved ?? {})
     .filter(downloadedId)
@@ -1112,7 +1122,28 @@ async function drawVoicesPanel() {
     inUse,
     nameOf: languageName,
     previewing: preview?.id ?? null,
+    mixes,
+    draft: mixDraft,
   }, {
+    onCreate: () => redrawWith(mixer.newDraft(kokoroVoices)),
+    onEdit: (mix) => redrawWith(mixer.draftOf(mix)),
+    onDuplicate: (mix) => redrawWith(mixer.duplicateOf(mix)),
+    onChange: (draft) => redrawWith(draft),
+    onCancel: () => redrawWith(null),
+    onDeleteMix: async (id) => {
+      await invoke('tts_mix_delete', { id }).catch(() => {});
+      drawVoicesPanel();
+    },
+    onSave: async (draft) => {
+      try {
+        const saved = await invoke('tts_mix_save', { mix: draft });
+        await (await loadSpeech()).voiceInstalled(saved.lang.split('-')[0], `${KOKORO_PREFIX}mix-${saved.id}`);
+        redrawWith(null);
+      } catch {
+        showToast(t('voices.mix.saveFailed'), { glyph: 'alert' });
+      }
+    },
+    onPreviewMix: previewMix,
     onDownload: (voiceId) => {
       downloads.set(voiceId, { phase: 'queued' });
       invoke('tts_download', { voiceId }).catch(() => downloads.set(voiceId, { phase: 'error', error: null }));
@@ -1128,6 +1159,25 @@ async function drawVoicesPanel() {
     onCard: (url) => invoke('open_external', { url }),
   });
   refocus();
+}
+
+/** The mixer's draft, heard before it is kept: Rust says it as `tts_speak` would, from the recipe alone. */
+async function previewMix(draft) {
+  stopPreview();
+  const { AudioEngine } = await import('../speech/engine-audio.js');
+  const { PREVIEW_TEXT } = await import('./voice-manager.js');
+  const playing = { id: 'mix-preview', stop: () => {} };
+  preview = playing;
+  const engine = new AudioEngine({
+    invoke: (command, args) => (command === 'tts_speak'
+      ? invoke('tts_mix_preview', { mix: draft, text: args.text, rate: args.rate, sound: args.sound })
+      : invoke(command, args)),
+  });
+  playing.stop = () => engine.stop();
+  const language = draft.lang.split('-')[0];
+  engine.speak(PREVIEW_TEXT[language] ?? PREVIEW_TEXT.en, { voiceId: `${KOKORO_PREFIX}preview` }).finally(() => {
+    if (preview === playing) preview = null;
+  });
 }
 
 /** Stops the sample playing, if any, and gives its button back its play sign. */

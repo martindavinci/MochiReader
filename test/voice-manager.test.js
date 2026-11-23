@@ -195,3 +195,19 @@ test('the id of a voice carries its engine', () => {
   assert.equal(voiceIdOf({ id: 'x' }), 'piper:x');
   assert.ok(PREVIEW_TEXT.hi);
 });
+
+test('with the mixes given, the manager ends with your voices; with a draft, its form', () => {
+  const both = [sara({ installed: true, bytes: 522_240 }), sara({ id: 'af_heart', name: 'Heart', lang: 'en-US', installed: true, bytes: 522_240 })];
+  const { host } = draw({ catalog: kokoroCatalog(both, true), languages: ['it'], mixes: [] });
+  const last = [...host.querySelectorAll('.voice-mixes')].at(-1);
+  assert.ok(last);
+  assert.ok(last.querySelector('.mix-create'));
+  const editing = draw({
+    catalog: kokoroCatalog(both, true),
+    languages: ['it'],
+    mixes: [],
+    draft: { id: '', name: '', lang: 'it-IT', parts: [{ voice: 'if_sara', weight: 50 }, { voice: 'af_heart', weight: 50 }] },
+  });
+  assert.equal(editing.host.querySelectorAll('.voice-mixes .mix-part').length, 2);
+  assert.equal(draw({}).host.querySelector('.voice-mixes'), null, 'no mixes given, no section');
+});

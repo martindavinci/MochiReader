@@ -580,6 +580,7 @@ pub fn run() {
             tts::tts_mixes,
             tts::tts_mix_save,
             tts::tts_mix_delete,
+            tts::tts_mix_preview,
             #[cfg(feature = "smoke")]
             smoke_write_dump,
             #[cfg(feature = "smoke")]

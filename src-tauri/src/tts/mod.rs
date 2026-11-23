@@ -254,6 +254,34 @@ impl Service {
         Ok(pack(id, &synthesis, 0, rate, &samples))
     }
 
+    /// A sound made elsewhere (the mixer's preview), kept as `voice` in place of what was kept for it, and packed as
+    /// `speak` packs one: it can be stretched again the same way.
+    pub fn speak_made(
+        &self,
+        voice: &str,
+        text: &str,
+        synthesis: Synthesis,
+        rate: f32,
+        style: Style,
+    ) -> Vec<u8> {
+        let synthesis = Arc::new(synthesis);
+        let id = {
+            let mut cache = lock(&self.cache);
+            cache.forget(voice);
+            cache.insert(
+                CacheKey {
+                    voice: voice.to_owned(),
+                    text: text.to_owned(),
+                },
+                Arc::clone(&synthesis),
+            )
+        };
+        let rate = clamp_rate(rate);
+        let samples = stretch::stretch(&synthesis.samples, synthesis.sample_rate, rate);
+        let samples = sound::shape(&synthesis.samples, &samples, synthesis.sample_rate, style);
+        pack(id, &synthesis, 0, rate, &samples)
+    }
+
     pub fn prepare(&self, voice: &str, text: &str) -> Result<(), TtsError> {
         self.sound(voice, text).map(|_| ())
     }
@@ -374,6 +402,32 @@ pub async fn tts_delete(
     off_the_workers(move || voices.delete(&voice_id)).await
 }
 
+/// A mix not kept yet, heard: the mixer's preview. Answered as `tts_speak` answers.
+#[tauri::command]
+pub async fn tts_mix_preview(
+    mix: mixes::Mix,
+    text: String,
+    rate: f32,
+    sound: Option<String>,
+    voices: tauri::State<'_, Arc<manager::Voices>>,
+    service: tauri::State<'_, Arc<Service>>,
+) -> Result<tauri::ipc::Response, TtsError> {
+    let (voices, service) = (Arc::clone(&voices), Arc::clone(&service));
+    let style = Style::named(sound.as_deref().unwrap_or_default());
+    let bytes = off_the_workers(move || {
+        let synthesis = voices.preview_mix(&mix, &text)?;
+        Ok(service.speak_made(
+            &format!("{KOKORO_PREFIX}preview"),
+            &text,
+            synthesis,
+            rate,
+            style,
+        ))
+    })
+    .await?;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
 /// The reader's mixes of Kokoro voices.
 #[tauri::command]
 pub async fn tts_mixes(
@@ -489,6 +543,30 @@ mod tests {
         assert_eq!(header["rate"], 1.5);
         assert_eq!(header["words"][0]["to"], 22050);
         assert_eq!(samples, vec![0.25, -0.5]);
+    }
+
+    #[test]
+    fn a_sound_made_elsewhere_is_kept_and_replaces_the_one_before() {
+        let counting = Arc::new(Counting {
+            calls: AtomicUsize::new(0),
+        });
+        let service = Service::with(counting.clone());
+        let first =
+            service.speak_made("kokoro:preview", "Ciao.", one_second(), 1.0, Style::Natural);
+        let (header, _) = unpack(&first);
+        let id: u64 = header["id"].as_str().unwrap().parse().unwrap();
+        // it can be stretched again, as a sentence said by a voice is
+        assert!(service.restretch(id, 0, 2.0, Style::Natural).is_ok());
+        let mut shorter = one_second();
+        shorter.samples.truncate(100);
+        let (_, samples) =
+            unpack(&service.speak_made("kokoro:preview", "Ciao.", shorter, 1.0, Style::Original));
+        assert_eq!(samples.len(), 100, "the new sound, not the one kept");
+        assert_eq!(
+            counting.calls.load(Ordering::SeqCst),
+            0,
+            "no voice was asked"
+        );
     }
 
     #[test]
