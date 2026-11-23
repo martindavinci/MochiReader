@@ -370,11 +370,12 @@ mod tests {
         assert_eq!(espeak_voice("ja-JP"), None);
     }
 
-    /// The real engine and model: `MOCHIREADER_ENGINE_DIR` (the engine pack) and `MOCHIREADER_KOKORO_DIR` (a folder with
+    /// By hand only (not an `engine_` test of the engine workflow): `MOCHIREADER_ENGINE_DIR` (the engine pack) and
+    /// `MOCHIREADER_KOKORO_DIR` (a folder with
     /// `model_quantized.onnx` and `if_sara.bin` as onnx-community publishes them).
     #[test]
     #[ignore]
-    fn engine_kokoro_says_a_sentence_and_its_words() {
+    fn kokoro_on_this_pc_says_a_sentence_and_its_words() {
         let engine_dir = std::path::PathBuf::from(
             std::env::var_os("MOCHIREADER_ENGINE_DIR").expect("the engine"),
         )
@@ -389,7 +390,7 @@ mod tests {
         assert!(super::super::onnx_patch::patch_kokoro_file(&model));
         let style = Style::from_bytes(&std::fs::read(kokoro.join("if_sara.bin")).unwrap()).unwrap();
         let catalog = super::super::catalog::Catalog::embedded().unwrap();
-        let loaded = super::super::engine_pack::load(&engine_dir).unwrap();
+        let loaded = super::super::engine_pack::shared(&engine_dir).unwrap();
         let voice = KokoroModel::load(&loaded.environment, &model).unwrap();
         let sound = voice
             .synthesize(

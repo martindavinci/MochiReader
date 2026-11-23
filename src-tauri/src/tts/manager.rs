@@ -420,7 +420,7 @@ impl Voices {
                 "this copy of the app has no voice engine".into(),
             ));
         }
-        let loaded = Arc::new(engine_pack::load(&self.places.engine)?);
+        let loaded = engine_pack::shared(&self.places.engine)?;
         *engine = Some(Arc::clone(&loaded));
         Ok(loaded)
     }
@@ -1202,6 +1202,88 @@ mod tests {
         assert_eq!(sound.sample_rate, 24_000);
         assert_eq!(sound.words.len(), 5, "{:?}", sound.words);
         assert_eq!(sound.words.last().unwrap().end, 24);
+    }
+
+    /// By hand only, without the network: `MOCHIREADER_ENGINE_DIR` and `MOCHIREADER_KOKORO_DIR` (`model_quantized.onnx`,
+    /// `if_sara.bin`, `af_heart.bin` as onnx-community publishes them), put in place as an install would.
+    #[test]
+    #[ignore]
+    fn kokoro_on_this_pc_mix_speaks() {
+        let engine_dir = std::path::PathBuf::from(
+            std::env::var_os("MOCHIREADER_ENGINE_DIR").expect("the engine"),
+        )
+        .canonicalize()
+        .unwrap();
+        let kokoro = std::path::PathBuf::from(
+            std::env::var_os("MOCHIREADER_KOKORO_DIR").expect("the model"),
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let places = Places::resolve(Some(dir.path()), dir.path(), &engine_dir);
+        let model_dir = places.voices.join(KOKORO_DIR);
+        std::fs::create_dir_all(&model_dir).unwrap();
+        let model = model_dir.join(KOKORO_MODEL);
+        std::fs::copy(kokoro.join("model_quantized.onnx"), &model).unwrap();
+        assert!(super::super::onnx_patch::patch_kokoro_file(&model));
+        let mut sums = BTreeMap::new();
+        sums.insert(KOKORO_MODEL.to_owned(), hash_of(&model).unwrap());
+        for id in ["if_sara", "af_heart"] {
+            let file = model_dir.join(format!("{id}.bin"));
+            std::fs::copy(kokoro.join(format!("{id}.bin")), &file).unwrap();
+            sums.insert(format!("{id}.bin"), hash_of(&file).unwrap());
+        }
+        std::fs::write(
+            model_dir.join(SUMS_FILE),
+            serde_json::to_vec(&sums).unwrap(),
+        )
+        .unwrap();
+        let voices = Arc::new(Voices::new(
+            places,
+            Catalog::embedded().unwrap(),
+            "test",
+            Arc::new(|_| {}),
+        ));
+        let saved = voices.save_mix(sara_and_heart()).unwrap();
+        let sound = voices
+            .synthesize_kokoro(&format!("mix-{}", saved.id), "Ciao a tutti, come state?")
+            .unwrap();
+        assert_eq!(sound.words.len(), 5, "{:?}", sound.words);
+        assert!(!voices
+            .preview_mix(&sara_and_heart(), "Ciao.")
+            .unwrap()
+            .samples
+            .is_empty());
+    }
+
+    /// A mix of two real voices says the same sentence, word by word.
+    #[test]
+    #[ignore]
+    fn engine_kokoro_mix_speaks() {
+        let engine_dir = std::path::PathBuf::from(
+            std::env::var_os("MOCHIREADER_ENGINE_DIR").expect("the engine"),
+        )
+        .canonicalize()
+        .unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let places = Places::resolve(Some(dir.path()), dir.path(), &engine_dir);
+        let voices = Arc::new(Voices::new(
+            places,
+            Catalog::embedded().unwrap(),
+            "test",
+            Arc::new(|_| {}),
+        ));
+        for id in ["if_sara", "af_heart"] {
+            voices
+                .install(id, &AtomicBool::new(false), &Report::for_test(id))
+                .unwrap();
+        }
+        let saved = voices.save_mix(sara_and_heart()).unwrap();
+        let sound = voices
+            .synthesize_kokoro(&format!("mix-{}", saved.id), "Ciao a tutti, come state?")
+            .unwrap();
+        assert!(sound.samples.len() > 24_000 / 2);
+        assert_eq!(sound.words.len(), 5, "{:?}", sound.words);
+        let preview = voices.preview_mix(&sara_and_heart(), "Ciao.").unwrap();
+        assert!(!preview.samples.is_empty());
     }
 
     #[test]

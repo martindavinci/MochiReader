@@ -91,6 +91,21 @@ pub fn load(dir: &Path) -> Result<Loaded, TtsError> {
     })
 }
 
+/// The engine of this process: ONNX Runtime allows one environment per process, so whoever needs it after the first
+/// gets the one already loaded (the app has one `Voices`; the engine tests make several in one process).
+pub fn shared(dir: &Path) -> Result<std::sync::Arc<Loaded>, TtsError> {
+    static LOADED: std::sync::Mutex<Option<std::sync::Arc<Loaded>>> = std::sync::Mutex::new(None);
+    let mut loaded = LOADED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(found) = loaded.as_ref() {
+        return Ok(std::sync::Arc::clone(found));
+    }
+    let made = std::sync::Arc::new(load(dir)?);
+    *loaded = Some(std::sync::Arc::clone(&made));
+    Ok(made)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
