@@ -814,3 +814,13 @@ test('a boundary without length takes the word at its index', () => {
   assert.equal(boundaryWord('uno', 9, 0), null);
   assert.equal(boundaryWord('— uno', 0, 0), null);
 });
+
+test('a voice of another language speaks with its own language', async () => {
+  const { engine, synth } = setup([ZIRA, ELSA]);
+  engine.speak('Hi.', { voiceId: ELSA.voiceURI, rate: 1, lang: 'en-GB' });
+  assert.equal(synth.spoken[0].voice, ELSA);
+  assert.equal(synth.spoken[0].lang, ELSA.lang);
+  engine.stop();
+  engine.speak('Hi.', { voiceId: ZIRA.voiceURI, rate: 1, lang: 'en-GB' });
+  assert.equal(synth.spoken.at(-1).lang, 'en-GB');
+});

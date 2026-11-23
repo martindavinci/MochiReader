@@ -13,7 +13,7 @@ const VIEW = {
   name: 'a.md',
   playing: true,
   rate: 1.3,
-  voices: [{ id: 'elsa', name: 'Microsoft Elsa - Italian (Italy)' }, { id: 'cosimo', name: 'Microsoft Cosimo - Italian (Italy)' }],
+  voices: { own: [{ id: 'elsa', name: 'Microsoft Elsa - Italian (Italy)' }, { id: 'cosimo', name: 'Microsoft Cosimo - Italian (Italy)' }], others: [], lang: 'it' },
   voiceId: 'cosimo',
   following: true,
 };
@@ -171,20 +171,41 @@ test('the last entry of the voices opens the voice manager and keeps the voice',
   globalThis.document = document;
   const chosen = [];
   let more = 0;
+  const asked = [];
   const bar = createSpeechBar({
     onCommand: () => {},
     onVoice: (id) => chosen.push(id),
-    onMoreVoices: () => {
+    onMoreVoices: (lang) => {
       more += 1;
+      asked.push(lang);
     },
   });
   bar.show(VIEW);
   const select = document.querySelector('.speech-voice');
-  const last = select.querySelector('option:last-child');
-  assert.equal(last.textContent, en['voices.more']);
+  const last = [...select.querySelectorAll('option')].at(-1);
+  assert.equal(last.textContent, en['voices.chooseShown']);
   select.querySelectorAll('option').forEach((option) => option.toggleAttribute('selected', option === last));
   select.dispatchEvent(new window.Event('change'));
   assert.equal(more, 1);
+  assert.deepEqual(asked, ['it'], "the panel opens on the text's language");
   assert.deepEqual(chosen, []);
   assert.equal(select.querySelector('option[selected]').getAttribute('value'), 'cosimo');
 });
+
+test('two groups when other languages are ticked, one when not', () => {
+  setLang('en');
+  const { bar, document } = setup();
+  bar.show(VIEW);
+  assert.equal(document.querySelectorAll('.speech-voice optgroup').length, 1);
+  assert.equal(document.querySelector('.speech-voice optgroup').getAttribute('label'), en['voices.textLang'].replace('{language}', 'Italian'));
+  bar.show({ ...VIEW, voices: { ...VIEW.voices, others: [{ id: 'zira', name: 'Microsoft Zira - English (United States)', lang: 'en-US' }] } });
+  const groups = [...document.querySelectorAll('.speech-voice optgroup')];
+  assert.equal(groups.length, 2);
+  assert.equal(groups[1].getAttribute('label'), en['voices.otherLangs']);
+  const zira = groups[1].querySelector('option');
+  assert.equal(zira.getAttribute('value'), 'zira');
+  assert.equal(zira.textContent, 'Zira · English (US)', 'a Windows name says its language already');
+  bar.show({ ...VIEW, voices: { ...VIEW.voices, others: [{ id: 'piper:x', name: 'Serena', lang: 'it-IT' }] } });
+  assert.equal(document.querySelectorAll('.speech-voice optgroup')[1].querySelector('option').textContent, 'Serena · Italian');
+});
+

@@ -98,7 +98,9 @@ export class WebSpeechEngine {
         const utterance = new this.#Utterance(text);
         utterance.voice = voice;
         utterance.rate = rate;
-        utterance.lang = parseLangTag(lang).canonical || voice.lang;
+        // a voice of another language speaks its own: told the text's, Windows would read with the wrong rules
+        const sameLanguage = parseLangTag(voice.lang).language === parseLangTag(lang).language;
+        utterance.lang = sameLanguage ? parseLangTag(lang).canonical || voice.lang : voice.lang;
         utterance.volume = this.volume ?? volume;
         const trace = this.onTrace;
         if (trace) utterance.onstart = () => trace('start', text);

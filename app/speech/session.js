@@ -3,6 +3,7 @@
 import { getLang, t } from '../core/i18n.js';
 import { AudioEngine } from './engine-audio.js';
 import { engineOf, isDownloaded, listVoices, RoutedEngine } from './engine-router.js';
+import { barVoices, usableVoice } from './voice-lists.js';
 import { closestVoice, languageName, WebSpeechEngine } from './engine-web.js';
 import { extractBlocks } from './extract.js';
 import { createHighlighter, HIGHLIGHT_NAME, WORD_HIGHLIGHT_NAME } from './highlight.js';
@@ -61,6 +62,8 @@ class SpeechSession {
   #blocks = [];
   #lang = null;
   #voices = [];
+  /** The voices ticked "also in other texts" in the Voices panel, as they are now. */
+  #everywhere;
   #voiceId = null;
   #savedVoices = {};
   #following = true;
@@ -101,7 +104,9 @@ class SpeechSession {
     edgeOn = () => false,
     wordsOn = () => true,
     soundOf = () => 'natural',
+    everywhere = () => [],
   }) {
+    this.#everywhere = everywhere;
     this.#wordsOn = wordsOn;
     const web = new WebSpeechEngine();
     this.#engine = engine ?? new RoutedEngine({ web, audio: new AudioEngine({ invoke, sound: soundOf }) });
@@ -368,14 +373,17 @@ class SpeechSession {
   #pickVoice(lang) {
     const language = parseLangTag(lang).language;
     const ofLanguage = this.#voices.filter((voice) => parseLangTag(voice.lang).language === language);
-    if (ofLanguage.length === 0) {
+    const wanted = [this.#tabVoices.get(this.#entry), this.#savedVoices[language]];
+    // a voice of another language holds while it is ticked "also in other texts"
+    const everywhere = this.#everywhere();
+    const known = wanted.find((id) => usableVoice(id, this.#voices, lang, everywhere));
+    if (ofLanguage.length === 0 && !known) {
       this.stop();
       this.#showVoiceHelp(languageName(language));
       return false;
     }
-    const wanted = [this.#tabVoices.get(this.#entry), this.#savedVoices[language]];
-    const known = wanted.find((id) => ofLanguage.some((voice) => voice.id === id));
-    const lost = !known && wanted.find((id) => isDownloaded(id));
+    // a downloaded voice no longer there at all; one there but no longer ticked is simply not chosen
+    const lost = !known && wanted.find((id) => isDownloaded(id) && !this.#voices.some((voice) => voice.id === id));
     const windows = ofLanguage.filter((voice) => engineOf(voice.id) === 'sapi');
     this.#lang = lang;
     // A downloaded voice that is gone hands over to Windows, which every PC has, rather than to another download.
@@ -588,7 +596,7 @@ class SpeechSession {
       rate: this.#player.rate,
       rates: this.#player.rates,
       volume: this.#player.volume,
-      voices: this.#voices.filter((voice) => parseLangTag(voice.lang).language === language),
+      voices: { ...barVoices(this.#voices, this.#lang, this.#everywhere()), lang: language },
       voiceId: this.#voiceId,
       following: this.#following,
       elsewhere: !this.#isInFront(this.#entry),

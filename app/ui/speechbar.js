@@ -3,6 +3,8 @@
 import { t } from '../core/i18n.js';
 import { icon, named } from './icons.js';
 import { shortVoiceName } from './voice-name.js';
+import { languageName } from '../speech/engine-web.js';
+import { parseLangTag } from '../speech/lang.js';
 
 const BAR_ID = 'speechbar';
 const TOGGLE = 'speech.toggle';
@@ -188,11 +190,13 @@ export function createSpeechBar({ onCommand, onVoice, onRate = () => {}, onVolum
     choosingByMouse = true;
   });
   let currentVoice = null;
+  /** The base language of the text being read: the voice panel opens on it. */
+  let currentLang = null;
   voice.addEventListener('change', () => {
     if (voice.value === MORE_VOICES) {
       const back = [...voice.querySelectorAll('option')].find((option) => option.value === currentVoice);
       if (back) back.selected = true;
-      onMoreVoices?.();
+      onMoreVoices?.(currentLang);
     } else {
       currentVoice = voice.value;
       onVoice(currentVoice);
@@ -214,17 +218,30 @@ export function createSpeechBar({ onCommand, onVoice, onRate = () => {}, onVolum
   bar.append(follow, sound.element, about, transport, voiceZone);
   document.getElementById('panes').after(bar);
 
-  const drawVoices = (voices, voiceId) => {
+  // The voices of the text's language, then the ones ticked "also in other texts", each with its language.
+  const drawVoices = ({ own, others, lang }, voiceId) => {
     currentVoice = voiceId;
-    voice.replaceChildren(...voices.map(({ id, name: voiceName }) => {
-      const option = made('option', undefined, shortVoiceName(voiceName));
-      option.setAttribute('value', id);
-      option.setAttribute('title', voiceName);
-      if (id === voiceId) option.setAttribute('selected', '');
-      return option;
-    }));
+    currentLang = lang;
+    const option = ({ id, name: voiceName, lang: voiceLang }, withLanguage) => {
+      const label = shortVoiceName(voiceName);
+      // a Windows voice's short name says its language already; a downloaded voice's does not
+      const said = withLanguage && !label.includes(' · ') ? `${label} · ${languageName(parseLangTag(voiceLang).language)}` : label;
+      const made_ = made('option', undefined, said);
+      made_.setAttribute('value', id);
+      made_.setAttribute('title', voiceName);
+      if (id === voiceId) made_.setAttribute('selected', '');
+      return made_;
+    };
+    const group = (label, list, withLanguage) => {
+      const made_ = made('optgroup');
+      made_.setAttribute('label', label);
+      made_.append(...list.map((one) => option(one, withLanguage)));
+      return made_;
+    };
+    voice.replaceChildren(group(t('voices.textLang', { language: languageName(lang) }), own, false));
+    if (others.length > 0) voice.append(group(t('voices.otherLangs'), others, true));
     if (onMoreVoices) {
-      const more = made('option', 'speech-more-voices', t('voices.more'));
+      const more = made('option', 'speech-more-voices', t('voices.chooseShown'));
       more.setAttribute('value', MORE_VOICES);
       voice.append(more);
     }

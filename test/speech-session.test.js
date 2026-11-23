@@ -100,7 +100,7 @@ afterEach(() => {
   setLang('en');
 });
 
-function setup({ voices, state = {}, sourceMode = 'skip', inFront = () => true, engine: given, wordsOn } = {}) {
+function setup({ voices, state = {}, sourceMode = 'skip', inFront = () => true, engine: given, wordsOn, everywhere } = {}) {
   const engine = given ?? fakeEngine(voices);
   const kept = { voices: {}, options: {}, ...state };
   kept.voices = { ...kept.voices };
@@ -160,6 +160,7 @@ function setup({ voices, state = {}, sourceMode = 'skip', inFront = () => true, 
     showVoiceHelp: (paragraphs) => helps.push(paragraphs),
     sourceMode: () => sourceMode,
     wordsOn,
+    ...(everywhere ? { everywhere } : {}),
   });
   sessions.push(session);
   return { session, engine, bar, media, saved, messages, helps, commands, handlers: () => barHandlers };
@@ -279,7 +280,7 @@ test('the bar offers the voices of the language; a choice is kept for the langua
   const tab = fakeTab(TWO);
   await session.start(tab.entry);
   await flush();
-  assert.deepEqual(bar.view.voices, [ELSA, COSIMO]);
+  assert.deepEqual(bar.view.voices, { own: [ELSA, COSIMO], others: [], lang: 'it' });
   assert.equal(bar.view.voiceId, 'elsa');
   handlers().onVoice('cosimo');
   await flush();
@@ -911,4 +912,52 @@ test('a deleted kokoro voice falls back to windows as a piper one does', async (
   await flush();
   assert.equal(engine.calls[0].voiceId, 'elsa');
   assert.deepEqual(messages, [en['speech.offlineFallback']]);
+});
+
+const ENGLISH = '<p data-sourcepos="1:1-1:9">One is here. Two is here.</p>';
+
+test('a ticked voice of another language is offered and kept for the language of the text', async () => {
+  const first = setup({ voices: [ELSA, PAOLA, ZIRA], everywhere: () => [PAOLA.id] });
+  await first.session.start(fakeTab(ENGLISH, { lang: 'en' }).entry);
+  await flush();
+  assert.deepEqual(first.bar.view.voices.own.map(({ id }) => id), ['zira']);
+  assert.deepEqual(first.bar.view.voices.others.map(({ id }) => id), [PAOLA.id]);
+  assert.equal(first.bar.view.voices.lang, 'en');
+  first.handlers().onVoice(PAOLA.id);
+  assert.deepEqual(first.commands.filter(([name]) => name === 'state_set_voice').at(-1), ['state_set_voice', { lang: 'en', voiceId: PAOLA.id }]);
+  const next = setup({ voices: [ELSA, PAOLA, ZIRA], everywhere: () => [PAOLA.id], state: { voices: { en: PAOLA.id } } });
+  await next.session.start(fakeTab(ENGLISH, { lang: 'en' }).entry);
+  await flush();
+  assert.equal(next.engine.calls[0].voiceId, PAOLA.id);
+});
+
+test('a saved voice of another language no longer ticked is not used, and nothing is said', async () => {
+  const { session, engine, messages } = setup({ voices: [ELSA, PAOLA, ZIRA], everywhere: () => [], state: { voices: { en: PAOLA.id } } });
+  await session.start(fakeTab(ENGLISH, { lang: 'en' }).entry);
+  await flush();
+  assert.equal(engine.calls[0].voiceId, 'zira');
+  assert.deepEqual(messages, []);
+});
+
+test('a text without voices of its own reads with its saved ticked voice, else asks for one', async () => {
+  const ticked = setup({ voices: [ELSA, PAOLA], everywhere: () => [PAOLA.id], state: { voices: { de: PAOLA.id } } });
+  await ticked.session.start(fakeTab(TWO, { lang: 'de' }).entry);
+  await flush();
+  assert.equal(ticked.engine.calls[0].voiceId, PAOLA.id);
+  const none = setup({ voices: [ELSA, PAOLA], everywhere: () => [], state: { voices: { de: PAOLA.id } } });
+  await none.session.start(fakeTab(TWO, { lang: 'de' }).entry);
+  await flush();
+  assert.equal(none.engine.calls.length, 0);
+  assert.equal(none.helps.length, 1);
+});
+
+test('unticking during a reading keeps the voice being used', async () => {
+  let ticks = [PAOLA.id];
+  const { session, engine } = setup({ voices: [ELSA, PAOLA, ZIRA], everywhere: () => ticks, state: { voices: { en: PAOLA.id } } });
+  await session.start(fakeTab(ENGLISH, { lang: 'en' }).entry);
+  await flush();
+  ticks = [];
+  engine.finish();
+  await flush();
+  assert.deepEqual(engine.calls.map(({ voiceId }) => voiceId), [PAOLA.id, PAOLA.id]);
 });
