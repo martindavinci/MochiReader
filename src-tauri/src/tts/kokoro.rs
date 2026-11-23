@@ -75,6 +75,11 @@ pub fn tokenize(phonemes: &str, vocab: &HashMap<String, i64>) -> Tokens {
     out
 }
 
+/// Whether a sentence has a word to say: marks alone ("?!", "…") are silence, as for Piper.
+pub fn says_something(tokens: &Tokens) -> bool {
+    !tokens.groups.is_empty()
+}
+
 /// The tokens in runs of at most `MAX_TOKENS`, each cut right after a space or a mark; a word longer than that is cut
 /// where the run is full.
 pub fn chunks(tokens: &Tokens) -> Vec<Range<usize>> {
@@ -209,6 +214,13 @@ impl KokoroModel {
         let voice = espeak_voice(lang)
             .ok_or_else(|| TtsError::Voice(format!("Kokoro does not speak {lang}")))?;
         let tokens = tokenize(&espeak.phonemize(voice, text)?, vocab);
+        if !says_something(&tokens) {
+            return Ok(Synthesis {
+                samples: Vec::new(),
+                sample_rate: SAMPLE_RATE,
+                words: Vec::new(),
+            });
+        }
         let mut samples = Vec::new();
         let mut durations: Option<Vec<f32>> = Some(Vec::with_capacity(tokens.ids.len()));
         for range in chunks(&tokens) {
@@ -292,6 +304,13 @@ mod tests {
         assert_eq!(tokens.ids, vec![43, 44, 16, 4, 16, 44]);
         // "x" has no token: no group
         assert_eq!(tokens.groups, vec![vec![0, 1], vec![5]]);
+    }
+
+    #[test]
+    fn marks_alone_say_nothing() {
+        let vocab = vocab(&[("?", 6), ("!", 5), (" ", 16), ("a", 43)]);
+        assert!(!says_something(&tokenize("?! ", &vocab)));
+        assert!(says_something(&tokenize("a?", &vocab)));
     }
 
     #[test]

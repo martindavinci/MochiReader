@@ -498,10 +498,17 @@ impl Voices {
 
     /// The hashes of the files of the Kokoro folder as installed: the patched model and each voice.
     fn kokoro_sums(&self) -> BTreeMap<String, String> {
-        std::fs::read(self.kokoro_dir().join(SUMS_FILE))
-            .ok()
-            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-            .unwrap_or_default()
+        self.read_kokoro_sums().unwrap_or_default()
+    }
+
+    /// The sums as written; none when the file is there but does not read (being written, or damaged), so that
+    /// nothing is judged damaged from it. No file is no sums.
+    fn read_kokoro_sums(&self) -> Option<BTreeMap<String, String>> {
+        match std::fs::read(self.kokoro_dir().join(SUMS_FILE)) {
+            Ok(bytes) => serde_json::from_slice(&bytes).ok(),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Some(BTreeMap::new()),
+            Err(_) => None,
+        }
     }
 
     fn change_kokoro_sums(
@@ -512,7 +519,15 @@ impl Voices {
         let mut sums = self.kokoro_sums();
         change(&mut sums);
         let bytes = serde_json::to_vec(&sums).map_err(voice_error)?;
-        std::fs::write(self.kokoro_dir().join(SUMS_FILE), bytes).map_err(voice_error)
+        // whole or not at all: a reader never finds it half written
+        let path = self.kokoro_dir().join(SUMS_FILE);
+        let part = part_of(&path);
+        std::fs::write(&part, bytes)
+            .and_then(|()| std::fs::rename(&part, &path))
+            .map_err(|error| {
+                let _ = std::fs::remove_file(&part);
+                voice_error(error)
+            })
     }
 
     fn kokoro_has(&self, file: &str) -> bool {
@@ -619,7 +634,14 @@ impl Voices {
             })?;
         }
         self.unload_kokoro(&file);
-        if !self.any_kokoro_voice() {
+        // the model stays while another Kokoro voice is on its way: it needs it
+        let coming = self
+            .catalog
+            .kokoro
+            .iter()
+            .flat_map(|kokoro| &kokoro.voices)
+            .any(|voice| voice.id != id && self.queue.busy(&voice.id));
+        if !coming && !self.any_kokoro_voice() {
             self.unload_kokoro(KOKORO_MODEL);
             let dir = self.kokoro_dir();
             if dir.exists() {
@@ -637,8 +659,14 @@ impl Voices {
             return Ok(());
         }
         let path = self.kokoro_dir().join(file);
-        let whole = self
-            .kokoro_sums()
+        let sums = {
+            let _files = lock(&self.kokoro_files);
+            self.read_kokoro_sums()
+        };
+        let Some(sums) = sums else {
+            return Err(TtsError::Voice("the sums of Kokoro do not read".into()));
+        };
+        let whole = sums
             .get(file)
             .is_some_and(|sum| hash_of(&path).is_ok_and(|found| found == *sum));
         if !whole {
@@ -1032,6 +1060,47 @@ mod tests {
         assert!(!kokoro.join("if_sara.bin").exists());
         assert!(kokoro.join(KOKORO_MODEL).is_file());
         assert!(!kokoro_row(&voices.view(), "if_sara").installed);
+    }
+
+    #[test]
+    fn unreadable_sums_never_delete_the_model() {
+        let dir = tempfile::tempdir().unwrap();
+        let voices = voices_in(dir.path(), kokoro_catalog_with(b"the model", b"voice"));
+        install_kokoro_files(voices.places(), &["if_sara"], b"the model", b"voice");
+        let kokoro = voices.places().voices.join(KOKORO_DIR);
+        // as a write cut short (or one being made) would leave it
+        std::fs::write(kokoro.join(SUMS_FILE), b"{\"model.on").unwrap();
+        // the check of a file read while the sums are being written
+        assert!(voices.verify_kokoro(KOKORO_MODEL).is_err());
+        assert!(voices.verify_kokoro("if_sara.bin").is_err());
+        assert!(kokoro.join(KOKORO_MODEL).is_file(), "the model stays");
+        assert!(kokoro.join("if_sara.bin").is_file(), "the voice stays");
+    }
+
+    #[test]
+    fn deleting_a_voice_while_another_downloads_keeps_the_model() {
+        let dir = tempfile::tempdir().unwrap();
+        let voices = voices_in(dir.path(), kokoro_catalog_with(b"the model", b"voice"));
+        install_kokoro_files(voices.places(), &["if_sara"], b"the model", b"voice");
+        let (go, wait) = std::sync::mpsc::channel::<()>();
+        let (started, running) = std::sync::mpsc::channel::<()>();
+        voices.queue.enqueue(
+            "af_heart",
+            Box::new(move |_, _| {
+                started.send(()).unwrap();
+                let _ = wait.recv();
+                Ok(())
+            }),
+        );
+        running.recv().unwrap();
+        voices.delete("if_sara").unwrap();
+        let kokoro = voices.places().voices.join(KOKORO_DIR);
+        assert!(!kokoro.join("if_sara.bin").exists());
+        assert!(
+            kokoro.join(KOKORO_MODEL).is_file(),
+            "Heart is coming and needs it"
+        );
+        go.send(()).unwrap();
     }
 
     #[test]
