@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.7.0] - 2026-11-23
+
+### Added
+
+- Tick a voice "Also in other texts" in the Voices panel to offer it in the reading bar whatever the language of the text, under "Also in other languages". Chosen there, it becomes the voice of that language and reads with its own accent.
+
+### Changed
+
+- One Voices panel: the languages on the left, and for each one the voice that reads it, the voices on this PC (Windows ones included) and the ones to download; your voices have their own place. The voice of each language moved there from Options, which keeps the sound of the voices and a button to the panel.
+
 ## [0.6.0] - 2026-11-23
 
 ### Added
