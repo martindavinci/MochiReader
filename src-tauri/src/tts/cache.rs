@@ -41,6 +41,11 @@ impl Cache {
         id
     }
 
+    /// Drops every sentence of `voice`: a voice that changed sounds different now.
+    pub fn forget(&mut self, voice: &str) {
+        self.entries.retain(|(_, key, _)| key.voice != voice);
+    }
+
     pub fn get(&self, id: u64) -> Option<Arc<Synthesis>> {
         self.entries
             .iter()
@@ -73,6 +78,18 @@ mod tests {
             sample_rate: 22050,
             words: Vec::new(),
         })
+    }
+
+    #[test]
+    fn cache_forget_drops_one_voice() {
+        let mut cache = Cache::new(CACHE_SENTENCES);
+        cache.insert(key("kokoro:mix-a", "Ciao."), sound());
+        cache.insert(key("kokoro:mix-a", "Ancora."), sound());
+        cache.insert(key("piper:b", "Ciao."), sound());
+        cache.forget("kokoro:mix-a");
+        assert!(cache.find(&key("kokoro:mix-a", "Ciao.")).is_none());
+        assert!(cache.find(&key("kokoro:mix-a", "Ancora.")).is_none());
+        assert!(cache.find(&key("piper:b", "Ciao.")).is_some());
     }
 
     #[test]

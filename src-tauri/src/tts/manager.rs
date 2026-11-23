@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! The voices the reader downloads: what is installed, the downloads, and the Piper voices loaded to speak.
 
-use super::catalog::{Catalog, CatalogVoice};
+use super::catalog::{Catalog, CatalogVoice, KokoroVoice};
 use super::download::{Emit, Http, Queue, Report};
 use super::engine_pack::{self, EngineState, Loaded};
+use super::kokoro::{KokoroModel, Style};
 use super::paths::{part_of, Places};
 use super::piper::PiperVoice;
-use super::{Synthesis, TtsError, VoiceInfo, PIPER_PREFIX};
+use super::{Synthesis, TtsError, VoiceInfo, KOKORO_PREFIX, PIPER_PREFIX};
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
@@ -20,6 +21,11 @@ const LICENSE_FILE: &str = "LICENSE.txt";
 const SAMPLE_MAX_BYTES: u64 = 2 * 1024 * 1024;
 /// Voices kept loaded at once: each holds its model in memory.
 const LOADED_VOICES: usize = 2;
+/// The folder of the Kokoro model and its voices, in the folder of the voices.
+const KOKORO_DIR: &str = "kokoro";
+const KOKORO_MODEL: &str = "model.onnx";
+/// Kokoro voices kept read at once: each is half a megabyte.
+const LOADED_STYLES: usize = 4;
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
@@ -55,6 +61,18 @@ pub struct VoiceView {
     pub card: String,
     pub installed: bool,
     pub busy: bool,
+    /// `piper` or `kokoro`.
+    pub engine: &'static str,
+    /// The grade its author gives a Kokoro voice, when it has one.
+    pub grade: Option<String>,
+}
+
+/// The one Kokoro model: its size, and whether it is on this PC.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KokoroModelView {
+    pub bytes: u64,
+    pub installed: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -64,6 +82,7 @@ pub struct CatalogView {
     pub used: u64,
     pub unavailable: Vec<String>,
     pub voices: Vec<VoiceView>,
+    pub kokoro_model: KokoroModelView,
 }
 
 fn model_file(dir: &Path, id: &str) -> PathBuf {
@@ -100,10 +119,20 @@ pub struct Voices {
     verified: Mutex<HashSet<String>>,
     engine: Mutex<Option<Arc<Loaded>>>,
     loaded: Mutex<Vec<(String, Arc<PiperVoice>)>>,
+    kokoro_model: Mutex<Option<Arc<KokoroModel>>>,
+    styles: Mutex<Vec<(String, Arc<Style>)>>,
+    /// One change at a time to the files of the Kokoro folder and their sums.
+    kokoro_files: Mutex<()>,
+    kokoro_vocab: HashMap<String, i64>,
 }
 
 impl Voices {
     pub fn new(places: Places, catalog: Catalog, version: &str, emit: Emit) -> Self {
+        let catalog_vocab = catalog
+            .kokoro
+            .as_ref()
+            .map(|kokoro| kokoro.vocab_map())
+            .unwrap_or_default();
         Self {
             places,
             catalog,
@@ -112,6 +141,10 @@ impl Voices {
             verified: Mutex::default(),
             engine: Mutex::default(),
             loaded: Mutex::default(),
+            kokoro_model: Mutex::default(),
+            styles: Mutex::default(),
+            kokoro_files: Mutex::default(),
+            kokoro_vocab: catalog_vocab,
         }
     }
 
@@ -159,18 +192,52 @@ impl Voices {
                 card: voice.card.clone(),
                 installed: self.installed(&voice.id),
                 busy: self.queue.busy(&voice.id),
+                engine: "piper",
+                grade: None,
             })
             .collect();
         let used = voices
             .iter()
             .filter(|voice| voice.installed)
             .map(|voice| folder_bytes(&self.places.voice(&voice.id)))
-            .sum::<u64>();
+            .sum::<u64>()
+            + folder_bytes(&self.kokoro_dir());
+        let model_installed = self.kokoro_has(KOKORO_MODEL);
+        let mut voices = voices;
+        if let Some(kokoro) = &self.catalog.kokoro {
+            voices.extend(kokoro.voices.iter().map(|voice| VoiceView {
+                id: voice.id.clone(),
+                name: voice.name.clone(),
+                lang: voice.lang.clone(),
+                quality: "kokoro".into(),
+                bytes: voice.file.bytes
+                    + if model_installed {
+                        0
+                    } else {
+                        kokoro.model.bytes
+                    },
+                license: kokoro.license.clone(),
+                card: kokoro.card.clone(),
+                installed: self.kokoro_installed(&voice.id),
+                busy: self.queue.busy(&voice.id),
+                engine: "kokoro",
+                grade: Some(voice.grade.clone()).filter(|grade| !grade.is_empty()),
+            }));
+        }
+        let kokoro_model = KokoroModelView {
+            bytes: self
+                .catalog
+                .kokoro
+                .as_ref()
+                .map_or(0, |kokoro| kokoro.model.bytes),
+            installed: model_installed,
+        };
         CatalogView {
             engine: EngineView { state },
             used,
             unavailable: self.catalog.unavailable.clone(),
             voices,
+            kokoro_model,
         }
     }
 
@@ -185,6 +252,18 @@ impl Voices {
                 name: voice.name.clone(),
                 lang: voice.lang.clone(),
             })
+            .chain(
+                self.catalog
+                    .kokoro
+                    .iter()
+                    .flat_map(|kokoro| &kokoro.voices)
+                    .filter(|voice| self.kokoro_installed(&voice.id))
+                    .map(|voice| VoiceInfo {
+                        id: format!("{KOKORO_PREFIX}{}", voice.id),
+                        name: voice.name.clone(),
+                        lang: voice.lang.clone(),
+                    }),
+            )
             .collect()
     }
 
@@ -195,7 +274,9 @@ impl Voices {
     }
 
     pub fn download(self: &Arc<Self>, id: &str) -> Result<(), TtsError> {
-        self.known(id)?;
+        if !self.is_kokoro(id) {
+            self.known(id)?;
+        }
         let voices = Arc::clone(self);
         let owned = id.to_owned();
         self.queue.enqueue(
@@ -210,6 +291,9 @@ impl Voices {
     }
 
     pub fn delete(&self, id: &str) -> Result<(), TtsError> {
+        if self.is_kokoro(id) {
+            return self.delete_kokoro(id);
+        }
         self.known(id)?;
         lock(&self.loaded).retain(|(loaded, _)| loaded != id);
         lock(&self.verified).remove(id);
@@ -222,19 +306,21 @@ impl Voices {
 
     /// The published sample of a voice, kept in memory only.
     pub fn sample(&self, id: &str) -> Result<Vec<u8>, TtsError> {
+        if self.is_kokoro(id) {
+            return Err(TtsError::Refused(format!(
+                "{id}: a Kokoro voice has no published sample"
+            )));
+        }
         let voice = self.known(id)?;
         self.http.bytes(&voice.sample, SAMPLE_MAX_BYTES)
     }
 
     fn install(&self, id: &str, cancel: &AtomicBool, report: &Report) -> Result<(), TtsError> {
-        let voice = self.known(id)?.clone();
-        if let EngineState::Missing | EngineState::Broken(_) =
-            engine_pack::state(&self.places.engine)
-        {
-            return Err(TtsError::Engine(
-                "this copy of the app has no voice engine".into(),
-            ));
+        if self.is_kokoro(id) {
+            return self.install_kokoro(id, cancel, report);
         }
+        let voice = self.known(id)?.clone();
+        self.engine_ready()?;
         let part = part_of(&self.places.voice(id));
         let outcome = self
             .fetch_voice(&voice, &part, cancel, report)
@@ -298,6 +384,15 @@ impl Voices {
             voice.name, voice.id, voice.license, voice.card, voice.model.url
         );
         std::fs::write(dir.join(LICENSE_FILE), license).map_err(voice_error)
+    }
+
+    fn engine_ready(&self) -> Result<(), TtsError> {
+        match engine_pack::state(&self.places.engine) {
+            EngineState::Missing | EngineState::Broken(_) => Err(TtsError::Engine(
+                "this copy of the app has no voice engine".into(),
+            )),
+            EngineState::Ready { .. } => Ok(()),
+        }
     }
 
     /// The engine, loaded once per run.
@@ -373,6 +468,224 @@ impl Voices {
         voice.synthesize(&loaded.espeak, text)
     }
 
+    fn is_kokoro(&self, id: &str) -> bool {
+        self.catalog.kokoro_voice(id).is_some()
+    }
+
+    fn known_kokoro(&self, id: &str) -> Result<&KokoroVoice, TtsError> {
+        self.catalog
+            .kokoro_voice(id)
+            .ok_or_else(|| TtsError::Refused(format!("no Kokoro voice {id} in the catalog")))
+    }
+
+    fn kokoro_dir(&self) -> PathBuf {
+        self.places.voices.join(KOKORO_DIR)
+    }
+
+    /// The hashes of the files of the Kokoro folder as installed: the patched model and each voice.
+    fn kokoro_sums(&self) -> BTreeMap<String, String> {
+        std::fs::read(self.kokoro_dir().join(SUMS_FILE))
+            .ok()
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .unwrap_or_default()
+    }
+
+    fn change_kokoro_sums(
+        &self,
+        change: impl FnOnce(&mut BTreeMap<String, String>),
+    ) -> Result<(), TtsError> {
+        let _files = lock(&self.kokoro_files);
+        let mut sums = self.kokoro_sums();
+        change(&mut sums);
+        let bytes = serde_json::to_vec(&sums).map_err(voice_error)?;
+        std::fs::write(self.kokoro_dir().join(SUMS_FILE), bytes).map_err(voice_error)
+    }
+
+    fn kokoro_has(&self, file: &str) -> bool {
+        self.kokoro_dir().join(file).is_file() && self.kokoro_sums().contains_key(file)
+    }
+
+    fn kokoro_installed(&self, id: &str) -> bool {
+        self.kokoro_has(KOKORO_MODEL) && self.kokoro_has(&format!("{id}.bin"))
+    }
+
+    fn any_kokoro_voice(&self) -> bool {
+        self.catalog
+            .kokoro
+            .iter()
+            .flat_map(|kokoro| &kokoro.voices)
+            .any(|voice| self.kokoro_has(&format!("{}.bin", voice.id)))
+    }
+
+    /// Forgets what was loaded of `file` in this run.
+    fn unload_kokoro(&self, file: &str) {
+        lock(&self.verified).remove(&format!("{KOKORO_DIR}/{file}"));
+        if file == KOKORO_MODEL {
+            lock(&self.kokoro_model).take();
+        } else if let Some(id) = file.strip_suffix(".bin") {
+            lock(&self.styles).retain(|(known, _)| known != id);
+        }
+    }
+
+    /// The Kokoro model, if it is not there yet, then the voice. A download cut short leaves no file half written, and
+    /// no Kokoro folder when no voice was there before.
+    fn install_kokoro(
+        &self,
+        id: &str,
+        cancel: &AtomicBool,
+        report: &Report,
+    ) -> Result<(), TtsError> {
+        let voice = self.known_kokoro(id)?.clone();
+        let kokoro = self
+            .catalog
+            .kokoro
+            .clone()
+            .ok_or_else(|| TtsError::Refused("no Kokoro in the catalog".into()))?;
+        self.engine_ready()?;
+        let dir = self.kokoro_dir();
+        std::fs::create_dir_all(&dir).map_err(voice_error)?;
+        let need_model = !self.kokoro_has(KOKORO_MODEL);
+        let total = voice.file.bytes + if need_model { kokoro.model.bytes } else { 0 };
+        let outcome = (|| -> Result<(), TtsError> {
+            let mut base = 0;
+            if need_model {
+                let model = dir.join(KOKORO_MODEL);
+                let _ = std::fs::remove_file(&model);
+                self.http.fetch(
+                    &kokoro.model.url,
+                    &model,
+                    &kokoro.model.sha256,
+                    cancel,
+                    |received, _| report.phase("voice", received, Some(total)),
+                )?;
+                // Without its lengths the model still speaks: only the sentence is marked.
+                super::onnx_patch::patch_kokoro_file(&model);
+                let sum = hash_of(&model)?;
+                self.change_kokoro_sums(|sums| {
+                    sums.insert(KOKORO_MODEL.to_owned(), sum);
+                })?;
+                self.unload_kokoro(KOKORO_MODEL);
+                base = kokoro.model.bytes;
+            }
+            let file = format!("{id}.bin");
+            self.http.fetch(
+                &voice.file.url,
+                &dir.join(&file),
+                &voice.file.sha256,
+                cancel,
+                |received, _| report.phase("voice", base + received, Some(total)),
+            )?;
+            self.change_kokoro_sums(|sums| {
+                sums.insert(file.clone(), voice.file.sha256.clone());
+            })?;
+            self.unload_kokoro(&file);
+            let license = format!(
+                "Kokoro-82M (hexgrad), ONNX by onnx-community\nLicense: {}\nModel card: {}\nSource: {}\n",
+                kokoro.license, kokoro.card, kokoro.model.url
+            );
+            std::fs::write(dir.join(LICENSE_FILE), license).map_err(voice_error)
+        })();
+        if outcome.is_err() && !self.any_kokoro_voice() {
+            self.unload_kokoro(KOKORO_MODEL);
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+        outcome
+    }
+
+    /// A Kokoro voice goes; with the last one the model goes too.
+    fn delete_kokoro(&self, id: &str) -> Result<(), TtsError> {
+        let file = format!("{id}.bin");
+        let path = self.kokoro_dir().join(&file);
+        if path.exists() {
+            std::fs::remove_file(&path).map_err(voice_error)?;
+        }
+        if self.kokoro_dir().exists() {
+            self.change_kokoro_sums(|sums| {
+                sums.remove(&file);
+            })?;
+        }
+        self.unload_kokoro(&file);
+        if !self.any_kokoro_voice() {
+            self.unload_kokoro(KOKORO_MODEL);
+            let dir = self.kokoro_dir();
+            if dir.exists() {
+                std::fs::remove_dir_all(&dir).map_err(voice_error)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Checks a file of the Kokoro folder against the hash written when it was installed, once per run; one that
+    /// fails is removed, and the manager offers to download it again.
+    fn verify_kokoro(&self, file: &str) -> Result<(), TtsError> {
+        let key = format!("{KOKORO_DIR}/{file}");
+        if lock(&self.verified).contains(&key) {
+            return Ok(());
+        }
+        let path = self.kokoro_dir().join(file);
+        let whole = self
+            .kokoro_sums()
+            .get(file)
+            .is_some_and(|sum| hash_of(&path).is_ok_and(|found| found == *sum));
+        if !whole {
+            let _ = std::fs::remove_file(&path);
+            let _ = self.change_kokoro_sums(|sums| {
+                sums.remove(file);
+            });
+            self.unload_kokoro(file);
+            return Err(TtsError::Voice(format!("{file} of Kokoro is damaged")));
+        }
+        lock(&self.verified).insert(key);
+        Ok(())
+    }
+
+    fn kokoro_model(&self, loaded: &Loaded) -> Result<Arc<KokoroModel>, TtsError> {
+        let mut model = lock(&self.kokoro_model);
+        if let Some(found) = model.as_ref() {
+            return Ok(Arc::clone(found));
+        }
+        let made = Arc::new(KokoroModel::load(
+            &loaded.environment,
+            &self.kokoro_dir().join(KOKORO_MODEL),
+        )?);
+        *model = Some(Arc::clone(&made));
+        Ok(made)
+    }
+
+    fn style(&self, id: &str) -> Result<Arc<Style>, TtsError> {
+        if let Some((_, style)) = lock(&self.styles).iter().find(|(known, _)| known == id) {
+            return Ok(Arc::clone(style));
+        }
+        let bytes =
+            std::fs::read(self.kokoro_dir().join(format!("{id}.bin"))).map_err(voice_error)?;
+        let style = Arc::new(Style::from_bytes(&bytes)?);
+        let mut styles = lock(&self.styles);
+        styles.push((id.to_owned(), Arc::clone(&style)));
+        while styles.len() > LOADED_STYLES {
+            styles.remove(0);
+        }
+        Ok(style)
+    }
+
+    /// Says `text` with the Kokoro voice `id` (without `kokoro:`).
+    pub fn synthesize_kokoro(&self, id: &str, text: &str) -> Result<Synthesis, TtsError> {
+        let voice = self.known_kokoro(id)?.clone();
+        if !self.kokoro_installed(id) {
+            return Err(TtsError::Voice(format!("{id} is not installed")));
+        }
+        self.verify_kokoro(KOKORO_MODEL)?;
+        self.verify_kokoro(&format!("{id}.bin"))?;
+        let style = self.style(id)?;
+        self.speak_kokoro(&voice.lang, &style, text)
+    }
+
+    fn speak_kokoro(&self, lang: &str, style: &Style, text: &str) -> Result<Synthesis, TtsError> {
+        let vocab = &self.kokoro_vocab;
+        let loaded = self.engine()?;
+        let model = self.kokoro_model(&loaded)?;
+        model.synthesize(&loaded.espeak, vocab, lang, style, text)
+    }
+
     /// The ids of the voices, for tests that look into the folder.
     #[cfg(test)]
     pub fn verify_for_test(&self, id: &str) -> Result<(), TtsError> {
@@ -404,6 +717,53 @@ pub mod testing {
             ]
         });
         Catalog::parse(&text.to_string()).unwrap()
+    }
+
+    /// `catalog_with` and a Kokoro model with two voices, Sara (Italian) and Heart (American English), whose files are
+    /// `model` and `voice`.
+    pub fn kokoro_catalog_with(model: &[u8], voice: &[u8]) -> Catalog {
+        let sha = |bytes: &[u8]| crate::native::sha256(bytes).unwrap();
+        let file = |bytes: &[u8]| serde_json::json!({ "url": "https://example.invalid/v", "sha256": sha(bytes), "bytes": bytes.len() });
+        let mut catalog = serde_json::to_value(catalog_with(b"model", b"{}")).unwrap();
+        catalog["kokoro"] = serde_json::json!({
+            "commit": "0".repeat(40), "license": "Apache-2.0", "card": "https://example.invalid/card",
+            "model": file(model), "vocab": [["a", 1]],
+            "voices": [
+                { "id": "if_sara", "name": "Sara", "lang": "it-IT", "grade": "C", "file": file(voice) },
+                { "id": "af_heart", "name": "Heart", "lang": "en-US", "grade": "A", "file": file(voice) }
+            ]
+        });
+        Catalog::parse(&catalog.to_string()).unwrap()
+    }
+
+    /// Puts the Kokoro model and the files of `ids` in place as installs would.
+    pub fn install_kokoro_files(places: &Places, ids: &[&str], model: &[u8], voice: &[u8]) {
+        let dir = places.voices.join(KOKORO_DIR);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(KOKORO_MODEL), model).unwrap();
+        let mut sums = std::collections::BTreeMap::new();
+        sums.insert(
+            KOKORO_MODEL.to_owned(),
+            crate::native::sha256(model).unwrap(),
+        );
+        for id in ids {
+            std::fs::write(dir.join(format!("{id}.bin")), voice).unwrap();
+            sums.insert(format!("{id}.bin"), crate::native::sha256(voice).unwrap());
+        }
+        std::fs::write(dir.join(SUMS_FILE), serde_json::to_vec(&sums).unwrap()).unwrap();
+    }
+
+    /// An engine folder with the files the app looks for: enough for it to try a download, not to speak.
+    pub fn fake_engine(places: &Places) {
+        std::fs::create_dir_all(places.engine.join("espeak-ng-data")).unwrap();
+        for file in [
+            "onnxruntime.dll",
+            "espeak-ng.dll",
+            "espeak-ng-data/phontab",
+            "VERSION",
+        ] {
+            std::fs::write(places.engine.join(file), b"x").unwrap();
+        }
     }
 
     /// Puts the files of a voice in place as an install would.
@@ -496,6 +856,114 @@ mod tests {
         assert!(!voices.view().voices[0].installed);
     }
 
+    fn kokoro_row<'a>(view: &'a CatalogView, id: &str) -> &'a VoiceView {
+        view.voices.iter().find(|voice| voice.id == id).unwrap()
+    }
+
+    #[test]
+    fn a_kokoro_voice_brings_the_model() {
+        let dir = tempfile::tempdir().unwrap();
+        let voices = voices_in(dir.path(), kokoro_catalog_with(b"the model", b"sara"));
+        let view = voices.view();
+        let sara = kokoro_row(&view, "if_sara");
+        assert_eq!(sara.engine, "kokoro");
+        assert_eq!(sara.quality, "kokoro");
+        assert_eq!(sara.grade.as_deref(), Some("C"));
+        assert_eq!(sara.license, "Apache-2.0");
+        assert!(!sara.installed);
+        assert_eq!(sara.bytes, 4 + 9, "the voice and the model it needs");
+        assert!(!view.kokoro_model.installed);
+        assert_eq!(view.kokoro_model.bytes, 9);
+        assert_eq!(kokoro_row(&view, "it_IT-paola-medium").engine, "piper");
+
+        install_kokoro_files(voices.places(), &["if_sara"], b"the model", b"sara");
+        let view = voices.view();
+        let sara = kokoro_row(&view, "if_sara");
+        assert!(sara.installed);
+        assert_eq!(sara.bytes, 4);
+        assert!(view.kokoro_model.installed);
+        assert!(!kokoro_row(&view, "af_heart").installed);
+        assert!(view.used > 0);
+        assert_eq!(
+            voices.installed_voices(),
+            [VoiceInfo {
+                id: "kokoro:if_sara".into(),
+                name: "Sara".into(),
+                lang: "it-IT".into()
+            }]
+        );
+    }
+
+    #[test]
+    fn deleting_the_last_kokoro_voice_removes_the_model() {
+        let dir = tempfile::tempdir().unwrap();
+        let voices = voices_in(dir.path(), kokoro_catalog_with(b"the model", b"voice"));
+        install_kokoro_files(
+            voices.places(),
+            &["if_sara", "af_heart"],
+            b"the model",
+            b"voice",
+        );
+        let kokoro = voices.places().voices.join(KOKORO_DIR);
+        voices.delete("if_sara").unwrap();
+        assert!(kokoro.join(KOKORO_MODEL).is_file());
+        assert!(!kokoro.join("if_sara.bin").exists());
+        assert!(!kokoro_row(&voices.view(), "if_sara").installed);
+        assert!(kokoro_row(&voices.view(), "af_heart").installed);
+        voices.delete("af_heart").unwrap();
+        assert!(!kokoro.exists());
+    }
+
+    #[test]
+    fn a_damaged_kokoro_voice_is_removed() {
+        let dir = tempfile::tempdir().unwrap();
+        let voices = voices_in(dir.path(), kokoro_catalog_with(b"the model", b"voice"));
+        install_kokoro_files(
+            voices.places(),
+            &["if_sara", "af_heart"],
+            b"the model",
+            b"voice",
+        );
+        let kokoro = voices.places().voices.join(KOKORO_DIR);
+        std::fs::write(kokoro.join("if_sara.bin"), b"damaged").unwrap();
+        assert!(matches!(
+            voices.synthesize_kokoro("if_sara", "Ciao."),
+            Err(TtsError::Voice(_))
+        ));
+        assert!(!kokoro.join("if_sara.bin").exists());
+        assert!(kokoro.join(KOKORO_MODEL).is_file());
+        assert!(!kokoro_row(&voices.view(), "if_sara").installed);
+    }
+
+    #[test]
+    fn a_cut_download_leaves_no_model() {
+        let dir = tempfile::tempdir().unwrap();
+        let voices = voices_in(dir.path(), kokoro_catalog_with(b"the model", b"voice"));
+        fake_engine(voices.places());
+        let report = Report::for_test("if_sara");
+        assert!(matches!(
+            voices.install("if_sara", &AtomicBool::new(true), &report),
+            Err(TtsError::Canceled)
+        ));
+        let kokoro = voices.places().voices.join(KOKORO_DIR);
+        assert!(!kokoro.join(KOKORO_MODEL).exists());
+        let left: Vec<_> = std::fs::read_dir(&kokoro)
+            .map(|entries| entries.flatten().map(|entry| entry.file_name()).collect())
+            .unwrap_or_default();
+        assert!(left.is_empty(), "{left:?}");
+        assert!(!voices.view().kokoro_model.installed);
+    }
+
+    #[test]
+    fn a_kokoro_voice_has_no_published_sample() {
+        let dir = tempfile::tempdir().unwrap();
+        let voices = voices_in(dir.path(), kokoro_catalog_with(b"the model", b"voice"));
+        assert!(matches!(
+            voices.sample("if_sara"),
+            Err(TtsError::Refused(_))
+        ));
+    }
+
     /// Only in the engine workflow, which builds the engine and sets MOCHIREADER_ENGINE_DIR: it loads its libraries and
     /// downloads one voice.
     #[test]
@@ -520,6 +988,39 @@ mod tests {
             .unwrap();
         assert_eq!(sound.sample_rate, 22050);
         assert!(sound.samples.len() > 22050 / 2);
+        assert_eq!(sound.words.len(), 5, "{:?}", sound.words);
+        assert_eq!(sound.words.last().unwrap().end, 24);
+    }
+
+    /// Like the test above, for Kokoro: downloads the model and Sara, then says a sentence word by word.
+    #[test]
+    #[ignore]
+    fn engine_kokoro_voice_downloads_and_speaks() {
+        let engine_dir = std::path::PathBuf::from(
+            std::env::var_os("MOCHIREADER_ENGINE_DIR").expect("the engine"),
+        )
+        .canonicalize()
+        .unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let places = Places::resolve(Some(dir.path()), dir.path(), &engine_dir);
+        let voices = Arc::new(Voices::new(
+            places,
+            Catalog::embedded().unwrap(),
+            "test",
+            Arc::new(|_| {}),
+        ));
+        voices
+            .install(
+                "if_sara",
+                &AtomicBool::new(false),
+                &Report::for_test("if_sara"),
+            )
+            .unwrap();
+        assert!(voices.view().kokoro_model.installed);
+        let sound = voices
+            .synthesize_kokoro("if_sara", "Ciao a tutti, come state?")
+            .unwrap();
+        assert_eq!(sound.sample_rate, 24_000);
         assert_eq!(sound.words.len(), 5, "{:?}", sound.words);
         assert_eq!(sound.words.last().unwrap().end, 24);
     }

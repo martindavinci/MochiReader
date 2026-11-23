@@ -394,7 +394,7 @@ mod tests {
         let sound = voice
             .synthesize(
                 &loaded.espeak,
-                &catalog.kokoro.unwrap().vocab,
+                &catalog.kokoro.unwrap().vocab_map(),
                 "it-IT",
                 &style,
                 "Ciao a tutti, come state?",

@@ -84,7 +84,10 @@ test('kokoro: every voice pinned, 522240 bytes, in an offered language, graded C
 });
 
 test('kokoro: the vocabulary maps symbols to ids', () => {
-  const vocab = catalog.kokoro.vocab;
+  // pairs, so that PowerShell (tools/engine-pack.ps1) can read the catalog: it refuses keys differing only in case
+  assert.ok(Array.isArray(catalog.kokoro.vocab));
+  const vocab = Object.fromEntries(catalog.kokoro.vocab);
+  assert.equal(Object.keys(vocab).length, catalog.kokoro.vocab.length, 'no symbol twice');
   assert.ok(Object.keys(vocab).length >= 100);
   for (const [symbol, id] of Object.entries(vocab)) {
     assert.equal([...symbol].length, 1, symbol);

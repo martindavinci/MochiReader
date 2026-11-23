@@ -20,7 +20,8 @@ if ($found -ne $OrtSha256.ToLowerInvariant()) { throw "ONNX Runtime zip: SHA-256
 
 $root = Split-Path -Parent $PSScriptRoot
 $catalog = Get-Content (Join-Path $root 'app/speech/voices.json') -Raw | ConvertFrom-Json
-$languages = $catalog.voices | ForEach-Object { ($_.lang -split '-')[0].ToLowerInvariant() } | Sort-Object -Unique
+# The languages of the Piper voices and of the Kokoro voices: each needs its eSpeak dictionary.
+$languages = @($catalog.voices) + @($catalog.kokoro.voices) | ForEach-Object { ($_.lang -split '-')[0].ToLowerInvariant() } | Sort-Object -Unique
 
 if (Test-Path $Out) { Remove-Item $Out -Recurse -Force }
 New-Item -ItemType Directory -Force (Join-Path $Out 'LICENSES') | Out-Null

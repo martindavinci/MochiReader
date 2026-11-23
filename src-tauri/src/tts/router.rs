@@ -2,7 +2,9 @@
 //! Sends each voice to its engine.
 
 use super::manager::Voices;
-use super::{engine_of, Engine, Synthesis, Synthesizer, TtsError, VoiceInfo, PIPER_PREFIX};
+use super::{
+    engine_of, Engine, Synthesis, Synthesizer, TtsError, VoiceInfo, KOKORO_PREFIX, PIPER_PREFIX,
+};
 use std::sync::Arc;
 
 pub struct Router {
@@ -23,6 +25,9 @@ impl Synthesizer for Router {
         }
         match engine_of(voice) {
             Engine::Piper => self.voices.synthesize(&voice[PIPER_PREFIX.len()..], text),
+            Engine::Kokoro => self
+                .voices
+                .synthesize_kokoro(&voice[KOKORO_PREFIX.len()..], text),
             Engine::Edge | Engine::Other => Err(TtsError::Voice(format!("no voice {voice}"))),
         }
     }

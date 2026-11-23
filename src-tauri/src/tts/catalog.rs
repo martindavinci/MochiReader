@@ -48,8 +48,15 @@ pub struct KokoroCatalog {
     pub license: String,
     pub card: String,
     pub model: RemoteFile,
-    pub vocab: HashMap<String, i64>,
+    /// [phoneme, token id] pairs.
+    pub vocab: Vec<(String, i64)>,
     pub voices: Vec<KokoroVoice>,
+}
+
+impl KokoroCatalog {
+    pub fn vocab_map(&self) -> HashMap<String, i64> {
+        self.vocab.iter().cloned().collect()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -103,6 +110,6 @@ mod tests {
         let catalog = Catalog::embedded().unwrap();
         assert_eq!(catalog.kokoro_voice("if_sara").unwrap().lang, "it-IT");
         assert!(catalog.kokoro_voice("../x").is_none());
-        assert!(catalog.kokoro.as_ref().unwrap().vocab.len() >= 100);
+        assert!(catalog.kokoro.as_ref().unwrap().vocab_map().len() >= 100);
     }
 }

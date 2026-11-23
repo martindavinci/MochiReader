@@ -2,7 +2,7 @@
 //
 // Fills the `kokoro` section of app/speech/voices.json: the one Kokoro-82M model the app uses (q8) and the voices listed
 // below, at one commit of huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX, with SHA-256 and size, and the
-// vocabulary of its tokenizer (phoneme → id). The rest of the catalog (the Piper voices) is left as it is.
+// vocabulary of its tokenizer as [phoneme, id] pairs. The rest of the catalog (the Piper voices) is left as it is.
 // Usage: node tools/kokoro-catalog.mjs [--write] [--commit <40 hex>]
 // Without --commit it takes the current commit of the repository.
 import { createHash } from 'node:crypto';
@@ -90,7 +90,8 @@ export async function kokoroSection(commit) {
     license: 'Apache-2.0',
     card: `${HF}/${REPO}/blob/${commit}/README.md`,
     model: await describe(commit, tree, MODEL),
-    vocab: tokenizer.model.vocab,
+    // pairs, not an object: PowerShell's ConvertFrom-Json refuses keys that differ only in case ('A', 'a')
+    vocab: Object.entries(tokenizer.model.vocab).sort(([, one], [, other]) => one - other),
     voices,
   };
 }

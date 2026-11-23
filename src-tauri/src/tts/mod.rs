@@ -32,6 +32,7 @@ pub const MIN_RATE: f32 = 0.5;
 pub const MAX_RATE: f32 = 4.0;
 pub const PIPER_PREFIX: &str = "piper:";
 pub const EDGE_PREFIX: &str = "edge:";
+pub const KOKORO_PREFIX: &str = "kokoro:";
 
 /// What went wrong, as the page reads it: `{ kind, message }`.
 #[derive(Debug, Clone, PartialEq)]
@@ -123,6 +124,7 @@ pub trait Synthesizer: Send + Sync {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Engine {
     Piper,
+    Kokoro,
     Edge,
     Other,
 }
@@ -130,6 +132,8 @@ pub enum Engine {
 pub fn engine_of(voice: &str) -> Engine {
     if voice.starts_with(PIPER_PREFIX) {
         Engine::Piper
+    } else if voice.starts_with(KOKORO_PREFIX) {
+        Engine::Kokoro
     } else if voice.starts_with(EDGE_PREFIX) {
         Engine::Edge
     } else {
@@ -228,6 +232,11 @@ impl Service {
         let synthesis = Arc::new(self.synth.synthesize(voice, text)?);
         let id = lock(&self.cache).insert(key, Arc::clone(&synthesis));
         Ok((id, synthesis))
+    }
+
+    /// Forgets the sentences made with `voice`.
+    pub fn forget(&self, voice: &str) {
+        lock(&self.cache).forget(voice);
     }
 
     pub fn speak(
