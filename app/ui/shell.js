@@ -1106,6 +1106,8 @@ async function drawVoicesPanel() {
     invoke('tts_mixes').catch(() => []),
   ]);
   const kokoroVoices = catalog.voices.filter((voice) => voice.engine === 'kokoro' && voice.installed);
+  // a draft keeps only the voices still on this PC (none to mix: no draft)
+  if (mixDraft) mixDraft = mixer.repairDraft(mixDraft, kokoroVoices);
   const redrawWith = (draft) => {
     mixDraft = draft;
     drawVoicesPanel();

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { parseHTML } from 'linkedom';
 import { setLang } from '../app/core/i18n.js';
 import en from '../app/lang/en.js';
-import { draftOf, draftProblem, duplicateOf, newDraft, renderMixer, renderMixes, withLang } from '../app/ui/voice-mixer.js';
+import { draftOf, draftProblem, duplicateOf, newDraft, renderMixer, renderMixes, repairDraft, withLang } from '../app/ui/voice-mixer.js';
 
 const NAMES = { it: 'Italian', en: 'English' };
 const nameOf = (language) => NAMES[language] ?? language;
@@ -128,4 +128,36 @@ test('editing and duplicating make drafts on the 0–100 scale', () => {
   const copy = duplicateOf(kept().mix);
   assert.equal(copy.id, '');
   assert.equal(copy.name, 'Sara e Heart 2');
+});
+
+test('save keeps what was typed and slid, even before the field is left', () => {
+  const where = host();
+  const { calls, made } = handlers();
+  renderMixer(where, { draft: newDraft(KOKORO), kokoroVoices: KOKORO, nameOf }, made);
+  const save = where.querySelector('.mix-save');
+  assert.equal(save.hasAttribute('disabled'), true);
+  const name = where.querySelector('.mix-name');
+  name.value = 'Mia';
+  name.dispatchEvent(new name.ownerDocument.defaultView.Event('input'));
+  const weight = where.querySelector('.mix-weight');
+  weight.value = '80';
+  weight.dispatchEvent(new weight.ownerDocument.defaultView.Event('input'));
+  assert.equal(save.hasAttribute('disabled'), false, 'a name typed is enough');
+  assert.equal(where.querySelector('.mix-problem'), null);
+  save.click();
+  const [name0, saved] = calls.at(-1);
+  assert.equal(name0, 'onSave');
+  assert.equal(saved.name, 'Mia');
+  assert.equal(saved.parts[0].weight, 80);
+});
+
+test('a draft is mended when its voices are gone', () => {
+  const draft = { id: '', name: 'Mia', lang: 'it-IT', parts: [{ voice: 'if_sara', weight: 70 }, { voice: 'af_heart', weight: 30 }] };
+  assert.equal(repairDraft(draft, [HEART]), null, 'fewer than two voices: no draft');
+  const mended = repairDraft(draft, [HEART, NICOLA]);
+  assert.deepEqual(mended.parts.map(({ voice }) => voice), ['af_heart', 'im_nicola']);
+  assert.equal(mended.parts[0].weight, 30);
+  assert.equal(mended.lang, 'it-IT', 'Nicola still speaks it');
+  assert.equal(repairDraft({ ...draft, parts: [{ voice: 'if_sara', weight: 50 }, { voice: 'im_nicola', weight: 50 }] }, [HEART, { id: 'bf_emma', name: 'Emma', lang: 'en-GB' }]).lang, 'en-US');
+  assert.equal(repairDraft(draft, KOKORO), draft, 'nothing gone, the same draft');
 });

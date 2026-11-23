@@ -45,6 +45,22 @@ export function withLang(draft, kokoroVoices) {
   return langs.includes(draft.lang) || langs.length === 0 ? draft : { ...draft, lang: langs[0] };
 }
 
+/**
+ * The draft with only voices still on this PC: a part whose voice is gone takes one not used yet; null when fewer than
+ * two voices are left to mix. The same draft when nothing is gone.
+ */
+export function repairDraft(draft, kokoroVoices) {
+  if (kokoroVoices.length < 2) return null;
+  const known = draft.parts.filter(({ voice }) => langOfVoice(kokoroVoices, voice));
+  if (known.length === draft.parts.length) return draft;
+  const parts = [...known];
+  for (const voice of kokoroVoices) {
+    if (parts.length >= 2) break;
+    if (!parts.some((part) => part.voice === voice.id)) parts.push({ voice: voice.id, weight: START_WEIGHT });
+  }
+  return withLang({ ...draft, parts }, kokoroVoices);
+}
+
 /** @returns {string|null} the key of what keeps the draft from being kept, or null. */
 export function draftProblem(draft, kokoroVoices) {
   if (!draft.name.trim()) return 'voices.mix.needName';
@@ -111,6 +127,9 @@ export function renderMixes(host, { mixes, kokoroVoices, nameOf }, handlers) {
 export function renderMixer(host, { draft, kokoroVoices, nameOf }, handlers) {
   const element = elementIn(host);
   const change = (next) => handlers.onChange(withLang(next, kokoroVoices));
+  // What the form holds now: a name typed or a weight slid counts at once, even before the field is left, so that Save
+  // and Preview never take the draft the form was drawn with.
+  const current = { ...draft, parts: draft.parts.map((part) => ({ ...part })) };
   const label = (text, control) => {
     const made = element('label', 'mix-field');
     made.append(element('span', 'mix-label', text), control);
@@ -121,7 +140,11 @@ export function renderMixer(host, { draft, kokoroVoices, nameOf }, handlers) {
   name.type = 'text';
   name.maxLength = 40;
   name.value = draft.name;
-  name.addEventListener('change', () => change({ ...draft, name: name.value }));
+  name.addEventListener('input', () => {
+    current.name = name.value;
+    refresh();
+  });
+  name.addEventListener('change', () => change(current));
 
   const rows = draft.parts.map((part, index) => {
     const row = element('div', 'mix-part');
@@ -140,16 +163,20 @@ export function renderMixer(host, { draft, kokoroVoices, nameOf }, handlers) {
     weight.value = String(part.weight);
     weight.setAttribute('aria-label', t('voices.mix.weight'));
     const shown = element('span', 'mix-weight-value', String(part.weight));
-    const withPart = (changed) => ({ ...draft, parts: draft.parts.map((one, at) => (at === index ? { ...one, ...changed } : one)) });
+    const withPart = (changed) => ({ ...current, parts: current.parts.map((one, at) => (at === index ? { ...one, ...changed } : one)) });
     select.addEventListener('change', () => change(withPart({ voice: select.value })));
-    // the number follows the slider as it moves; the draft changes once it is let go
-    weight.addEventListener('input', () => { shown.textContent = weight.value; });
-    weight.addEventListener('change', () => change(withPart({ weight: Number(weight.value) })));
+    // the number follows the slider as it moves; the panel is drawn again once it is let go
+    weight.addEventListener('input', () => {
+      shown.textContent = weight.value;
+      current.parts[index].weight = Number(weight.value);
+      refresh();
+    });
+    weight.addEventListener('change', () => change(current));
     row.append(select, weight, shown);
     if (index === MAX_PARTS - 1) {
       const remove = element('button', 'btn btn-secondary mix-remove', '×');
       remove.setAttribute('aria-label', t('voices.delete'));
-      remove.addEventListener('click', () => change({ ...draft, parts: draft.parts.slice(0, index) }));
+      remove.addEventListener('click', () => change({ ...current, parts: current.parts.slice(0, index) }));
       row.append(remove);
     }
     return row;
@@ -159,7 +186,7 @@ export function renderMixer(host, { draft, kokoroVoices, nameOf }, handlers) {
   if (draft.parts.length < MAX_PARTS) {
     const add = element('button', 'btn btn-secondary mix-add', t('voices.mix.addThird'));
     const unused = kokoroVoices.find((voice) => !draft.parts.some((part) => part.voice === voice.id)) ?? kokoroVoices[0];
-    add.addEventListener('click', () => change({ ...draft, parts: [...draft.parts, { voice: unused.id, weight: THIRD_WEIGHT }] }));
+    add.addEventListener('click', () => change({ ...current, parts: [...current.parts, { voice: unused.id, weight: THIRD_WEIGHT }] }));
     parts.push(add);
   }
 
@@ -170,18 +197,15 @@ export function renderMixer(host, { draft, kokoroVoices, nameOf }, handlers) {
     if (tag === draft.lang) option.selected = true;
     lang.append(option);
   }
-  lang.addEventListener('change', () => change({ ...draft, lang: lang.value }));
+  lang.addEventListener('change', () => change({ ...current, lang: lang.value }));
   parts.push(label(t('voices.mix.lang'), lang));
 
-  const problem = draftProblem(draft, kokoroVoices);
-  if (problem) parts.push(element('p', 'voice-error mix-problem', t(problem)));
+  const said = element('p', 'voice-error mix-problem');
   const actions = element('div', 'voice-actions');
   const preview = element('button', 'btn btn-secondary mix-preview', t('voices.preview'));
-  preview.addEventListener('click', () => handlers.onPreviewMix(draft));
-  if (draftProblem({ ...draft, name: draft.name || '-' }, kokoroVoices)) preview.setAttribute('disabled', '');
+  preview.addEventListener('click', () => handlers.onPreviewMix({ ...current }));
   const save = element('button', 'btn btn-neutral mix-save', t('voices.mix.save'));
-  if (problem) save.setAttribute('disabled', '');
-  save.addEventListener('click', () => handlers.onSave(draft));
+  save.addEventListener('click', () => handlers.onSave({ ...current }));
   const cancel = element('button', 'btn btn-secondary mix-cancel', t('voices.cancel'));
   cancel.addEventListener('click', () => handlers.onCancel());
   actions.append(preview, save, cancel);
@@ -189,5 +213,18 @@ export function renderMixer(host, { draft, kokoroVoices, nameOf }, handlers) {
 
   const form = element('div', 'mix-form');
   form.append(...parts);
+  // what keeps the draft from being kept, said above the buttons; Preview needs only the voices, not a name
+  function refresh() {
+    const problem = draftProblem(current, kokoroVoices);
+    save.toggleAttribute('disabled', Boolean(problem));
+    preview.toggleAttribute('disabled', Boolean(draftProblem({ ...current, name: current.name || '-' }, kokoroVoices)));
+    if (problem) {
+      said.textContent = t(problem);
+      if (!said.isConnected) actions.before(said);
+    } else {
+      said.remove();
+    }
+  }
+  refresh();
   host.replaceChildren(element('h2', 'option-group', t('voices.mix.title')), form);
 }
