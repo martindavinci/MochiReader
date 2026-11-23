@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0] - 2026-11-23
+
+### Added
+
+- Kokoro voices: more natural voices that read without internet, word by word, in American and British English, Italian, Spanish, French, Brazilian Portuguese and Hindi. The first one also downloads their model, 92 MB, shared by all of them; each voice after it is about half a megabyte.
+- Your voices: in the voice manager, mix two or three Kokoro voices with a weight each, choose the language it reads, hear it, and save it with a name. It is listed with the other voices of its language.
+
 ## [0.5.0] - 2026-11-14
 
 ### Added
