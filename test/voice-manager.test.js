@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { parseHTML } from 'linkedom';
 import { setLang } from '../app/core/i18n.js';
 import en from '../app/lang/en.js';
-import { progressText, renderVoiceManager } from '../app/ui/voice-manager.js';
+import { PREVIEW_TEXT, progressText, renderVoiceManager, voiceIdOf } from '../app/ui/voice-manager.js';
 
 const NAMES = { it: 'Italian', de: 'German', en: 'English', ja: 'Japanese' };
 const voice = (id, lang, extra = {}) => ({
@@ -152,4 +152,46 @@ for (const [state, key] of [['missing', 'voices.noEngine'], ['broken', 'voices.e
 test('a download under way says its share', () => {
   assert.equal(progressText({ phase: 'queued' }), en['voices.waiting']);
   assert.equal(progressText({ phase: 'voice', received: 1, total: 2 }), '50%');
+});
+
+const MODEL_BYTES = 92_361_116;
+const sara = (extra = {}) => voice('if_sara', 'it-IT', {
+  name: 'Sara', quality: 'kokoro', engine: 'kokoro', grade: 'C', license: 'Apache-2.0', bytes: 522_240 + MODEL_BYTES, ...extra,
+});
+const kokoroCatalog = (voices, installed = false) => ({
+  ...catalog({ voices }), kokoroModel: { bytes: MODEL_BYTES, installed },
+});
+
+test('a kokoro voice says its engine and grade, and what downloading it costs before it can be heard', () => {
+  const { row } = draw({ catalog: kokoroCatalog([sara()]), languages: ['it'] });
+  const line = row('if_sara');
+  assert.match(line.textContent, new RegExp(en['voices.quality.kokoro']));
+  assert.match(line.textContent, new RegExp(en['voices.grade'].replace('{grade}', 'C')));
+  assert.equal(lastButton(line).textContent, en['voices.download']);
+  const preview = line.querySelector('.voice-preview');
+  assert.equal(preview.hasAttribute('disabled'), true);
+  assert.equal(preview.getAttribute('title'), en['voices.kokoroPreviewAfter'].replace('{size}', '93'));
+});
+
+test('an installed kokoro voice can be heard', () => {
+  const { row, calls } = draw({ catalog: kokoroCatalog([sara({ installed: true, bytes: 522_240 })], true), languages: ['it'] });
+  const preview = row('if_sara').querySelector('.voice-preview');
+  assert.equal(preview.hasAttribute('disabled'), false);
+  preview.click();
+  assert.equal(calls[0][0], 'onPreview');
+});
+
+test('the kokoro model is told once, with its size', () => {
+  const { host } = draw({ catalog: kokoroCatalog([sara(), sara({ id: 'im_nicola', name: 'Nicola' })]), languages: ['it'] });
+  const told = [...host.querySelectorAll('.voice-kokoro-model')];
+  assert.equal(told.length, 1);
+  assert.equal(told[0].textContent, en['voices.kokoroModel'].replace('{size}', '92'));
+  assert.equal(draw({}).host.querySelector('.voice-kokoro-model'), null, 'no Kokoro voice, nothing said');
+});
+
+test('the id of a voice carries its engine', () => {
+  assert.equal(voiceIdOf({ engine: 'kokoro', id: 'if_sara' }), 'kokoro:if_sara');
+  assert.equal(voiceIdOf({ engine: 'piper', id: 'x' }), 'piper:x');
+  assert.equal(voiceIdOf({ id: 'x' }), 'piper:x');
+  assert.ok(PREVIEW_TEXT.hi);
 });

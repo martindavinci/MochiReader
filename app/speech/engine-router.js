@@ -4,18 +4,23 @@ import { RATE_LEVELS } from './player.js';
 
 /**
  * One SpeechEngine in front of two: the voices of Windows go to WebSpeechEngine, the voices the app says itself
- * (`piper:…`, `edge:…`) to AudioEngine. Any id without one of these prefixes is a voice of Windows, as saved before 0.4.0.
+ * (`piper:…`, `kokoro:…`, `edge:…`) to AudioEngine. Any id without one of these prefixes is a voice of Windows, as saved before 0.4.0.
  */
 
 export const PIPER_PREFIX = 'piper:';
 export const EDGE_PREFIX = 'edge:';
+export const KOKORO_PREFIX = 'kokoro:';
 
-/** @returns {'piper'|'edge'|'sapi'} */
+/** @returns {'piper'|'kokoro'|'edge'|'sapi'} */
 export function engineOf(voiceId) {
   if (typeof voiceId === 'string' && voiceId.startsWith(PIPER_PREFIX)) return 'piper';
+  if (typeof voiceId === 'string' && voiceId.startsWith(KOKORO_PREFIX)) return 'kokoro';
   if (typeof voiceId === 'string' && voiceId.startsWith(EDGE_PREFIX)) return 'edge';
   return 'sapi';
 }
+
+/** A voice downloaded to this PC (Piper, Kokoro, or a mix of Kokoro voices): it may be gone since it was chosen. */
+export const isDownloaded = (voiceId) => ['piper', 'kokoro'].includes(engineOf(voiceId));
 
 /** Whether a new speed or volume reaches the sentence being said, instead of saying it again. */
 export const isLive = (voiceId) => engineOf(voiceId) !== 'sapi';

@@ -904,3 +904,11 @@ test('with words off only the sentence is tinted', async () => {
   assert.ok(CSS.highlights.get(HIGHLIGHT_NAME));
   assert.equal(CSS.highlights.get(WORD_HIGHLIGHT_NAME), undefined);
 });
+
+test('a deleted kokoro voice falls back to windows as a piper one does', async () => {
+  const { session, engine, messages } = setup({ state: { voices: { it: 'kokoro:if_sara' } } });
+  await session.start(fakeTab(TWO).entry);
+  await flush();
+  assert.equal(engine.calls[0].voiceId, 'elsa');
+  assert.deepEqual(messages, [en['speech.offlineFallback']]);
+});

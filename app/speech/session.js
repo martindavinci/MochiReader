@@ -2,7 +2,7 @@
 // Loads with the first reading, not with the app: this module brings all of app/speech with it.
 import { getLang, t } from '../core/i18n.js';
 import { AudioEngine } from './engine-audio.js';
-import { engineOf, listVoices, RoutedEngine } from './engine-router.js';
+import { engineOf, isDownloaded, listVoices, RoutedEngine } from './engine-router.js';
 import { closestVoice, languageName, WebSpeechEngine } from './engine-web.js';
 import { extractBlocks } from './extract.js';
 import { createHighlighter, HIGHLIGHT_NAME, WORD_HIGHLIGHT_NAME } from './highlight.js';
@@ -375,7 +375,7 @@ class SpeechSession {
     }
     const wanted = [this.#tabVoices.get(this.#entry), this.#savedVoices[language]];
     const known = wanted.find((id) => ofLanguage.some((voice) => voice.id === id));
-    const lost = !known && wanted.find((id) => engineOf(id) === 'piper');
+    const lost = !known && wanted.find((id) => isDownloaded(id));
     const windows = ofLanguage.filter((voice) => engineOf(voice.id) === 'sapi');
     this.#lang = lang;
     // A downloaded voice that is gone hands over to Windows, which every PC has, rather than to another download.
@@ -395,7 +395,7 @@ class SpeechSession {
 
   /**
    * A voice of the app failed on a sentence: the reading goes on with an offline voice of the language, for the rest
-   * of this reading. After Edge that is a downloaded voice if there is one, after Piper a voice of Windows.
+   * of this reading. After Edge that is a downloaded voice if there is one, after Piper or Kokoro a voice of Windows.
    * @returns {boolean} Whether another voice took over.
    */
   #liveFailed({ voiceId }, error = null) {
@@ -404,8 +404,9 @@ class SpeechSession {
     if (failed === 'sapi') return false;
     const language = parseLangTag(this.#lang).language;
     const ofLanguage = this.#voices.filter((voice) => parseLangTag(voice.lang).language === language);
-    const offline = (engine) => ofLanguage.filter((voice) => engineOf(voice.id) === engine);
-    const choices = failed === 'edge' ? [offline('piper'), offline('sapi')] : [offline('sapi')];
+    const offline = (kept) => ofLanguage.filter((voice) => kept(voice.id));
+    const windows = offline((id) => engineOf(id) === 'sapi');
+    const choices = failed === 'edge' ? [offline(isDownloaded), windows] : [windows];
     const saved = this.#savedVoices[language];
     const replacement = choices
       .map((voices) => voices.find((voice) => voice.id === saved) ?? closestVoice(voices, this.#lang))

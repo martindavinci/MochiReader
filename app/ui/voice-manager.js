@@ -2,6 +2,7 @@
 import { t } from '../core/i18n.js';
 import { icon, named } from './icons.js';
 import { elementIn, panelHead } from './panel-parts.js';
+import { KOKORO_PREFIX, PIPER_PREFIX } from '../speech/engine-router.js';
 
 /** The phases of a download still under way, as `tts-download` names them. */
 const BUSY = new Set(['queued', 'voice']);
@@ -16,7 +17,11 @@ export const PREVIEW_TEXT = {
   es: 'Hola, así sueno cuando te leo un texto.',
   fr: 'Bonjour, voici ma voix quand je vous fais la lecture.',
   pt: 'Olá, é assim que eu soo quando leio para você.',
+  hi: 'नमस्ते, जब मैं आपको पढ़कर सुनाती हूँ तो मेरी आवाज़ ऐसी लगती है।',
 };
+
+/** The id the reader speaks with, from a voice of the catalog: its engine's prefix and its id. */
+export const voiceIdOf = (voice) => `${voice.engine === 'kokoro' ? KOKORO_PREFIX : PIPER_PREFIX}${voice.id}`;
 
 const languageOf = (tag) => tag.split('-')[0].toLowerCase();
 const megabytes = (bytes) => Math.max(1, Math.round(bytes / BYTES_PER_MB));
@@ -67,6 +72,11 @@ export function renderVoiceManager(host, view, handlers) {
     const playing = view.previewing === voice.id;
     const preview = element('button', `btn btn-secondary voice-preview${playing ? ' is-playing' : ''}`);
     named(preview, t(playing ? 'voices.stopPreview' : 'voices.preview'));
+    // A Kokoro voice has no published sample: it is heard once it is on this PC.
+    if (voice.engine === 'kokoro' && !voice.installed) {
+      preview.setAttribute('disabled', '');
+      preview.setAttribute('title', t('voices.kokoroPreviewAfter', { size: megabytes(voice.bytes) }));
+    }
     preview.setAttribute('aria-pressed', String(playing));
     preview.append(icon(host.ownerDocument, playing ? 'stop' : 'play', 12));
     preview.addEventListener('click', () => handlers.onPreview(voice));
@@ -96,7 +106,8 @@ export function renderVoiceManager(host, view, handlers) {
     const item = element('li', 'voice-row');
     item.dataset.voice = voice.id;
     const words = element('div', 'voice-words');
-    const quality = t(`voices.quality.${voice.quality}`);
+    const quality = [t(`voices.quality.${voice.quality}`), voice.grade ? t('voices.grade', { grade: voice.grade }) : null]
+      .filter(Boolean).join(' · ');
     const license = element('button', 'link-button voice-license', t('voices.license', { license: voice.license }));
     license.addEventListener('click', () => handlers.onCard(voice.card));
     const meta = element('p', 'voice-meta');
@@ -139,6 +150,9 @@ export function renderVoiceManager(host, view, handlers) {
     element('p', 'panel-message', t('voices.intro')),
     element('p', 'voice-used', t('voices.used', { size: megabytes(catalog.used) })),
   );
+  if (catalog.kokoroModel && catalog.voices.some((voice) => voice.engine === 'kokoro')) {
+    summary.append(element('p', 'voice-kokoro-model', t('voices.kokoroModel', { size: megabytes(catalog.kokoroModel.bytes) })));
+  }
   if (!engineReady) {
     const why = catalog.engine.state === 'missing' ? 'voices.noEngine' : 'voices.engineBroken';
     summary.append(element('p', 'voice-engine', t(why)));

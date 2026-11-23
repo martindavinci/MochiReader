@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { AUDIO_RATES } from '../app/speech/engine-audio.js';
-import { engineOf, RoutedEngine } from '../app/speech/engine-router.js';
+import { engineOf, isDownloaded, RoutedEngine } from '../app/speech/engine-router.js';
 import { RATE_LEVELS } from '../app/speech/player.js';
 
 function fake(name, voices = []) {
@@ -106,4 +106,19 @@ test('a voice of the app that fails tells why to whoever takes over', async () =
   };
   assert.equal(await engine.speak('Uno.', { voiceId: 'piper:paola' }), 'stopped');
   assert.deepEqual(told, [['piper:paola', { kind: 'engine', message: 'ONNX Runtime did not load' }]]);
+});
+
+test('kokoro voices are voices of the app, downloaded like piper ones', async () => {
+  assert.equal(engineOf('kokoro:if_sara'), 'kokoro');
+  assert.equal(engineOf('kokoro:mix-0a1b2c3d'), 'kokoro');
+  assert.equal(isDownloaded('kokoro:if_sara'), true);
+  assert.equal(isDownloaded('piper:x'), true);
+  assert.equal(isDownloaded('edge:x'), false);
+  assert.equal(isDownloaded('Microsoft Elsa'), false);
+  const web = fake('web');
+  const audio = fake('audio');
+  const engine = new RoutedEngine({ web, audio });
+  assert.equal(engine.live('kokoro:if_sara'), true);
+  assert.equal(engine.rates('kokoro:if_sara'), AUDIO_RATES);
+  assert.equal(await engine.speak('Uno.', { voiceId: 'kokoro:if_sara' }), 'audio end');
 });

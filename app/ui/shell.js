@@ -53,6 +53,9 @@ const PANEL_TABS = 'tabs';
 const PANEL_SHORTCUTS = 'shortcuts';
 const PANEL_VOICES = 'voices';
 const PIPER_PREFIX = 'piper:';
+const KOKORO_PREFIX = 'kokoro:';
+/** A voice downloaded to this PC, by its id as the reader speaks with it. */
+const downloadedId = (id) => typeof id === 'string' && (id.startsWith(PIPER_PREFIX) || id.startsWith(KOKORO_PREFIX));
 const DOWNLOAD_EVENT = 'tts-download';
 const DOWNLOAD_OVER = new Set(['done', 'error', 'canceled']);
 const GAP_PX = 6;
@@ -1072,7 +1075,7 @@ async function drawVoiceOptions() {
 async function listenToSound(groups) {
   if (speech?.reading()) return;
   const group = groups.find(({ lang }) => lang === getLang().split('-')[0]);
-  const downloaded = (group?.voices ?? []).filter(({ id }) => id.startsWith(PIPER_PREFIX));
+  const downloaded = (group?.voices ?? []).filter(({ id }) => downloadedId(id));
   const voice = downloaded.find(({ id }) => id === group.selected) ?? downloaded[0];
   if (!voice) {
     showToast(t('voices.listenNone'), { glyph: 'info' });
@@ -1099,8 +1102,8 @@ async function drawVoicesPanel() {
   ]);
   if (panels.current() !== PANEL_VOICES) return;
   const inUse = new Set(Object.values(saved ?? {})
-    .filter((id) => typeof id === 'string' && id.startsWith(PIPER_PREFIX))
-    .map((id) => id.slice(PIPER_PREFIX.length)));
+    .filter(downloadedId)
+    .map((id) => id.slice(id.indexOf(':') + 1)));
   const refocus = keepFocus(panelHost);
   renderVoiceManager(panelHost, {
     catalog,
@@ -1153,7 +1156,7 @@ async function previewVoice(voice) {
   };
   if (panels.current() === PANEL_VOICES) drawVoicesPanel();
   if (voice.installed) {
-    const [{ AudioEngine }, { PREVIEW_TEXT }] = await Promise.all([
+    const [{ AudioEngine }, { PREVIEW_TEXT, voiceIdOf }] = await Promise.all([
       import('../speech/engine-audio.js'),
       import('./voice-manager.js'),
     ]);
@@ -1161,7 +1164,7 @@ async function previewVoice(voice) {
     const engine = new AudioEngine({ invoke });
     const language = voice.lang.split('-')[0];
     playing.stop = () => engine.stop();
-    engine.speak(PREVIEW_TEXT[language] ?? PREVIEW_TEXT.en, { voiceId: `${PIPER_PREFIX}${voice.id}` }).finally(over);
+    engine.speak(PREVIEW_TEXT[language] ?? PREVIEW_TEXT.en, { voiceId: voiceIdOf(voice) }).finally(over);
     return;
   }
   try {
@@ -1193,7 +1196,8 @@ async function onDownload({ voiceId, phase, received, total, error }) {
   if (phase === 'done') {
     const catalog = await invoke('tts_catalog');
     const voice = catalog.voices.find(({ id }) => id === voiceId);
-    if (voice) await (await loadSpeech()).voiceInstalled(voice.lang.split('-')[0], `${PIPER_PREFIX}${voiceId}`);
+    const { voiceIdOf } = await import('./voice-manager.js');
+    if (voice) await (await loadSpeech()).voiceInstalled(voice.lang.split('-')[0], voiceIdOf(voice));
   }
   if (panels.current() === PANEL_VOICES && (DOWNLOAD_OVER.has(phase) || !panelHost.querySelector(`[data-voice="${voiceId}"] progress`))) {
     drawVoicesPanel();
