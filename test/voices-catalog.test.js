@@ -52,3 +52,44 @@ test('ids are unique', () => {
 test('ids are safe as folder names', () => {
   for (const voice of catalog.voices) assert.match(voice.id, /^[A-Za-z0-9_-]+$/);
 });
+
+const KOKORO = /^https:\/\/huggingface\.co\/onnx-community\/Kokoro-82M-v1\.0-ONNX\/(resolve|blob)\/[0-9a-f]{40}\//;
+const KOKORO_LANGS = new Set(['en-US', 'en-GB', 'it-IT', 'es-ES', 'fr-FR', 'pt-BR', 'hi-IN']);
+
+test('kokoro: one q8 model, pinned, hashed', () => {
+  const k = catalog.kokoro;
+  assert.equal(k.license, 'Apache-2.0');
+  assert.match(k.card, KOKORO);
+  assert.match(k.model.url, KOKORO);
+  assert.ok(k.model.url.endsWith('/onnx/model_quantized.onnx'));
+  assert.equal(k.model.bytes, 92361116);
+  assert.match(k.model.sha256, SHA256);
+});
+
+test('kokoro: every voice pinned, 522240 bytes, in an offered language, graded C or better (or ungraded)', () => {
+  const ids = new Set();
+  for (const voice of catalog.kokoro.voices) {
+    assert.match(voice.file.url, KOKORO, voice.id);
+    assert.equal(voice.file.bytes, 522240, voice.id);
+    assert.match(voice.file.sha256, SHA256, voice.id);
+    assert.ok(KOKORO_LANGS.has(voice.lang), voice.id);
+    // Spanish and Brazilian Portuguese voices have no grade from their author
+    if (['es-ES', 'pt-BR'].includes(voice.lang)) assert.equal(voice.grade, '', voice.id);
+    else assert.match(voice.grade, /^(A|B|C)[+-]?$/, voice.id);
+    assert.notEqual(voice.grade, 'C-', voice.id);
+    assert.ok(!ids.has(voice.id), voice.id);
+    ids.add(voice.id);
+  }
+  for (const tried of ['if_sara', 'im_nicola', 'af_heart', 'af_bella', 'bf_emma']) assert.ok(ids.has(tried), tried);
+});
+
+test('kokoro: the vocabulary maps symbols to ids', () => {
+  const vocab = catalog.kokoro.vocab;
+  assert.ok(Object.keys(vocab).length >= 100);
+  for (const [symbol, id] of Object.entries(vocab)) {
+    assert.equal([...symbol].length, 1, symbol);
+    assert.ok(Number.isInteger(id) && id >= 0, symbol);
+  }
+  // the padding the model wants around the tokens
+  assert.equal(vocab.$, 0);
+});

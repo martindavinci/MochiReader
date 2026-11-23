@@ -6,7 +6,7 @@
 // Usage: node tools/piper-catalog.mjs [--write] [--commit <40 hex>]
 // Without --commit it takes the current commit of the repository.
 import { createHash } from 'node:crypto';
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isEntryPoint } from './is-entry-point.mjs';
@@ -103,7 +103,9 @@ async function main(args) {
     voices.push(await voiceEntry(commit, voice));
     console.log(`${voice.id}: ok`);
   }
-  const catalog = { version: 1, unavailable: UNAVAILABLE, voices };
+  // The Kokoro section is tools/kokoro-catalog.mjs's: kept as it is.
+  const { kokoro } = JSON.parse(readFileSync(CATALOG, 'utf8'));
+  const catalog = { version: 1, unavailable: UNAVAILABLE, voices, ...(kokoro ? { kokoro } : {}) };
   const text = `${JSON.stringify(catalog, null, 2)}\n`;
   if (args.includes('--write')) writeFileSync(CATALOG, text);
   else console.log(text);
