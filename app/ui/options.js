@@ -3,14 +3,12 @@ import { t } from '../core/i18n.js';
 import { mascot } from './home.js';
 import { named } from './icons.js';
 import { panelHead } from './panel-parts.js';
-import { shortVoiceName } from './voice-name.js';
 
 const THEME_ATTRIBUTE = 'data-theme';
 const TEXT_SIZE_VARIABLE = '--text-size';
 const SYSTEM = 'system';
 const VOICE_OPTIONS_CLASS = 'voice-options';
 /** The value of the last entry of each list of voices, which opens the voice manager instead. */
-const MORE_VOICES = '#more';
 const ABOUT_CLASS = 'about';
 const ABOUT_MASCOT_PX = 32;
 const FOCUS_KEY = 'data-key';
@@ -134,64 +132,15 @@ export function interfaceLang({ language }, systemLang) {
 }
 
 /**
- * The voices are asked for separately, and they come when the rest of the panel is on screen.
+ * The voices' part of the Options panel, drawn once the rest is on screen: the button that plays the sound chosen and
+ * the way to the Voices panel, where the voice of each language is chosen.
  * @param {HTMLElement} host The panel, with its options already drawn.
- * @param {{lang: string, name: string, voices: {id: string, name: string, group?: 'local'|'online'}[], selected: string}[]} groups
- *   The voices of each language: those of this PC first, then the online ones.
- * @param {(lang: string, voiceId: string) => void} onVoice
- * @param {{onManage?: () => void, onListen?: () => void}} [more] `onListen` plays a sentence in the sound chosen.
+ * @param {{onManage?: () => void, onListen?: () => void}} handlers
  */
-export function renderVoiceOptions(host, groups, onVoice, { onManage, onListen } = {}) {
+export function renderVoiceOptions(host, { onManage, onListen } = {}) {
   const document = host.ownerDocument;
-  const optionOf = (voice, selected) => {
-    const option = document.createElement('option');
-    option.setAttribute('value', voice.id);
-    option.setAttribute('title', voice.name);
-    if (voice.id === selected) option.setAttribute('selected', '');
-    option.textContent = voice.group === 'online' ? `${shortVoiceName(voice.name)} (${t('edge.online')})` : shortVoiceName(voice.name);
-    return option;
-  };
-  const rows = groups.map(({ lang, name, voices, selected }) => {
-    const select = document.createElement('select');
-    select.setAttribute('name', `voice-${lang}`);
-    const local = voices.filter((voice) => voice.group !== 'online');
-    const online = voices.filter((voice) => voice.group === 'online');
-    if (online.length === 0) {
-      select.append(...local.map((voice) => optionOf(voice, selected)));
-    } else {
-      for (const [label, list] of [[t('voices.onThisPc'), local], [t('voices.online'), online]]) {
-        if (list.length === 0) continue;
-        const group = document.createElement('optgroup');
-        group.setAttribute('label', label);
-        group.append(...list.map((voice) => optionOf(voice, selected)));
-        select.append(group);
-      }
-    }
-    if (onManage) {
-      const more = document.createElement('option');
-      more.setAttribute('value', MORE_VOICES);
-      more.textContent = t('voices.more');
-      select.append(more);
-    }
-    let current = voices.some((voice) => voice.id === selected) ? selected : [...local, ...online][0]?.id;
-    select.addEventListener('change', () => {
-      if (select.value !== MORE_VOICES) {
-        current = select.value;
-        onVoice(lang, current);
-        return;
-      }
-      // The entry opens the voice manager and is never the voice of the language.
-      const back = [...select.querySelectorAll('option')].find((option) => option.value === current);
-      if (back) back.selected = true;
-      onManage();
-    });
-    const caption = document.createElement('span');
-    caption.textContent = t('options.voice', { lang: name });
-    const row = document.createElement('label');
-    row.className = 'option';
-    row.append(caption, select);
-    return row;
-  });
+  // The voice of each language is chosen in the Voices panel; here, the sound of the voices and the way there.
+  const rows = [];
   const action = (className, text, run) => {
     const button = document.createElement('button');
     button.className = `btn btn-secondary ${className}`;

@@ -248,6 +248,8 @@ class SpeechSession {
   /** The default voice of a language was chosen. A tab that chose its own keeps it. */
   defaultVoiceChanged(language, voiceId) {
     this.#savedVoices[language] = voiceId;
+    // a voice cleared (the language chooses by itself again) leaves the reading on the voice it has
+    if (!voiceId) return;
     if (!this.active() || parseLangTag(this.#lang).language !== language || this.#tabVoices.has(this.#entry)) return;
     this.#useVoice(voiceId);
   }

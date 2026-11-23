@@ -462,7 +462,8 @@ function loadSpeech() {
       nameOf: ({ path }) => fileName(path),
       showMessage: showToast,
       showVoiceHelp,
-      showVoices: () => showPanel(PANEL_VOICES),
+      showVoices: (lang) => openVoicesPanel(lang),
+      everywhere: () => voicesEverywhere,
       sourceMode: () => options.sourceMode,
       showEntry: (entry) => {
         const tab = tabs.all().find(({ id }) => entries.get(id) === entry);
@@ -1062,8 +1063,8 @@ async function drawVoiceOptions() {
   if (!panelHost.querySelector('.voice-options')) return;
   if (panels.current() !== PANEL_OPTIONS) return;
   const groups = voiceGroups(voices, saved).map((group) => ({ ...group, name: languageName(group.lang) }));
-  renderVoiceOptions(panelHost, groups, chooseDefaultVoice, {
-    onManage: () => showPanel(PANEL_VOICES),
+  renderVoiceOptions(panelHost, {
+    onManage: () => openVoicesPanel(),
     onListen: () => listenToSound(groups),
   });
 }
@@ -1095,16 +1096,45 @@ function voiceLanguages() {
 
 /** The voice being made in the mixer, while its form is open. */
 let mixDraft = null;
+/** The voices ticked "also in other texts" (the option `voicesEverywhere`): the reading bar offers them for any text. */
+let voicesEverywhere = [];
+/** What the Voices panel shows: a language, '*' (all of them) or 'mine' (the reader's own voices); null at first. */
+let voicesSelected = null;
+
+const baseLanguage = (tag) => String(tag ?? '').split('-')[0].toLowerCase();
+
+/** The Voices panel, on a language: the text's when asked from the reading bar, else the one being read or the interface's. */
+function openVoicesPanel(lang = null) {
+  voicesSelected = baseLanguage(lang ?? activeEntry()?.reader?.lang ?? getLang());
+  showPanel(PANEL_VOICES);
+}
 
 async function drawVoicesPanel() {
-  const [{ languageName }, { renderVoiceManager }, mixer, catalog, { voices: saved }, mixes] = await Promise.all([
+  const [{ languageName, WebSpeechEngine }, { renderVoiceManager, voiceIdOf }, mixer, { listVoices, engineOf }, { saveTick }] = await Promise.all([
     import('../speech/engine-web.js'),
     import('./voice-manager.js'),
     import('./voice-mixer.js'),
+    import('../speech/engine-router.js'),
+    import('../speech/voice-lists.js'),
+  ]);
+  const [catalog, { voices: saved }, mixes, voices] = await Promise.all([
     invoke('tts_catalog'),
     invoke('state_get'),
     invoke('tts_mixes').catch(() => []),
+    listVoices({ web: new WebSpeechEngine(), invoke }).catch(() => []),
   ]);
+  // every voice that can read now, as the reading bar knows them, with what it is
+  const kindOf = (id) => {
+    const engine = engineOf(id);
+    if (engine === 'sapi') return 'windows';
+    if (engine === 'edge') return 'online';
+    return id.startsWith(`${KOKORO_PREFIX}mix-`) ? 'mix' : engine;
+  };
+  const local = voices.map(({ id, name, lang }) => ({ id, name, lang, engine: kindOf(id) }));
+  const untick = async (id) => {
+    if (!voicesEverywhere.includes(id)) return;
+    voicesEverywhere = await saveTick(invoke, { voiceId: id, voiceLang: '', on: false, everywhere: voicesEverywhere, saved: {} });
+  };
   const kokoroVoices = catalog.voices.filter((voice) => voice.engine === 'kokoro' && voice.installed);
   // a draft keeps only the voices still on this PC (none to mix: no draft)
   if (mixDraft) mixDraft = mixer.repairDraft(mixDraft, kokoroVoices);
@@ -1126,7 +1156,31 @@ async function drawVoicesPanel() {
     previewing: preview?.id ?? null,
     mixes,
     draft: mixDraft,
+    local,
+    defaults: saved ?? {},
+    everywhere: voicesEverywhere,
+    selected: voicesSelected ?? baseLanguage(activeEntry()?.reader?.lang ?? getLang()),
   }, {
+    onSelect: (key) => {
+      voicesSelected = key;
+      drawVoicesPanel();
+    },
+    onDefault: (lang, voiceId) => {
+      chooseDefaultVoice(lang, voiceId);
+      drawVoicesPanel();
+    },
+    onEverywhere: async (voiceId, on) => {
+      const voice = local.find(({ id }) => id === voiceId);
+      const before = saved ?? {};
+      voicesEverywhere = await saveTick(invoke, { voiceId, voiceLang: voice?.lang ?? '', on, everywhere: voicesEverywhere, saved: before });
+      // the languages that had chosen it choose by themselves again
+      if (!on) {
+        for (const [lang, id] of Object.entries(before)) {
+          if (id === voiceId && lang !== baseLanguage(voice?.lang)) speech?.defaultVoiceChanged(lang, '');
+        }
+      }
+      drawVoicesPanel();
+    },
     onCreate: () => redrawWith(mixer.newDraft(kokoroVoices)),
     onEdit: (mix) => redrawWith(mixer.draftOf(mix)),
     onDuplicate: (mix) => redrawWith(mixer.duplicateOf(mix)),
@@ -1134,6 +1188,7 @@ async function drawVoicesPanel() {
     onCancel: () => redrawWith(null),
     onDeleteMix: async (id) => {
       await invoke('tts_mix_delete', { id }).catch(() => {});
+      await untick(`${KOKORO_PREFIX}mix-${id}`);
       drawVoicesPanel();
     },
     onSave: async (draft) => {
@@ -1154,6 +1209,8 @@ async function drawVoicesPanel() {
     onCancel: (voiceId) => invoke('tts_cancel', { voiceId }),
     onDelete: async (voiceId) => {
       await invoke('tts_delete', { voiceId }).catch(() => {});
+      const deleted = catalog.voices.find(({ id }) => id === voiceId);
+      if (deleted) await untick(voiceIdOf(deleted));
       downloads.delete(voiceId);
       drawVoicesPanel();
     },
@@ -1538,6 +1595,7 @@ async function boot() {
     listen('open-paths', ({ payload }) => openPaths(payload)),
     listen('shell-command', ({ payload }) => onShellCommand(payload)),
   ]);
+  voicesEverywhere = Array.isArray(saved?.voicesEverywhere) ? saved.voicesEverywhere : [];
   await useLanguage(readOptions(saved));
   followSystemTheme();
   paintCaption();

@@ -172,28 +172,23 @@ test('a change reports the value as the app stores it', () => {
   assert.deepEqual(changes, [['theme', 'dark'], ['textSize', 22]]);
 });
 
-const GROUPS = [
-  { lang: 'en', name: 'English', voices: [{ id: 'zira', name: 'Zira' }], selected: 'zira' },
-  { lang: 'it', name: 'Italian', voices: [{ id: 'elsa', name: 'Elsa' }, { id: 'cosimo', name: 'Cosimo' }], selected: 'cosimo' },
-];
-
-test('each language with voices gets a list of them, with the last used selected', () => {
+test('the voices part keeps the sound and links to the voices panel', () => {
   setLang('en');
-  const { host, field } = draw();
-  renderVoiceOptions(host, GROUPS, () => {});
-  assert.deepEqual(values(field('voice-it')), ['elsa', 'cosimo']);
-  assert.equal(selected(field('voice-it')), 'cosimo');
-  assert.equal(selected(field('voice-en')), 'zira');
-  const label = field('voice-it').closest('label').querySelector('span').textContent;
-  assert.ok(label.includes('Italian'), label);
+  const { host } = draw();
+  let managed = 0;
+  renderVoiceOptions(host, { onManage: () => { managed += 1; } });
+  assert.equal(host.querySelector('select[name^="voice-"]'), null, 'the voice of each language is chosen in the Voices panel');
+  const manage = host.querySelector('.voice-manage');
+  assert.equal(manage.textContent, en['voices.manage']);
+  manage.click();
+  assert.equal(managed, 1);
 });
 
 test('the voices come before the notices at the bottom of the panel, and drawing them again replaces them', () => {
   const { host } = draw();
-  renderVoiceOptions(host, GROUPS, () => {});
-  renderVoiceOptions(host, GROUPS, () => {});
-  assert.equal(host.querySelectorAll('select[name="voice-it"]').length, 1);
-  assert.ok(host.querySelector('.about').previousElementSibling.closest('.panel-body') === host.querySelector('.voice-options').parentElement);
+  renderVoiceOptions(host, { onManage: () => {} });
+  renderVoiceOptions(host, { onManage: () => {} });
+  assert.equal(host.querySelectorAll('.voice-manage').length, 1);
   const parts = [...host.querySelector('.panel-body').children];
   assert.ok(parts.indexOf(host.querySelector('.voice-options')) < parts.indexOf(host.querySelector('.about')));
 });
@@ -211,73 +206,11 @@ test('the voices end with a button that plays the sound chosen, when asked for',
   setLang('en');
   const { host, click } = draw();
   let heard = 0;
-  renderVoiceOptions(host, GROUPS, () => {}, { onManage: () => {}, onListen: () => { heard += 1; } });
+  renderVoiceOptions(host, { onManage: () => {}, onListen: () => { heard += 1; } });
   const listen = host.querySelector('.voice-listen');
   assert.equal(listen.textContent, en['voices.listen']);
   click(listen);
   assert.equal(heard, 1);
-  renderVoiceOptions(host, GROUPS, () => {});
+  renderVoiceOptions(host, {});
   assert.equal(host.querySelector('.voice-listen'), null);
-});
-
-test('choosing a voice says for which language', () => {
-  const { host, choose } = draw();
-  const chosen = [];
-  renderVoiceOptions(host, GROUPS, (lang, id) => chosen.push([lang, id]));
-  choose('voice-it', 'elsa');
-  assert.deepEqual(chosen, [['it', 'elsa']]);
-});
-
-test('voices are grouped on this pc and online, with a way to manage them', () => {
-  setLang('en');
-  const { host, field } = draw();
-  let managed = 0;
-  const groups = [{
-    lang: 'it',
-    name: 'Italian',
-    voices: [
-      { id: 'elsa', name: 'Elsa', group: 'local' },
-      { id: 'piper:it_IT-paola-medium', name: 'Paola', group: 'local' },
-      { id: 'edge:it-IT-ElsaNeural', name: 'Elsa Neural', group: 'online' },
-    ],
-    selected: 'piper:it_IT-paola-medium',
-  }];
-  renderVoiceOptions(host, groups, () => {}, {
-    onManage: () => {
-      managed += 1;
-    },
-  });
-  const labels = [...field('voice-it').querySelectorAll('optgroup')].map((group) => group.getAttribute('label'));
-  assert.deepEqual(labels, [en['voices.onThisPc'], en['voices.online']]);
-  assert.deepEqual(values(field('voice-it')), ['elsa', 'piper:it_IT-paola-medium', 'edge:it-IT-ElsaNeural', '#more']);
-  assert.ok(field('voice-it').querySelector('[value^="edge:"]').textContent.includes(en['edge.online']));
-  host.querySelector('.voice-manage').click();
-  assert.equal(managed, 1);
-});
-
-test('without online voices the list has no groups', () => {
-  const { host, field } = draw();
-  renderVoiceOptions(host, GROUPS, () => {});
-  assert.equal(field('voice-it').querySelectorAll('optgroup').length, 0);
-  assert.equal(host.querySelector('.voice-manage'), null);
-});
-
-test('the last entry of a list of voices opens the voice manager and chooses no voice', () => {
-  setLang('en');
-  const { host, field, choose } = draw();
-  const chosen = [];
-  let managed = 0;
-  renderVoiceOptions(host, GROUPS, (lang, id) => chosen.push([lang, id]), {
-    onManage: () => {
-      managed += 1;
-    },
-  });
-  const more = field('voice-it').querySelector('option:last-child');
-  assert.equal(more.textContent, en['voices.more']);
-  choose('voice-it', '#more');
-  assert.equal(managed, 1);
-  assert.equal(selected(field('voice-it')), 'cosimo');
-  assert.deepEqual(chosen, []);
-  choose('voice-it', 'elsa');
-  assert.deepEqual(chosen, [['it', 'elsa']]);
 });

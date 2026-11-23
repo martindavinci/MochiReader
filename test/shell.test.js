@@ -110,6 +110,8 @@ async function startShell(openDocument, {
     },
     state_get_options: () => state.options,
     tts_voices: () => appVoices,
+    tts_catalog: () => ({ engine: { state: 'missing' }, used: 0, unavailable: [], voices: [], kokoroModel: { bytes: 0, installed: false } }),
+    tts_mixes: () => [],
     tts_speak: (args) => {
       state.spoken.push(args);
     },
@@ -1661,18 +1663,42 @@ test('with no voice for the language, a panel says how to add one in Windows and
   assert.equal(shell.panel().hidden, true);
 });
 
-test('the options offer a voice for each language, the last used selected, and keep a new choice', async (t) => {
+/** The Voices panel, from the Options' button, on Italian (it opens on the language of the interface). */
+async function openVoicesPanel(shell) {
+  await shell.pressReady(',', { ctrl: true });
+  await shell.wait();
+  shell.panel().querySelector('.voice-manage').click();
+  await shell.wait();
+  await shell.wait();
+  shell.panel().querySelector('.voice-langs [data-lang="it"]').click();
+  await shell.wait();
+  await shell.wait();
+}
+
+test('the voices panel says which voice reads each language, the last used selected, and keeps a new choice', async (t) => {
   t.after(() => speechShellDown());
   const shell = await startReadingShell(undefined, { voices: { it: 'uri:cosimo' } });
-  await shell.pressReady(',', { ctrl: true });
-  const it = shell.panel().querySelector('select[name="voice-it"]');
+  await openVoicesPanel(shell);
+  assert.equal(shell.panel().querySelector('select[name^="voice-"]'), null, 'no more lists in the options');
+  const it = shell.panel().querySelector('.voice-default');
   assert.ok(it);
   assert.equal(it.querySelector('option[selected]').getAttribute('value'), 'uri:cosimo');
-  assert.ok(shell.panel().querySelector('select[name="voice-en"]'));
   it.querySelectorAll('option').forEach((option) => option.toggleAttribute('selected', option.getAttribute('value') === 'uri:elsa'));
   it.dispatchEvent(new shell.window.Event('change'));
   await shell.wait();
   assert.deepEqual(shell.state.voiceWrites, [{ lang: 'it', voiceId: 'uri:elsa' }]);
+});
+
+test('a voice ticked in the voices panel is kept as an option', async (t) => {
+  t.after(() => speechShellDown());
+  const shell = await startReadingShell(undefined, { voices: {} });
+  await openVoicesPanel(shell);
+  const box = shell.panel().querySelector('[data-voice="uri:elsa"] .voice-everywhere input');
+  assert.ok(box);
+  box.checked = true;
+  box.dispatchEvent(new shell.window.Event('change'));
+  await shell.wait();
+  assert.deepEqual(shell.state.optionWrites.at(-1), ['voicesEverywhere', ['uri:elsa']]);
 });
 
 test('the voice chosen in the options is the one the reading uses', async (t) => {

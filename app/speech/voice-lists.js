@@ -52,3 +52,21 @@ export function afterUntick(voiceId, voiceLang, everywhere, saved) {
       .map(([language]) => language),
   };
 }
+
+/**
+ * Saves a tick, or its removal and what follows from it: the languages that had chosen the voice choose by themselves
+ * again (an empty voice clears a language).
+ * @param {(command: string, args: object) => Promise<*>} invoke
+ * @returns {Promise<string[]>} the ticks now
+ */
+export async function saveTick(invoke, { voiceId, voiceLang, on, everywhere, saved }) {
+  if (on) {
+    const now = afterTick(voiceId, everywhere);
+    await invoke('state_set_option', { name: 'voicesEverywhere', value: now });
+    return now;
+  }
+  const { everywhere: now, clear } = afterUntick(voiceId, voiceLang, everywhere, saved);
+  await invoke('state_set_option', { name: 'voicesEverywhere', value: now });
+  for (const lang of clear) await invoke('state_set_voice', { lang, voiceId: '' });
+  return now;
+}

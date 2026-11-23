@@ -323,10 +323,16 @@ impl Store {
     }
 
     /// `lang` is a language without a region: the last voice chosen for it is the one it gets next.
+    /// The voice of a language; an empty id lets the language choose by itself again.
     pub fn set_voice(&self, lang: &str, voice_id: &str) {
-        self.state()
-            .voices
-            .insert(lang.to_string(), voice_id.to_string());
+        {
+            let mut state = self.state();
+            if voice_id.is_empty() {
+                state.voices.remove(lang);
+            } else {
+                state.voices.insert(lang.to_string(), voice_id.to_string());
+            }
+        }
         self.persist();
     }
 
@@ -856,5 +862,17 @@ mod tests {
         touch(&store, "C:\\x\\a.md");
         store.save_position("k", json!(1));
         assert_eq!(state_on_disk(dir.path()), store.snapshot());
+    }
+
+    #[test]
+    fn an_empty_voice_clears_the_language() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_in(dir.path());
+        store.set_voice("en", "piper:x");
+        store.set_voice("it", "elsa");
+        store.set_voice("en", "");
+        let voices = store.state().voices.clone();
+        assert!(!voices.contains_key("en"));
+        assert_eq!(voices.get("it").map(String::as_str), Some("elsa"));
     }
 }

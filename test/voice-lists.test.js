@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { afterTick, afterUntick, barVoices, usableVoice } from '../app/speech/voice-lists.js';
+import { afterTick, afterUntick, barVoices, saveTick, usableVoice } from '../app/speech/voice-lists.js';
 
 const ELSA = { id: 'elsa', name: 'Microsoft Elsa', lang: 'it-IT' };
 const SERENA = { id: 'piper:serena', name: 'Serena', lang: 'it-IT' };
@@ -46,4 +46,18 @@ test('unticking clears it where it was chosen for another language', () => {
 test('ticking adds once', () => {
   assert.deepEqual(afterTick('zira', ['zira']), ['zira']);
   assert.deepEqual(afterTick('zira', []), ['zira']);
+});
+
+test('a tick is saved, and unticking clears the languages that had chosen the voice', async () => {
+  const sent = [];
+  const invoke = async (command, args) => { sent.push([command, args]); };
+  const kept = await saveTick(invoke, { voiceId: 'piper:serena', voiceLang: 'it-IT', on: false, everywhere: ['piper:serena', 'zira'], saved: { it: 'piper:serena', en: 'piper:serena' } });
+  assert.deepEqual(kept, ['zira']);
+  assert.deepEqual(sent, [
+    ['state_set_option', { name: 'voicesEverywhere', value: ['zira'] }],
+    ['state_set_voice', { lang: 'en', voiceId: '' }],
+  ]);
+  sent.length = 0;
+  assert.deepEqual(await saveTick(invoke, { voiceId: 'zira', voiceLang: 'en-US', on: true, everywhere: [], saved: {} }), ['zira']);
+  assert.deepEqual(sent, [['state_set_option', { name: 'voicesEverywhere', value: ['zira'] }]]);
 });

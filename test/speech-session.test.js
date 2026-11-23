@@ -961,3 +961,13 @@ test('unticking during a reading keeps the voice being used', async () => {
   await flush();
   assert.deepEqual(engine.calls.map(({ voiceId }) => voiceId), [PAOLA.id, PAOLA.id]);
 });
+
+test('a voice cleared for the language being read leaves the reading on its voice', async () => {
+  const { session, engine } = setup({ voices: [ELSA, PAOLA, ZIRA], everywhere: () => [PAOLA.id], state: { voices: { en: PAOLA.id } } });
+  await session.start(fakeTab(ENGLISH, { lang: 'en' }).entry);
+  await flush();
+  session.defaultVoiceChanged('en', '');
+  engine.finish();
+  await flush();
+  assert.deepEqual(engine.calls.map(({ voiceId }) => voiceId), [PAOLA.id, PAOLA.id]);
+});
