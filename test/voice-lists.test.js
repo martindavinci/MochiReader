@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { afterTick, afterUntick, barVoices, saveTick, usableVoice } from '../app/speech/voice-lists.js';
+import { afterTick, afterUntick, barVoices, panelLanguage, saveTick, usableVoice } from '../app/speech/voice-lists.js';
 
 const ELSA = { id: 'elsa', name: 'Microsoft Elsa', lang: 'it-IT' };
 const SERENA = { id: 'piper:serena', name: 'Serena', lang: 'it-IT' };
@@ -60,4 +60,11 @@ test('a tick is saved, and unticking clears the languages that had chosen the vo
   sent.length = 0;
   assert.deepEqual(await saveTick(invoke, { voiceId: 'zira', voiceLang: 'en-US', on: true, everywhere: [], saved: {} }), ['zira']);
   assert.deepEqual(sent, [['state_set_option', { name: 'voicesEverywhere', value: ['zira'] }]]);
+});
+
+test('the panel opens on a language read from any tag, else on the one given after it', () => {
+  assert.equal(panelLanguage('en_US', 'it'), 'en');
+  assert.equal(panelLanguage('', 'it-IT'), 'it');
+  assert.equal(panelLanguage(null, 'it'), 'it');
+  assert.equal(panelLanguage('PT-br', 'it'), 'pt');
 });

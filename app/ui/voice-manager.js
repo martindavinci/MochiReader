@@ -60,9 +60,28 @@ const ERROR_KEYS = {
  * @param {{onDownload: (id: string) => void, onCancel: (id: string) => void, onDelete: (id: string) => void,
  *   onPreview: (voice: object) => void, onCard: (url: string) => void}} handlers
  */
+/** The phases after which a download is over: its row changes for good. */
+const DOWNLOAD_OVER = new Set(['done', 'error', 'canceled']);
+
+/**
+ * Whether a download's news needs the panel drawn again: when it is over, or when its row is on screen without its bar.
+ * A row not on screen (another language shown) needs nothing; a bar on screen moves by itself.
+ */
+export function downloadRedraw(phase, row) {
+  return DOWNLOAD_OVER.has(phase) || Boolean(row && !row.querySelector('progress'));
+}
+
 export function renderVoiceManager(host, view, handlers) {
   const element = elementIn(host);
-  const { catalog, progress, inUse, nameOf } = view;
+  const { catalog, progress, inUse } = view;
+  // a language whose name cannot be told (a tag no language has) is shown by its code
+  const nameOf = (language) => {
+    try {
+      return view.nameOf(language);
+    } catch {
+      return language;
+    }
+  };
   // The engine comes with the app: a copy built without it, or with it damaged, can only play the samples.
   const engineReady = catalog.engine.state === 'ready';
 
@@ -147,6 +166,7 @@ export function renderVoiceManager(host, view, handlers) {
     const label = element('label', 'voice-everywhere');
     const box = element('input');
     box.type = 'checkbox';
+    box.dataset.focus = `tick:${id}`;
     box.checked = everywhere.has(id);
     box.addEventListener('change', () => handlers.onEverywhere?.(id, box.checked));
     label.append(box, element('span', undefined, t('voices.everywhere')));
@@ -187,13 +207,12 @@ export function renderVoiceManager(host, view, handlers) {
     part.append(element(heading, heading === 'h2' ? 'option-group' : 'voice-language-name', nameOf(language)));
     const mine = onPc(language);
     const later = toDownload(language);
-    if (mine.length === 0 && later.length === 0) {
-      part.append(element('p', 'panel-message', t('voices.noneForLang')));
-      return part;
-    }
     const choices = [...mine, ...local.filter((voice) => languageOfVoice(voice) !== language && everywhere.has(voice.id))];
+    // a language with no voice of its own can still be read by a ticked voice of another one
+    if (mine.length === 0 && later.length === 0) part.append(element('p', 'panel-message', t('voices.noneForLang')));
     if (choices.length > 0) {
       const select = element('select', 'voice-default');
+      select.dataset.focus = `default:${language}`;
       const auto = element('option', undefined, t('voices.automatic'));
       auto.setAttribute('value', '');
       select.append(auto, ...choices.map((voice) => {
@@ -235,9 +254,11 @@ export function renderVoiceManager(host, view, handlers) {
   const rest = [...voiced]
     .filter((language) => !first.includes(language))
     .sort((one, other) => nameOf(one).localeCompare(nameOf(other)));
-  const firstShown = first.filter((language) => voiced.has(language) || language === view.selected);
-  const languages = [...firstShown, ...rest];
   const selected = view.selected ?? '*';
+  const firstShown = first.filter((language) => voiced.has(language) || language === selected);
+  // the language asked for is in the column even when nothing else names it (a text's language with no voice)
+  const asked = selected !== '*' && selected !== 'mine' && !firstShown.includes(selected) && !rest.includes(selected) ? [selected] : [];
+  const languages = [...asked, ...firstShown, ...rest];
 
   const nav = element('nav', 'voice-langs');
   nav.setAttribute('aria-label', t('voices.languages'));
@@ -250,6 +271,7 @@ export function renderVoiceManager(host, view, handlers) {
     const item = element('button', 'voice-lang');
     item.type = 'button';
     item.dataset.lang = key;
+    item.dataset.focus = `lang:${key}`;
     item.append(element('span', 'voice-lang-name', name));
     if (many !== null) item.append(element('span', 'voice-lang-count', String(many)));
     if (key === selected) item.setAttribute('aria-current', 'true');
@@ -296,4 +318,6 @@ export function renderVoiceManager(host, view, handlers) {
   const body = element('div', 'panel-body voice-manager');
   body.append(summary, panel);
   host.replaceChildren(panelHead(host, { glyph: 'speaker', title: t('voices.title') }), body);
+  // what had the focus before the panel was drawn again gets it back
+  if (view.focus) [...host.querySelectorAll('[data-focus]')].find((made) => made.dataset.focus === view.focus)?.focus({ preventScroll: true });
 }

@@ -209,3 +209,11 @@ test('two groups when other languages are ticked, one when not', () => {
   assert.equal(document.querySelectorAll('.speech-voice optgroup')[1].querySelector('option').textContent, 'Serena · Italian');
 });
 
+
+test('a reading with no voice of its language shows only the other group', () => {
+  setLang('en');
+  const { bar, document } = setup();
+  bar.show({ ...VIEW, voices: { own: [], others: [{ id: 'piper:x', name: 'Serena', lang: 'it-IT' }], lang: 'la' }, voiceId: 'piper:x' });
+  const groups = [...document.querySelectorAll('.speech-voice optgroup')];
+  assert.deepEqual(groups.map((group) => group.getAttribute('label')), [en['voices.otherLangs']]);
+});

@@ -971,3 +971,14 @@ test('a voice cleared for the language being read leaves the reading on its voic
   await flush();
   assert.deepEqual(engine.calls.map(({ voiceId }) => voiceId), [PAOLA.id, PAOLA.id]);
 });
+
+test('a voice unticked during a reading stays in the bar while it reads, and leaves it after', async () => {
+  let ticks = [PAOLA.id];
+  const { session, bar } = setup({ voices: [ELSA, PAOLA, ZIRA], everywhere: () => ticks, state: { voices: { en: PAOLA.id } } });
+  await session.start(fakeTab(ENGLISH, { lang: 'en' }).entry);
+  await flush();
+  ticks = [];
+  session.redraw();
+  assert.deepEqual(bar.view.voices.others.map(({ id }) => id), [PAOLA.id]);
+  assert.equal(bar.view.voiceId, PAOLA.id);
+});

@@ -57,7 +57,6 @@ const KOKORO_PREFIX = 'kokoro:';
 /** A voice downloaded to this PC, by its id as the reader speaks with it. */
 const downloadedId = (id) => typeof id === 'string' && (id.startsWith(PIPER_PREFIX) || id.startsWith(KOKORO_PREFIX));
 const DOWNLOAD_EVENT = 'tts-download';
-const DOWNLOAD_OVER = new Set(['done', 'error', 'canceled']);
 const GAP_PX = 6;
 const DROP_MASCOT_PX = 88;
 const FORWARD = 1;
@@ -1101,16 +1100,15 @@ let voicesEverywhere = [];
 /** What the Voices panel shows: a language, '*' (all of them) or 'mine' (the reader's own voices); null at first. */
 let voicesSelected = null;
 
-const baseLanguage = (tag) => String(tag ?? '').split('-')[0].toLowerCase();
-
 /** The Voices panel, on a language: the text's when asked from the reading bar, else the one being read or the interface's. */
-function openVoicesPanel(lang = null) {
-  voicesSelected = baseLanguage(lang ?? activeEntry()?.reader?.lang ?? getLang());
+async function openVoicesPanel(lang = null) {
+  const { panelLanguage } = await import('../speech/voice-lists.js');
+  voicesSelected = panelLanguage(lang ?? activeEntry()?.reader?.lang, getLang());
   showPanel(PANEL_VOICES);
 }
 
 async function drawVoicesPanel() {
-  const [{ languageName, WebSpeechEngine }, { renderVoiceManager, voiceIdOf }, mixer, { listVoices, engineOf }, { saveTick }] = await Promise.all([
+  const [{ languageName, WebSpeechEngine }, { renderVoiceManager, voiceIdOf }, mixer, { listVoices, engineOf }, { saveTick, panelLanguage }] = await Promise.all([
     import('../speech/engine-web.js'),
     import('./voice-manager.js'),
     import('./voice-mixer.js'),
@@ -1134,6 +1132,7 @@ async function drawVoicesPanel() {
   const untick = async (id) => {
     if (!voicesEverywhere.includes(id)) return;
     voicesEverywhere = await saveTick(invoke, { voiceId: id, voiceLang: '', on: false, everywhere: voicesEverywhere, saved: {} });
+    speech?.redraw();
   };
   const kokoroVoices = catalog.voices.filter((voice) => voice.engine === 'kokoro' && voice.installed);
   // a draft keeps only the voices still on this PC (none to mix: no draft)
@@ -1146,7 +1145,8 @@ async function drawVoicesPanel() {
   const inUse = new Set(Object.values(saved ?? {})
     .filter(downloadedId)
     .map((id) => id.slice(id.indexOf(':') + 1)));
-  const refocus = keepFocus(panelHost);
+  const focus = panelHost.ownerDocument.activeElement?.closest?.('[data-focus]')?.dataset.focus ?? null;
+  const refocus = focus ? () => {} : keepFocus(panelHost);
   renderVoiceManager(panelHost, {
     catalog,
     progress: downloads,
@@ -1159,7 +1159,8 @@ async function drawVoicesPanel() {
     local,
     defaults: saved ?? {},
     everywhere: voicesEverywhere,
-    selected: voicesSelected ?? baseLanguage(activeEntry()?.reader?.lang ?? getLang()),
+    selected: voicesSelected ?? panelLanguage(activeEntry()?.reader?.lang, getLang()),
+    focus,
   }, {
     onSelect: (key) => {
       voicesSelected = key;
@@ -1176,9 +1177,11 @@ async function drawVoicesPanel() {
       // the languages that had chosen it choose by themselves again
       if (!on) {
         for (const [lang, id] of Object.entries(before)) {
-          if (id === voiceId && lang !== baseLanguage(voice?.lang)) speech?.defaultVoiceChanged(lang, '');
+          if (id === voiceId && lang !== panelLanguage(voice?.lang, '')) speech?.defaultVoiceChanged(lang, '');
         }
       }
+      // the reading bar offers the ticked voices: it shows the change at once
+      speech?.redraw();
       drawVoicesPanel();
     },
     onCreate: () => redrawWith(mixer.newDraft(kokoroVoices)),
@@ -1308,7 +1311,8 @@ async function onDownload({ voiceId, phase, received, total, error }) {
     const { voiceIdOf } = await import('./voice-manager.js');
     if (voice) await (await loadSpeech()).voiceInstalled(voice.lang.split('-')[0], voiceIdOf(voice));
   }
-  if (panels.current() === PANEL_VOICES && (DOWNLOAD_OVER.has(phase) || !panelHost.querySelector(`[data-voice="${voiceId}"] progress`))) {
+  const { downloadRedraw } = await import('./voice-manager.js');
+  if (panels.current() === PANEL_VOICES && downloadRedraw(phase, panelHost.querySelector(`[data-voice="${voiceId}"]`))) {
     drawVoicesPanel();
   } else if (panels.current() === PANEL_VOICES) {
     updateDownloadRow(voiceId);

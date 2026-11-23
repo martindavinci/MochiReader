@@ -238,7 +238,8 @@ export function createSpeechBar({ onCommand, onVoice, onRate = () => {}, onVolum
       made_.append(...list.map((one) => option(one, withLanguage)));
       return made_;
     };
-    voice.replaceChildren(group(t('voices.textLang', { language: languageName(lang) }), own, false));
+    voice.replaceChildren();
+    if (own.length > 0) voice.append(group(t('voices.textLang', { language: languageName(lang) }), own, false));
     if (others.length > 0) voice.append(group(t('voices.otherLangs'), others, true));
     if (onMoreVoices) {
       const more = made('option', 'speech-more-voices', t('voices.chooseShown'));

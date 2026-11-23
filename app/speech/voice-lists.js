@@ -70,3 +70,11 @@ export async function saveTick(invoke, { voiceId, voiceLang, on, everywhere, sav
   for (const lang of clear) await invoke('state_set_voice', { lang, voiceId: '' });
   return now;
 }
+
+/**
+ * The language the Voices panel opens on: the base language of `tag`, however it is written ("en_US", "EN"), else of
+ * `fallback` (a document may say nothing, or something that is no language).
+ */
+export function panelLanguage(tag, fallback) {
+  return parseLangTag(tag).language || parseLangTag(fallback).language;
+}

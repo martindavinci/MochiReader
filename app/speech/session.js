@@ -518,6 +518,14 @@ class SpeechSession {
     this.#draw();
   }
 
+  /** The voices the bar offers; the one reading stays among them while it reads, even if no longer ticked. */
+  #barVoices(language) {
+    const { own, others } = barVoices(this.#voices, this.#lang, this.#everywhere());
+    const reading = this.#voices.find((voice) => voice.id === this.#voiceId);
+    const listed = reading && (own.includes(reading) || others.includes(reading));
+    return { own, others: reading && !listed ? [...others, reading] : others, lang: language };
+  }
+
   #chooseVoice(voiceId) {
     this.#tabVoices.set(this.#entry, voiceId);
     this.#savedVoices[parseLangTag(this.#lang).language] = voiceId;
@@ -598,7 +606,7 @@ class SpeechSession {
       rate: this.#player.rate,
       rates: this.#player.rates,
       volume: this.#player.volume,
-      voices: { ...barVoices(this.#voices, this.#lang, this.#everywhere()), lang: language },
+      voices: this.#barVoices(language),
       voiceId: this.#voiceId,
       following: this.#following,
       elsewhere: !this.#isInFront(this.#entry),

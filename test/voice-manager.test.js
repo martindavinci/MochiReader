@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { parseHTML } from 'linkedom';
 import { setLang } from '../app/core/i18n.js';
 import en from '../app/lang/en.js';
-import { PREVIEW_TEXT, progressText, renderVoiceManager, voiceIdOf } from '../app/ui/voice-manager.js';
+import { downloadRedraw, PREVIEW_TEXT, progressText, renderVoiceManager, voiceIdOf } from '../app/ui/voice-manager.js';
 
 const NAMES = { it: 'Italian', de: 'German', en: 'English', ja: 'Japanese' };
 const voice = (id, lang, extra = {}) => ({
@@ -305,4 +305,46 @@ test('a language with no voice says so, and stays in the column', () => {
   const { host } = drawPanel({ selected: 'ja', languages: ['ja', 'it'] });
   assert.equal(host.querySelector('.voice-langs [data-lang]').dataset.lang, 'ja');
   assert.match(host.querySelector('.voice-content').textContent, new RegExp(en['voices.noneForLang']));
+});
+
+test('what had the focus gets it back once the panel is drawn again', () => {
+  setLang('en');
+  const { document, HTMLElement } = parseHTML('<!doctype html><html><body><aside id="panel"></aside></body></html>');
+  const focused = [];
+  HTMLElement.prototype.focus = function focus() { focused.push(this.dataset.focus); };
+  const host = document.getElementById('panel');
+  const view = {
+    catalog: catalog(), progress: new Map(), languages: ['it'], inUse: new Set(), nameOf: (language) => NAMES[language] ?? language,
+    local: [ELSA_W, ZIRA_W], defaults: {}, everywhere: [], selected: 'it',
+  };
+  renderVoiceManager(host, { ...view, focus: 'tick:elsa' }, {});
+  renderVoiceManager(host, { ...view, focus: 'default:it' }, {});
+  renderVoiceManager(host, { ...view, focus: 'lang:en' }, {});
+  assert.deepEqual(focused, ['tick:elsa', 'default:it', 'lang:en']);
+  assert.ok(host.querySelector('[data-focus="tick:elsa"]').matches('input[type="checkbox"]'));
+});
+
+test('a download redraws the panel only when it ends, or when its row has no bar yet', () => {
+  const doc = parseHTML('<!doctype html><html><body><ul><li id="a"><progress></progress></li><li id="b"></li></ul></body></html>').document;
+  assert.equal(downloadRedraw('voice', null), false, 'its row is not on screen: nothing to draw');
+  assert.equal(downloadRedraw('voice', doc.getElementById('a')), false, 'its bar moves by itself');
+  assert.equal(downloadRedraw('voice', doc.getElementById('b')), true);
+  for (const phase of ['done', 'error', 'canceled']) assert.equal(downloadRedraw(phase, null), true, phase);
+});
+
+test('a language with no voice of its own can be read by a ticked one, and is in the column', () => {
+  const { host } = drawPanel({ selected: 'la', languages: ['it'], everywhere: ['elsa'] });
+  assert.ok(host.querySelector('.voice-langs [data-lang="la"]'));
+  const select = host.querySelector('.voice-default');
+  assert.ok(select);
+  assert.deepEqual([...select.querySelectorAll('option')].map((option) => option.getAttribute('value')), ['', 'elsa']);
+  assert.match(host.querySelector('.voice-content').textContent, new RegExp(en['voices.noneForLang']));
+});
+
+test('a language whose name cannot be told is shown by its code', () => {
+  const nameOf = (language) => {
+    if (!/^[a-z]{2,3}$/.test(language)) throw new RangeError('invalid_argument');
+    return NAMES[language] ?? language;
+  };
+  assert.doesNotThrow(() => drawPanel({ selected: 'en_us', nameOf }));
 });
