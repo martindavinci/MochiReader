@@ -161,3 +161,17 @@ test('a draft is mended when its voices are gone', () => {
   assert.equal(repairDraft({ ...draft, parts: [{ voice: 'if_sara', weight: 50 }, { voice: 'im_nicola', weight: 50 }] }, [HEART, { id: 'bf_emma', name: 'Emma', lang: 'en-GB' }]).lang, 'en-US');
   assert.equal(repairDraft(draft, KOKORO), draft, 'nothing gone, the same draft');
 });
+
+test('a kept mix can be ticked to show in other texts', () => {
+  const where = host();
+  const calls = [];
+  renderMixes(where, { mixes: [kept()], kokoroVoices: KOKORO, nameOf, everywhere: ['kokoro:mix-0a1b2c3d'] }, { onEverywhere: (...args) => calls.push(args) });
+  const box = where.querySelector('[data-mix="0a1b2c3d"] .voice-everywhere input');
+  assert.equal(box.checked, true);
+  box.checked = false;
+  box.dispatchEvent(new box.ownerDocument.defaultView.Event('change'));
+  assert.deepEqual(calls, [['kokoro:mix-0a1b2c3d', false]]);
+  const without = host();
+  renderMixes(without, { mixes: [kept()], kokoroVoices: KOKORO, nameOf }, {});
+  assert.equal(without.querySelector('.voice-everywhere'), null, 'no ticks given, no box');
+});

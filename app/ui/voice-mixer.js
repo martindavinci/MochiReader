@@ -73,11 +73,12 @@ export function draftProblem(draft, kokoroVoices) {
 /**
  * The kept mixes and the button that makes one.
  * @param {HTMLElement} host
- * @param {{mixes: {mix: Draft, missing: string[]}[], kokoroVoices: KokoroVoice[], nameOf: (language: string) => string}} view
+ * @param {{mixes: {mix: Draft, missing: string[]}[], kokoroVoices: KokoroVoice[], nameOf: (language: string) => string,
+ *   everywhere?: string[]|null}} view `everywhere`: the ticked voice ids; given, each mix has its tick
  * @param {{onCreate: () => void, onEdit: (mix: Draft) => void, onDuplicate: (mix: Draft) => void,
  *   onDeleteMix: (id: string) => void}} handlers
  */
-export function renderMixes(host, { mixes, kokoroVoices, nameOf }, handlers) {
+export function renderMixes(host, { mixes, kokoroVoices, nameOf, everywhere = null }, handlers) {
   const element = elementIn(host);
   const button = (text, action) => {
     const made = element('button', 'btn btn-secondary', text);
@@ -97,6 +98,17 @@ export function renderMixes(host, { mixes, kokoroVoices, nameOf }, handlers) {
       element('p', 'voice-meta', `${nameOf(languageOf(mix.lang))} · ${parts}`),
     );
     if (missing.length > 0) words.append(element('p', 'voice-error', t('voices.mix.missing', { names: missing.join(', ') })));
+    // the same tick as its row in its language: shown in the bar whatever the text's language
+    if (Array.isArray(everywhere)) {
+      const id = `kokoro:mix-${mix.id}`;
+      const label = element('label', 'voice-everywhere');
+      const box = element('input');
+      box.type = 'checkbox';
+      box.checked = everywhere.includes(id);
+      box.addEventListener('change', () => handlers.onEverywhere?.(id, box.checked));
+      label.append(box, element('span', undefined, t('voices.everywhere')));
+      words.append(label);
+    }
     const actions = element('div', 'voice-actions');
     if (missing.length === 0) {
       actions.append(button(t('voices.mix.edit'), () => handlers.onEdit(mix)), button(t('voices.mix.duplicate'), () => handlers.onDuplicate(mix)));

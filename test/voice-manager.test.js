@@ -92,10 +92,11 @@ test('languages of open documents come first', () => {
   assert.deepEqual(sections, ['de', 'it', 'en']);
 });
 
-test('voices of other languages are under all languages', () => {
+test('voices of other languages come after in the column, and all languages shows each one', () => {
   const { host } = draw({ languages: ['it'] });
-  const titles = [...host.querySelectorAll('.voice-language h2')].map((title) => title.textContent);
-  assert.deepEqual(titles, ['Italian', en['voices.allLanguages']]);
+  assert.deepEqual([...host.querySelectorAll('.voice-langs [data-lang]')].map((item) => item.dataset.lang), ['it', 'en', 'de', '*']);
+  const titles = [...host.querySelectorAll('.voice-content .voice-language h2')].map((title) => title.textContent);
+  assert.deepEqual(titles, ['Italian', 'English', 'German']);
 });
 
 test('a language without voices to download is not named', () => {
@@ -123,9 +124,9 @@ test('the license opens its card and the play button its sample', () => {
 
 test('under all languages each language has its name over its voices', () => {
   const { host } = draw({ languages: ['it'] });
-  const names = [...host.querySelectorAll('.voice-sublanguage h3')].map((title) => title.textContent);
-  assert.deepEqual(names, ['English', 'German']);
-  assert.ok(host.querySelector('.voice-sublanguage[data-lang="de"] [data-voice="de_DE-thorsten-medium"]'));
+  const german = host.querySelector('.voice-content .voice-language[data-lang="de"]');
+  assert.equal(german.querySelector('h2').textContent, 'German');
+  assert.ok(german.querySelector('[data-voice="de_DE-thorsten-medium"]'));
 });
 
 test('the sample playing turns its play button into stop', () => {
@@ -210,4 +211,98 @@ test('with the mixes given, the manager ends with your voices; with a draft, its
   });
   assert.equal(editing.host.querySelectorAll('.voice-mixes .mix-part').length, 2);
   assert.equal(draw({}).host.querySelector('.voice-mixes'), null, 'no mixes given, no section');
+});
+
+// The Voices panel: a column of languages, and the chosen language's voice, voices on this PC and to download.
+const ELSA_W = { id: 'elsa', name: 'Microsoft Elsa - Italian (Italy)', lang: 'it-IT', engine: 'windows' };
+const ZIRA_W = { id: 'zira', name: 'Microsoft Zira - English (United States)', lang: 'en-US', engine: 'windows' };
+const ISABELLA_O = { id: 'edge:isabella', name: 'Microsoft Isabella Online', lang: 'it-IT', engine: 'online' };
+const panelHandlers = (calls) => Object.fromEntries(['onSelect', 'onDefault', 'onEverywhere']
+  .map((name) => [name, (...args) => calls.push([name, ...args])]));
+function drawPanel(view, calls = []) {
+  setLang('en');
+  const { document } = parseHTML('<!doctype html><html><body><aside id="panel"></aside></body></html>');
+  const host = document.getElementById('panel');
+  renderVoiceManager(host, {
+    catalog: catalog(),
+    progress: new Map(),
+    languages: ['it'],
+    inUse: new Set(),
+    nameOf: (language) => NAMES[language] ?? language,
+    local: [ELSA_W, ZIRA_W],
+    defaults: {},
+    everywhere: [],
+    ...view,
+  }, { ...Object.fromEntries(['onDownload', 'onCancel', 'onDelete', 'onPreview', 'onCard'].map((name) => [name, () => {}])), ...panelHandlers(calls) });
+  return { host, calls };
+}
+
+test('the column lists the languages with their counts and marks the selected one', () => {
+  const { host, calls } = drawPanel({ selected: 'it' });
+  const items = [...host.querySelectorAll('.voice-langs [data-lang]')];
+  assert.deepEqual(items.map((item) => item.dataset.lang), ['it', 'en', 'de', '*']);
+  assert.match(items[0].textContent, /Italian/);
+  assert.match(items[0].textContent, /2/);
+  assert.equal(items[0].getAttribute('aria-current'), 'true');
+  assert.equal(items[1].hasAttribute('aria-current'), false);
+  items[1].click();
+  assert.deepEqual(calls[0], ['onSelect', 'en']);
+});
+
+test('a language says which voice reads it, and choosing one sets the default', () => {
+  const { host, calls } = drawPanel({ selected: 'it', everywhere: ['zira'] });
+  const select = host.querySelector('.voice-default');
+  assert.match(select.closest('label').textContent, new RegExp(en['voices.readsLang'].replace('{language}', 'Italian')));
+  assert.deepEqual([...select.querySelectorAll('option')].map((option) => option.getAttribute('value')), ['', 'elsa', 'zira']);
+  select.querySelectorAll('option').forEach((option) => option.toggleAttribute('selected', option.getAttribute('value') === 'elsa'));
+  select.dispatchEvent(new select.ownerDocument.defaultView.Event('change'));
+  assert.deepEqual(calls.at(-1), ['onDefault', 'it', 'elsa']);
+});
+
+test('each voice on this pc can be ticked to show in other texts', () => {
+  const { host, calls } = drawPanel({ selected: 'it', everywhere: ['elsa'] });
+  const box = host.querySelector('[data-voice="elsa"] .voice-everywhere input');
+  assert.equal(box.checked, true);
+  assert.match(box.closest('label').textContent, new RegExp(en['voices.everywhere']));
+  box.checked = false;
+  box.dispatchEvent(new box.ownerDocument.defaultView.Event('change'));
+  assert.deepEqual(calls.at(-1), ['onEverywhere', 'elsa', false]);
+});
+
+test('windows and online voices have no delete, and the online ones come under their own heading', () => {
+  const { host } = drawPanel({ selected: 'it', local: [ELSA_W, ISABELLA_O] });
+  for (const id of ['elsa', 'edge:isabella']) {
+    const row = host.querySelector(`[data-voice="${id}"]`);
+    assert.ok(row, id);
+    assert.equal([...row.querySelectorAll('button')].some((button) => button.textContent === en['voices.delete']), false, id);
+  }
+  assert.ok([...host.querySelectorAll('.voice-content h3')].some((heading) => heading.textContent === en['voices.online']));
+});
+
+test('the default of another language says for which', () => {
+  const paola = voice('it_IT-paola-medium', 'it-IT', { installed: true, engine: 'piper' });
+  const { host } = drawPanel({
+    selected: 'it',
+    catalog: catalog({ voices: [paola] }),
+    local: [ELSA_W, { id: 'piper:it_IT-paola-medium', name: 'paola', lang: 'it-IT', engine: 'piper' }],
+    defaults: { it: 'elsa', en: 'piper:it_IT-paola-medium' },
+    everywhere: ['piper:it_IT-paola-medium'],
+  });
+  assert.match(host.querySelector('[data-voice="elsa"]').textContent, new RegExp(en['voices.default']));
+  assert.match(host.querySelector('[data-voice="it_IT-paola-medium"]').textContent, new RegExp(en['voices.defaultFor'].replace('{language}', 'English')));
+});
+
+test('all languages shows every language; your voices shows the mixer', () => {
+  const all = drawPanel({ selected: '*' });
+  assert.deepEqual([...all.host.querySelectorAll('.voice-content > [data-lang]')].map((part) => part.dataset.lang), ['it', 'en', 'de']);
+  const mine = drawPanel({ selected: 'mine', mixes: [] });
+  assert.ok(mine.host.querySelector('.voice-content .voice-mixes'));
+  assert.equal(mine.host.querySelector('.voice-content [data-lang="it"]'), null);
+  assert.equal([...mine.host.querySelectorAll('.voice-langs [data-lang]')].at(-1).dataset.lang, 'mine');
+});
+
+test('a language with no voice says so, and stays in the column', () => {
+  const { host } = drawPanel({ selected: 'ja', languages: ['ja', 'it'] });
+  assert.equal(host.querySelector('.voice-langs [data-lang]').dataset.lang, 'ja');
+  assert.match(host.querySelector('.voice-content').textContent, new RegExp(en['voices.noneForLang']));
 });

@@ -543,6 +543,24 @@ article:empty { display: none; }
 .voice-actions .voice-preview.is-playing { border-color: var(--accent); color: var(--accent); }
 .voice-actions .btn:disabled { opacity: .55; cursor: default; }
 .voice-kokoro-model { margin: 0; color: var(--muted); font: 12px/1.5 var(--font-ui-s); }
+/* the Voices panel: its languages in a column beside what the chosen one holds; above it when the panel is narrow */
+.voice-manager { container-type: inline-size; }
+.voice-panel { display: flex; gap: var(--space-3); align-items: flex-start; }
+.voice-langs { flex: 0 0 200px; display: flex; flex-direction: column; gap: 2px; position: sticky; top: 0; }
+.voice-lang { display: flex; justify-content: space-between; gap: var(--space-2); padding: 6px 10px; border: 0; border-radius: var(--radius-s); background: none; color: inherit; font: 14px/1.4 var(--font-ui); text-align: left; cursor: pointer; }
+.voice-lang:hover { background: var(--surface); }
+.voice-lang[aria-current="true"] { background: var(--accent-soft); }
+.voice-lang-count { color: var(--muted); font: 12px/1.6 var(--font-ui-s); }
+.voice-content { flex: 1; min-width: 0; }
+.voice-default-field { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin: 0 var(--space-3) var(--space-2); color: var(--muted); font: 13px/1.4 var(--font-ui-s); }
+.voice-group { margin: var(--space-3) var(--space-3) 4px; color: var(--muted); font: 600 12px/1.4 var(--font-ui-s); letter-spacing: .04em; text-transform: uppercase; }
+.voice-everywhere { display: inline-flex; align-items: center; gap: 6px; margin-top: 2px; font: 12px/1.4 var(--font-ui-s); }
+.voice-everywhere input { accent-color: var(--accent); }
+.voice-default-badge { margin-left: var(--space-2); }
+@container (max-width: 560px) {
+  .voice-panel { flex-direction: column; }
+  .voice-langs { flex: none; flex-direction: row; overflow-x: auto; position: static; width: 100%; }
+}
 /* the reader's own voices: the kept ones like the voices above, the one being made as a small form */
 .mix-row.is-disabled .voice-name { opacity: .55; }
 .mix-create { margin: var(--space-2) var(--space-3); }
