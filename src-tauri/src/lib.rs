@@ -577,6 +577,9 @@ pub fn run() {
             tts::tts_cancel,
             tts::tts_delete,
             tts::tts_sample,
+            tts::tts_mixes,
+            tts::tts_mix_save,
+            tts::tts_mix_delete,
             #[cfg(feature = "smoke")]
             smoke_write_dump,
             #[cfg(feature = "smoke")]

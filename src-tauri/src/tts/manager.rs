@@ -5,6 +5,7 @@ use super::catalog::{Catalog, CatalogVoice, KokoroVoice};
 use super::download::{Emit, Http, Queue, Report};
 use super::engine_pack::{self, EngineState, Loaded};
 use super::kokoro::{KokoroModel, Style};
+use super::mixes::{self, Mix, MixView, MIXES_FILE};
 use super::paths::{part_of, Places};
 use super::piper::PiperVoice;
 use super::{Synthesis, TtsError, VoiceInfo, KOKORO_PREFIX, PIPER_PREFIX};
@@ -124,6 +125,8 @@ pub struct Voices {
     /// One change at a time to the files of the Kokoro folder and their sums.
     kokoro_files: Mutex<()>,
     kokoro_vocab: HashMap<String, i64>,
+    /// One change at a time to the mixes.
+    mixes_file: Mutex<()>,
 }
 
 impl Voices {
@@ -145,6 +148,7 @@ impl Voices {
             styles: Mutex::default(),
             kokoro_files: Mutex::default(),
             kokoro_vocab: catalog_vocab,
+            mixes_file: Mutex::default(),
         }
     }
 
@@ -262,6 +266,16 @@ impl Voices {
                         id: format!("{KOKORO_PREFIX}{}", voice.id),
                         name: voice.name.clone(),
                         lang: voice.lang.clone(),
+                    }),
+            )
+            .chain(
+                self.mixes()
+                    .into_iter()
+                    .filter(|view| view.missing.is_empty())
+                    .map(|view| VoiceInfo {
+                        id: format!("{KOKORO_PREFIX}mix-{}", view.mix.id),
+                        name: view.mix.name,
+                        lang: view.mix.lang,
                     }),
             )
             .collect()
@@ -667,8 +681,93 @@ impl Voices {
         Ok(style)
     }
 
-    /// Says `text` with the Kokoro voice `id` (without `kokoro:`).
+    fn mixes_path(&self) -> PathBuf {
+        self.places.voices.join(MIXES_FILE)
+    }
+
+    /// The reader's mixes, each with the names of the voices it needs that are not on this PC.
+    pub fn mixes(&self) -> Vec<MixView> {
+        mixes::load(&self.mixes_path())
+            .into_iter()
+            .map(|mix| {
+                let missing = mix
+                    .parts
+                    .iter()
+                    .filter(|part| !self.kokoro_installed(&part.voice))
+                    .map(|part| {
+                        self.catalog
+                            .kokoro_voice(&part.voice)
+                            .map_or_else(|| part.voice.clone(), |voice| voice.name.clone())
+                    })
+                    .collect();
+                MixView { mix, missing }
+            })
+            .collect()
+    }
+
+    /// Keeps a mix, new or changed (the same id), as `mixes::validate` makes it.
+    pub fn save_mix(&self, mix: Mix) -> Result<Mix, TtsError> {
+        let valid = mixes::validate(&mix, &self.catalog)?;
+        let _file = lock(&self.mixes_file);
+        let mut all = mixes::load(&self.mixes_path());
+        match all.iter_mut().find(|known| known.id == valid.id) {
+            Some(known) => *known = valid.clone(),
+            None => all.push(valid.clone()),
+        }
+        mixes::store(&self.mixes_path(), &all)?;
+        Ok(valid)
+    }
+
+    pub fn delete_mix(&self, id: &str) -> Result<(), TtsError> {
+        let _file = lock(&self.mixes_file);
+        let mut all = mixes::load(&self.mixes_path());
+        let before = all.len();
+        all.retain(|known| known.id != id);
+        if all.len() != before {
+            mixes::store(&self.mixes_path(), &all)?;
+        }
+        Ok(())
+    }
+
+    /// The style of a mix: the styles of its voices, each times its weight. Every voice must be on this PC.
+    fn mix_style(&self, mix: &Mix) -> Result<Style, TtsError> {
+        self.verify_kokoro(KOKORO_MODEL)?;
+        let mut styles = Vec::with_capacity(mix.parts.len());
+        for part in &mix.parts {
+            if !self.kokoro_installed(&part.voice) {
+                let name = self
+                    .catalog
+                    .kokoro_voice(&part.voice)
+                    .map_or(part.voice.as_str(), |voice| voice.name.as_str());
+                return Err(TtsError::Voice(format!("{name} is not installed")));
+            }
+            self.verify_kokoro(&format!("{}.bin", part.voice))?;
+            styles.push((self.style(&part.voice)?, part.weight));
+        }
+        let parts: Vec<(&Style, f32)> = styles
+            .iter()
+            .map(|(style, weight)| (style.as_ref(), *weight))
+            .collect();
+        Ok(Style::mix(&parts))
+    }
+
+    /// Says `text` with a mix not kept (the mixer's preview), checked as a kept one would be.
+    pub fn preview_mix(&self, mix: &Mix, text: &str) -> Result<Synthesis, TtsError> {
+        let valid = mixes::validate(mix, &self.catalog)?;
+        let style = self.mix_style(&valid)?;
+        self.speak_kokoro(&valid.lang, &style, text)
+    }
+
+    /// Says `text` with the Kokoro voice `id` (without `kokoro:`): a voice of the catalog, or `mix-<id>`.
     pub fn synthesize_kokoro(&self, id: &str, text: &str) -> Result<Synthesis, TtsError> {
+        if let Some(mix_id) = id.strip_prefix("mix-") {
+            let mix = mixes::load(&self.mixes_path())
+                .into_iter()
+                .find(|mix| mix.id == mix_id)
+                .ok_or_else(|| TtsError::Voice(format!("no mix {mix_id}")))?;
+            let style = self.mix_style(&mix)?;
+            return self.speak_kokoro(&mix.lang, &style, text);
+        }
         let voice = self.known_kokoro(id)?.clone();
         if !self.kokoro_installed(id) {
             return Err(TtsError::Voice(format!("{id} is not installed")));
@@ -952,6 +1051,86 @@ mod tests {
             .unwrap_or_default();
         assert!(left.is_empty(), "{left:?}");
         assert!(!voices.view().kokoro_model.installed);
+    }
+
+    fn sara_and_heart() -> crate::tts::mixes::Mix {
+        crate::tts::mixes::Mix {
+            id: String::new(),
+            name: "Sara e Heart".into(),
+            lang: "it-IT".into(),
+            parts: vec![
+                crate::tts::mixes::MixPart {
+                    voice: "if_sara".into(),
+                    weight: 70.0,
+                },
+                crate::tts::mixes::MixPart {
+                    voice: "af_heart".into(),
+                    weight: 30.0,
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn a_saved_mix_is_listed_and_spoken() {
+        let dir = tempfile::tempdir().unwrap();
+        // a voice of the real size, so that its style reads
+        let voice = vec![0u8; crate::tts::kokoro::STYLE_BYTES];
+        let voices = voices_in(dir.path(), kokoro_catalog_with(b"the model", &voice));
+        install_kokoro_files(
+            voices.places(),
+            &["if_sara", "af_heart"],
+            b"the model",
+            &voice,
+        );
+        let saved = voices.save_mix(sara_and_heart()).unwrap();
+        assert_eq!(voices.mixes().len(), 1);
+        assert!(voices.mixes()[0].missing.is_empty());
+        assert!(voices.installed_voices().contains(&VoiceInfo {
+            id: format!("kokoro:mix-{}", saved.id),
+            name: "Sara e Heart".into(),
+            lang: "it-IT".into(),
+        }));
+        // edited under the same id: one mix still
+        let mut edited = saved.clone();
+        edited.name = "Sara".into();
+        voices.save_mix(edited).unwrap();
+        assert_eq!(voices.mixes().len(), 1);
+        assert_eq!(voices.mixes()[0].mix.name, "Sara");
+        // the files are whole: it gets as far as the engine, which this test has not
+        assert!(matches!(
+            voices.synthesize_kokoro(&format!("mix-{}", saved.id), "Ciao."),
+            Err(TtsError::Engine(_))
+        ));
+        voices.delete_mix(&saved.id).unwrap();
+        assert!(voices.mixes().is_empty());
+    }
+
+    #[test]
+    fn a_mix_with_a_deleted_voice_is_missing_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let voices = voices_in(dir.path(), kokoro_catalog_with(b"the model", b"voice"));
+        install_kokoro_files(
+            voices.places(),
+            &["if_sara", "af_heart"],
+            b"the model",
+            b"voice",
+        );
+        let saved = voices.save_mix(sara_and_heart()).unwrap();
+        voices.delete("if_sara").unwrap();
+        assert_eq!(voices.mixes()[0].missing, ["Sara"]);
+        assert!(!voices
+            .installed_voices()
+            .iter()
+            .any(|voice| voice.id.starts_with("kokoro:mix-")));
+        assert!(matches!(
+            voices.synthesize_kokoro(&format!("mix-{}", saved.id), "Ciao."),
+            Err(TtsError::Voice(_))
+        ));
+        assert!(matches!(
+            voices.synthesize_kokoro("mix-nothing", "Ciao."),
+            Err(TtsError::Voice(_))
+        ));
     }
 
     #[test]

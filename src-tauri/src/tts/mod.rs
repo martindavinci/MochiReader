@@ -10,6 +10,7 @@ pub mod engine_pack;
 pub mod espeak;
 pub mod kokoro;
 pub mod manager;
+pub mod mixes;
 pub mod onnx_patch;
 pub mod paths;
 pub mod piper;
@@ -371,6 +372,46 @@ pub async fn tts_delete(
 ) -> Result<(), TtsError> {
     let voices = Arc::clone(&voices);
     off_the_workers(move || voices.delete(&voice_id)).await
+}
+
+/// The reader's mixes of Kokoro voices.
+#[tauri::command]
+pub async fn tts_mixes(
+    voices: tauri::State<'_, Arc<manager::Voices>>,
+) -> Result<Vec<mixes::MixView>, TtsError> {
+    let voices = Arc::clone(&voices);
+    off_the_workers(move || Ok(voices.mixes())).await
+}
+
+/// Keeps a mix, new (no id) or changed; the sentences said with it before are forgotten.
+#[tauri::command]
+pub async fn tts_mix_save(
+    mix: mixes::Mix,
+    voices: tauri::State<'_, Arc<manager::Voices>>,
+    service: tauri::State<'_, Arc<Service>>,
+) -> Result<mixes::Mix, TtsError> {
+    let (voices, service) = (Arc::clone(&voices), Arc::clone(&service));
+    off_the_workers(move || {
+        let saved = voices.save_mix(mix)?;
+        service.forget(&format!("{KOKORO_PREFIX}mix-{}", saved.id));
+        Ok(saved)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn tts_mix_delete(
+    id: String,
+    voices: tauri::State<'_, Arc<manager::Voices>>,
+    service: tauri::State<'_, Arc<Service>>,
+) -> Result<(), TtsError> {
+    let (voices, service) = (Arc::clone(&voices), Arc::clone(&service));
+    off_the_workers(move || {
+        voices.delete_mix(&id)?;
+        service.forget(&format!("{KOKORO_PREFIX}mix-{id}"));
+        Ok(())
+    })
+    .await
 }
 
 /// The published sample of a voice not installed, as MP3 bytes. Asked only when the reader presses its play button.
