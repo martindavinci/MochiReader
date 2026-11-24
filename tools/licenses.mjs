@@ -81,6 +81,12 @@ export const VENDORED = [
     licenseFile: 'app/vendor/foliate/LICENSE',
   },
   {
+    name: 'pdf.js',
+    version: '5.7.284',
+    license: 'Apache-2.0',
+    licenseFile: 'app/vendor/pdfjs/LICENSE',
+  },
+  {
     name: 'zip.js',
     version: 'vendored by foliate-js',
     license: 'BSD-3-Clause',

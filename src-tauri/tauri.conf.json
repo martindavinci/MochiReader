@@ -19,7 +19,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline' blob:; img-src 'self' data: blob: http://mochi.localhost; font-src 'self' data: blob:; media-src blob:; frame-src blob:; connect-src ipc: http://ipc.localhost http://mochi.localhost"
+      "csp": "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline' blob:; img-src 'self' data: blob: http://mochi.localhost; font-src 'self' data: blob:; media-src blob:; frame-src blob:; worker-src 'self'; connect-src ipc: http://ipc.localhost http://mochi.localhost"
     }
   },
   "bundle": {

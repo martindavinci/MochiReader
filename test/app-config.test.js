@@ -32,8 +32,15 @@ test('the CSP blocks everything the app does not use', () => {
     conf.app.security.csp,
     "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline' blob:; "
       + "img-src 'self' data: blob: http://mochi.localhost; font-src 'self' data: blob:; media-src blob:; "
-      + 'frame-src blob:; connect-src ipc: http://ipc.localhost http://mochi.localhost',
+      + "frame-src blob:; worker-src 'self'; connect-src ipc: http://ipc.localhost http://mochi.localhost",
   );
+});
+
+test('the PDF reader runs in a worker of the app, and nothing it could load runs by eval or WebAssembly', () => {
+  const csp = conf.app.security.csp;
+  assert.match(csp, /(^|; )worker-src 'self'(;|$)/);
+  assert.doesNotMatch(csp, /unsafe-eval/);
+  assert.doesNotMatch(csp, /connect-src[^;]*'self'/);
 });
 
 test('the window stays hidden until the first draw', () => {
