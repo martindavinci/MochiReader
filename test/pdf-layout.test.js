@@ -210,3 +210,62 @@ test('the title a page shows below a decoration is said once, by the mark', () =
   )], [{ title: 'Chapter Two', page: 0, y: 50, depth: 0 }]);
   assert.deepEqual(texts(chapters[0].blocks), ['heading: Chapter Two', '[figure null]', `paragraph: ${full('Text')} ends.`]);
 });
+
+test('a title the page shows in parts, number then name, is said once, by the mark', () => {
+  const chapters = reflow([page(
+    line('1', 100, { size: 24 }),
+    line('The Quiet Weight of Small Stones', 140, { size: 20 }),
+    line('WHY SMALL STONES SINK', 180, { bold: true }),
+    ...paragraph(220, full('Text'), 'ends.'),
+  )], [{ title: '1 The Quiet Weight of Small Stones', page: 0, y: 72, depth: 0 }]);
+  assert.deepEqual(texts(chapters[0].blocks), [
+    'heading: 1 The Quiet Weight of Small Stones',
+    'heading: WHY SMALL STONES SINK',
+    `paragraph: ${full('Text')} ends.`,
+  ]);
+});
+
+test('a mark that points back before the one above it is placed at its heading, else left out', () => {
+  const pages = [
+    page(...paragraph(100, full('Title page'), 'ends.')),
+    page(line('Epigraph', 100, { size: 24 }), ...paragraph(140, full('Words'), 'ends.')),
+    page(line('Introduction', 100, { size: 24 }), ...paragraph(140, full('Intro'), 'ends.')),
+  ];
+  const chapters = reflow(pages, [
+    { title: 'Title Page', page: 0, y: 72, depth: 0 },
+    { title: 'Epigraph', page: 1, y: 72, depth: 0 },
+    { title: 'Introduction: Where It Began', page: 0, y: 0, depth: 0 },
+    { title: 'Lost', page: 0, y: 0, depth: 0 },
+  ]);
+  assert.deepEqual(chapters.map(({ title }) => title), ['Title Page', 'Epigraph', 'Introduction: Where It Began']);
+  assert.deepEqual(texts(chapters[2].blocks), ['heading: Introduction: Where It Began', `paragraph: ${full('Intro')} ends.`]);
+});
+
+test('a lead-in in small capitals keeps its space before the text', () => {
+  const blocks = blocksOf([page(
+    line('T', 270, { size: 26, bold: true }),
+    { text: 'HE TALE OF', x: 72 + 13, y: 270, width: 33, size: 6, bold: false },
+    { text: 'the team changed one day.', x: 72 + 13 + 35, y: 270, width: 200, size: BODY, bold: false },
+    ...paragraph(300, full('Filler so the body'), 'is known.'),
+  )]);
+  assert.equal(blocks[0].text, 'THE TALE OF the team changed one day.');
+});
+
+test('lines indented together, as in a box or under a figure, stay one paragraph', () => {
+  const blocks = blocksOf([page(
+    ...paragraph(80, full('Before'), full('the box'), full('and more'), 'the box.'),
+    line(full('FIGURE 1: A line of stones grows longer every day, so'), 545, { x: 100, size: 6 }),
+    line('year.', 552, { x: 100, size: 6 }),
+    line(full('Inside a box a line'), 600, { x: 100 }),
+    line('goes on here.', 616, { x: 100 }),
+  )]);
+  assert.deepEqual(blocks.map(({ text }) => text.split(' ').at(-1)), ['box.', 'year.', 'here.']);
+});
+
+test('a line a seventh bigger than the body is a heading', () => {
+  const blocks = blocksOf([page(
+    line('Where It Began', 80, { size: 16.6 }),
+    ...paragraph(120, full('Body text'), full('in a size'), 'that is not round.').map((run) => ({ ...run, size: 14.4 })),
+  )]);
+  assert.deepEqual(blocks[0], { kind: 'heading', level: 2, text: 'Where It Began' });
+});

@@ -33,7 +33,7 @@ const PAGE_NUMBER = /^\s*(\d+|[ivxlcdm]+)\s*$/i;
 const SAME_BASELINE = 0.4;
 // A gap between runs wider than this share of the size is a space.
 const SPACE_GAP = 0.2;
-const HEADING_SIZE = 1.15;
+const HEADING_SIZE = 1.1;
 const NOTE_SIZE = 0.85;
 const DROP_CAP_SIZE = 1.8;
 const DROP_CAP_LETTERS = 2;
@@ -48,6 +48,8 @@ const MAX_HEADING_LENGTH = 80;
 const MIN_FIGURE_SHARE = 0.02;
 const CAPTION = /^figure\s*\d/i;
 const PAGES_PER_CHAPTER = 10;
+// A heading this short could be anything: a mark is not moved to it.
+const MIN_TITLE_LETTERS = 4;
 const MAX_LEVEL = 3;
 const RIGHT_EDGE_PERCENTILE = 0.95;
 const SENTENCE_END = /[.!?…:;"”’')\]]$/u;
@@ -101,9 +103,12 @@ function linesOf({ runs }, page) {
     let text = '';
     let end = -Infinity;
     const letters = new Map();
+    let lastSize = Infinity;
     for (const run of parts) {
       const spaced = text === '' || text.endsWith(' ') || run.text.startsWith(' ');
-      if (!spaced && run.x - end > SPACE_GAP * run.size) text += ' ';
+      // Measured on the smaller of the two: a lead-in in small capitals sits close to the text after it.
+      if (!spaced && run.x - end > SPACE_GAP * Math.min(lastSize, run.size)) text += ' ';
+      lastSize = run.size;
       text += run.text;
       end = Math.max(end, run.x + run.width);
       letters.set(run.size, (letters.get(run.size) ?? 0) + Math.max(1, letterCount(run.text)));
@@ -202,7 +207,15 @@ function joinLines(before, after) {
 const isCapitals = (text) => letterCount(text) > 1 && text === text.toUpperCase() && TWO_CAPITALS.test(text)
   && text.length <= MAX_HEADING_LENGTH && !ENDS_LIKE_A_SENTENCE_PART.test(text);
 
-const sameTitle = (a, b) => a.replace(NOT_A_WORD, ' ').trim().toLowerCase() === b.replace(NOT_A_WORD, ' ').trim().toLowerCase();
+const wordsOf = (text) => text.replace(NOT_A_WORD, ' ').trim().toLowerCase().split(' ').filter(Boolean);
+
+/** Whether `text` is the title, or a run of its words: a page may show "1" and the name apart. */
+function partOfTitle(text, title) {
+  const part = wordsOf(text);
+  const whole = wordsOf(title);
+  if (part.length === 0 || part.length > whole.length) return false;
+  return whole.some((_, at) => part.every((word, offset) => whole[at + offset] === word));
+}
 
 /** Every page's lines and figures, in reading order, as blocks with where each starts, and the notes. */
 function blocksOf(pages, marks) {
@@ -275,7 +288,9 @@ function blocksOf(pages, marks) {
             && (!endsSentence(paragraph.text) || STARTS_LOWER.test(line.text));
         } else {
           const short = before.right < column.right - SHORT_LINE * body && endsSentence(before.text);
-          joins = gapBefore <= column.gap * NEW_PARAGRAPH_GAP && !indented && !short
+          // An indent counts against the line above: lines indented together, in a box or a caption, go on.
+          const indentedHere = indented && line.x > before.x + INDENT * body;
+          joins = gapBefore <= column.gap * NEW_PARAGRAPH_GAP && !indentedHere && !short
             && Math.abs(before.size - line.size) < SIZE_CHANGE;
         }
       }
@@ -314,15 +329,36 @@ function finished(block, level) {
 }
 
 /**
+ * The marks in the outline's order, each where it leads. One that leads back before the mark above it is a broken link
+ * of the PDF: it goes to its heading after that mark, if one bears its title, else it is left out.
+ */
+function placeMarks(marks, blocks) {
+  const placed = [];
+  let last = null;
+  for (const mark of marks) {
+    let at = { page: mark.page, y: mark.y };
+    if (last && before(at, last)) {
+      const heading = blocks.find((block) => block.kind === 'heading' && !before(block.at, last)
+        && letterCount(block.text) >= MIN_TITLE_LETTERS && partOfTitle(block.text, mark.title));
+      if (!heading) continue;
+      at = { page: heading.at.page, y: heading.at.y - 1 };
+    }
+    placed.push({ ...mark, ...at });
+    last = at;
+  }
+  return placed;
+}
+
+/**
  * @param {Page[]} pages
- * @param {Mark[]} marks
+ * @param {Mark[]} marks In the outline's order.
  * @returns {Chapter[]}
  */
 export function reflow(pages, marks) {
-  const sorted = [...marks].sort((a, b) => a.page - b.page || a.y - b.y);
-  const { blocks, notes } = blocksOf(pages, sorted);
+  const { blocks, notes } = blocksOf(pages, marks);
+  const placed = placeMarks(marks, blocks);
 
-  if (sorted.length === 0) {
+  if (placed.length === 0) {
     const chapters = [];
     for (const block of blocks) {
       const index = Math.floor(block.at.page / PAGES_PER_CHAPTER);
@@ -337,8 +373,8 @@ export function reflow(pages, marks) {
   }
 
   // The chapter of a place: the last mark at or before it, or -1 before the first one.
-  const chapterOf = (at) => sorted.findLastIndex((mark) => !before(at, mark));
-  const parts = [{ title: null, depth: 0, blocks: [], notes: [] }, ...sorted.map(({ title, depth }) => ({ title, depth, blocks: [], notes: [] }))];
+  const chapterOf = (at) => placed.findLastIndex((mark) => !before(at, mark));
+  const parts = [{ title: null, depth: 0, blocks: [], notes: [] }, ...placed.map(({ title, depth }) => ({ title, depth, blocks: [], notes: [] }))];
   for (const block of blocks) parts[chapterOf(block.at) + 1].blocks.push(block);
   for (const note of notes) parts[chapterOf(note.at) + 1].notes.push(note.text);
 
@@ -347,7 +383,7 @@ export function reflow(pages, marks) {
     // The title the page shows is the mark's: it is said once. It may come below a decoration, never after the text.
     const lead = part.blocks.findIndex(({ kind }) => kind === 'paragraph');
     const opening = lead === -1 ? part.blocks : part.blocks.slice(0, lead);
-    const shown = new Set(opening.filter((block) => block.kind === 'heading' && sameTitle(block.text, part.title)));
+    const shown = new Set(opening.filter((block) => block.kind === 'heading' && partOfTitle(block.text, part.title)));
     const level = Math.min(part.depth + 2, MAX_LEVEL);
     return {
       ...part,
