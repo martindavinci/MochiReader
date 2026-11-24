@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { fileName, isSupported, OPENABLE_EXTENSIONS } from '../app/core/paths.js';
+import { fileName, isBook, isSupported, OPENABLE_EXTENSIONS } from '../app/core/paths.js';
 
 test('the name is the last segment of either slash', () => {
   assert.equal(fileName('C:\\x\\Lunaris Essentials_ è, vale.md'), 'Lunaris Essentials_ è, vale.md');
@@ -20,7 +20,16 @@ test('only Markdown and EPUB files can be opened, in any case', () => {
 });
 
 test('the extensions the file dialog offers are the ones that open', () => {
-  assert.deepEqual(OPENABLE_EXTENSIONS, ['md', 'markdown', 'epub']);
+  assert.deepEqual(OPENABLE_EXTENSIONS, ['md', 'markdown', 'epub', 'pdf']);
   for (const extension of OPENABLE_EXTENSIONS) assert.ok(isSupported(`C:\\x\\a.${extension.toUpperCase()}`), extension);
   assert.equal(isSupported('C:\\x\\amd'), false);
+});
+
+test('a PDF opens, and is a book like an EPUB', () => {
+  assert.equal(isSupported('C:/b/x.PDF'), true);
+  assert.ok(OPENABLE_EXTENSIONS.includes('pdf'));
+  assert.equal(isBook('pdf'), true);
+  assert.equal(isBook('epub'), true);
+  assert.equal(isBook('markdown'), false);
+  assert.equal(isBook(null), false);
 });

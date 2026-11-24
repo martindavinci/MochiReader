@@ -14,6 +14,7 @@ const SAME_FOLDER: &str = ".";
 const PARENT_FOLDER: &str = "..";
 const MARKDOWN_EXTENSIONS: [&str; 2] = ["md", "markdown"];
 const EPUB_EXTENSION: &str = "epub";
+const PDF_EXTENSION: &str = "pdf";
 const IMAGE_EXTENSIONS: [&str; 8] = ["avif", "bmp", "gif", "jpeg", "jpg", "png", "svg", "webp"];
 
 pub struct Vault {
@@ -60,9 +61,24 @@ pub fn is_epub(path: &Path) -> bool {
     has_extension(path, &[EPUB_EXTENSION])
 }
 
-/// Whether the app can open the file in a tab.
+pub fn is_pdf(path: &Path) -> bool {
+    has_extension(path, &[PDF_EXTENSION])
+}
+
+/// A file the reader shows as a book, served whole to the page.
+pub fn is_book(path: &Path) -> bool {
+    is_epub(path) || is_pdf(path)
+}
+
+/// What a note can link to and the vault index lists. A PDF is not one: papers in two columns read badly reflowed, so
+/// a link to one stays text.
 pub fn is_document(path: &Path) -> bool {
     is_markdown(path) || is_epub(path)
+}
+
+/// Whether the app can open the file in a tab.
+pub fn is_openable(path: &Path) -> bool {
+    is_document(path) || is_pdf(path)
 }
 
 fn has_extension(path: &Path, extensions: &[&str]) -> bool {

@@ -760,6 +760,16 @@ mod tests {
     }
 
     #[test]
+    fn wikilink_to_a_pdf_stays_text() {
+        let dir = tree(&["paper.pdf"]);
+        let html = in_folder(dir.path(), "[[paper.pdf]]\n").html;
+        let link = doc_link(dir.path().join("paper.pdf"));
+        assert!(!html.contains(&link), "{html}");
+        assert!(crate::vault::is_openable(&dir.path().join("paper.pdf")));
+        assert!(!crate::vault::is_document(&dir.path().join("paper.pdf")));
+    }
+
+    #[test]
     fn tag_is_marked_not_in_code_or_links() {
         let html = alone("testo #tag e #perché/sotto-due, (#terzo).\n").html;
         for tag in ["#tag", "#perché/sotto-due", "#terzo"] {

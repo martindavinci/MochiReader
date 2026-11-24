@@ -2,7 +2,7 @@
 //! `http://mochi.localhost`: the images and the books of the open documents, and nothing else.
 use crate::docs::OPEN_TIMEOUT;
 use crate::obsidian::path_token;
-use crate::vault::{is_epub, is_image};
+use crate::vault::{is_book, is_image};
 use std::fs;
 use std::io;
 use std::path::{Component, Path, PathBuf, Prefix};
@@ -25,13 +25,14 @@ const URL_SEPARATOR: char = '/';
 const NO_SNIFF: &str = "nosniff";
 const NO_STORE: &str = "no-store";
 const DEFAULT_TYPE: &str = "application/octet-stream";
-const MEDIA_TYPES: [(&str, &str); 9] = [
+const MEDIA_TYPES: [(&str, &str); 10] = [
     ("avif", "image/avif"),
     ("bmp", "image/bmp"),
     ("epub", "application/epub+zip"),
     ("gif", "image/gif"),
     ("jpeg", "image/jpeg"),
     ("jpg", "image/jpeg"),
+    ("pdf", "application/pdf"),
     ("png", "image/png"),
     ("svg", "image/svg+xml"),
     ("webp", "image/webp"),
@@ -176,7 +177,7 @@ fn serve(roots: &Roots, request_path: &str) -> Served {
     };
     let is_served: fn(&Path) -> bool = match route {
         IMAGE_ROUTE => is_image,
-        FILE_ROUTE => is_epub,
+        FILE_ROUTE => is_book,
         _ => return Err(StatusCode::NOT_FOUND),
     };
     let path = decode_path_token(token).ok_or(StatusCode::BAD_REQUEST)?;
@@ -276,6 +277,12 @@ mod tests {
         let response = get(&roots, "file", &book);
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(response.headers()["content-type"], "application/epub+zip");
+
+        let pdf = dir.path().join("a.pdf");
+        fs::write(&pdf, b"%PDF").unwrap();
+        let response = get(&roots, "file", &pdf);
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()["content-type"], "application/pdf");
     }
 
     #[test]

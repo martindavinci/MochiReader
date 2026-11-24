@@ -12,7 +12,7 @@ export default {
   'home.keyPage': 'Virar a página',
 
   'dialog.open': 'Abrir um arquivo',
-  'dialog.filter': 'Markdown e EPUB',
+  'dialog.filter': 'Markdown, EPUB e PDF',
 
   'drop.title': 'Solte para abrir',
   'drop.text': 'Arquivos Markdown (.md) e EPUB (.epub) abrem em uma nova aba.',

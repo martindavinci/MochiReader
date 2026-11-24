@@ -3,7 +3,7 @@
 use crate::native::sha256;
 use crate::protocol::{file_url, Roots};
 use crate::render::{decode_text, render_markdown, RenderCtx, Rendered};
-use crate::vault::{find_vault, is_document, is_epub, is_markdown};
+use crate::vault::{find_vault, is_book, is_markdown, is_openable, is_pdf};
 use serde::Serialize;
 use std::fs;
 use std::io;
@@ -28,6 +28,7 @@ const MS_PER_SECOND: f64 = 1000.0;
 pub enum DocKind {
     Markdown,
     Epub,
+    Pdf,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -136,7 +137,12 @@ fn load(path: &str, read: impl FnOnce(&Path) -> io::Result<Vec<u8>>) -> LoadResu
         if !fs::metadata(file)?.is_file() {
             return Err(OpenErrorCode::Unreadable.into());
         }
-        (DocKind::Epub, None, None, Some(file_url(file)))
+        let kind = if is_pdf(file) {
+            DocKind::Pdf
+        } else {
+            DocKind::Epub
+        };
+        (kind, None, None, Some(file_url(file)))
     };
     Ok(Loaded {
         doc: OpenedDoc {
@@ -178,7 +184,7 @@ fn wait(receiver: &Receiver<LoadResult>, timeout: Duration) -> LoadResult {
 }
 
 fn check_supported(path: &str) -> Result<(), OpenError> {
-    if is_document(Path::new(path)) {
+    if is_openable(Path::new(path)) {
         Ok(())
     } else {
         Err(OpenErrorCode::Unsupported.into())
@@ -260,7 +266,7 @@ impl Docs {
         let path = PathBuf::from(path);
         answer_within(
             move || {
-                if !is_epub(&path) {
+                if !is_book(&path) {
                     return Err(OpenErrorCode::Unsupported.into());
                 }
                 let real = roots.allows(&path).map_err(|status| match status {
@@ -560,6 +566,30 @@ mod tests {
         assert!(doc.rendered.is_none());
         let url = doc.file_url.unwrap();
         assert!(url.starts_with("http://mochi.localhost/file/"), "{url}");
+    }
+
+    #[test]
+    fn a_pdf_gets_a_url_and_no_text() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a b.pdf");
+        fs::write(&path, b"%PDF").unwrap();
+        let doc = open(&path).unwrap();
+        assert_eq!(doc.kind, DocKind::Pdf);
+        assert!(doc.rendered.is_none());
+        assert!(doc.key.is_none());
+        let url = doc.file_url.unwrap();
+        assert!(url.starts_with("http://mochi.localhost/file/"), "{url}");
+    }
+
+    #[test]
+    fn a_pdf_has_a_hash() {
+        let dir = tempfile::tempdir().unwrap();
+        let book = dir.path().join("a.pdf");
+        fs::write(&book, b"abc").unwrap();
+        let path = book.to_string_lossy().into_owned();
+        let docs = Docs::default();
+        docs.open(&path).unwrap();
+        assert_eq!(docs.file_hash(&path), Ok(ABC_SHA256.to_string()));
     }
 
     #[test]

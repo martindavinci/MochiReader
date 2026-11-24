@@ -12,7 +12,7 @@ export default {
   'home.keyPage': '翻页',
 
   'dialog.open': '打开文件',
-  'dialog.filter': 'Markdown 和 EPUB',
+  'dialog.filter': 'Markdown、EPUB 和 PDF',
 
   'drop.title': '松开即可打开',
   'drop.text': 'Markdown (.md) 和 EPUB (.epub) 文件会在新标签页中打开。',

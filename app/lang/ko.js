@@ -12,7 +12,7 @@ export default {
   'home.keyPage': '페이지 넘기기',
 
   'dialog.open': '파일 열기',
-  'dialog.filter': 'Markdown 및 EPUB',
+  'dialog.filter': 'Markdown, EPUB 및 PDF',
 
   'drop.title': '놓으면 열립니다',
   'drop.text': 'Markdown(.md) 및 EPUB(.epub) 파일은 새 탭에서 열립니다.',
