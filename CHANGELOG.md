@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.8.1] - 2026-11-25
+
+### Added
+
+- A bookmark leaves a small ribbon in the margin beside its place, in Markdown files and in books, so you can see where your bookmarks are as you read.
+
 ## [0.8.0] - 2026-11-24
 
 ### Added
