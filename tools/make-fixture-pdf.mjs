@@ -194,7 +194,7 @@ export const PDF_FIXTURES = {
     },
     outline: [
       { title: 'Chapter One', page: 0, top: 90 },
-      { title: 'Chapter Two', page: 2, top: 160, children: [{ title: 'Part Two Subtitle', page: 2, top: 195 }] },
+      { title: 'Chapter Two', page: 2, top: 50, children: [{ title: 'Part Two Subtitle', page: 2, top: 195 }] },
     ],
     info: { Title: 'A Made-Up Book', Author: 'Nobody' },
   }),
