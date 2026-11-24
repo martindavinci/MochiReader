@@ -655,6 +655,14 @@ article {
   --wide: max(100%, min(100cqi - 2 * var(--article-pad-x), 80rem));
 }
 
+/* The block of a bookmark: a small ribbon in the margin beside its first line, only to be seen. Books draw the same
+   ribbon over their text (readers/bookmark-mark.js). */
+article [data-bookmark]:not(hr) { position: relative; }
+article [data-bookmark]:not(hr)::after {
+  content: ""; position: absolute; left: -18px; top: calc(.825em - 6.5px); width: 8px; height: 13px;
+  background: var(--accent); clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 69%, 0 100%); pointer-events: none;
+}
+
 /* A part clips what leaves its box, so it spans the padding of the text: list numbers stand out to the left. */
 article.large > .part {
   margin-inline: calc(-1 * var(--article-pad-x));

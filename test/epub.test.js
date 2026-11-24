@@ -1249,3 +1249,47 @@ test('a view chosen by hand holds whatever the book has', async (t) => {
   reader.setFlow('paginated');
   assert.equal(view.renderer.attributes.get('flow'), 'paginated');
 });
+
+/** foliate's view as far as the marks of the bookmarks use it: it records what it is asked to draw and to take away. */
+function annotatingView() {
+  const view = new FakeView();
+  view.annotations = [];
+  view.addAnnotation = async ({ value }, remove) => {
+    view.annotations.push([remove ? 'delete' : 'add', value]);
+  };
+  view.deleteAnnotation = (annotation) => view.addAnnotation(annotation, true);
+  return view;
+}
+
+const MARK_A = 'epubcfi(/6/2!/4/2,/1:0,/1:10)';
+const MARK_B = 'epubcfi(/6/4!/4/6,/1:0,/1:12)';
+
+test('the bookmarks of a book are marked beside its text, and a mark goes with its bookmark', () => {
+  const view = annotatingView();
+  const reader = makeReader(view, {});
+  reader.showBookmarks([{ kind: 'epub', cfi: MARK_A }, { kind: 'epub', cfi: MARK_B }]);
+  reader.showBookmarks([{ kind: 'epub', cfi: MARK_B }]);
+  assert.deepEqual(view.annotations, [['add', MARK_A], ['add', MARK_B], ['delete', MARK_A]]);
+});
+
+test('a section that comes on screen gets its marks again', () => {
+  const view = annotatingView();
+  const reader = makeReader(view, {});
+  reader.showBookmarks([{ kind: 'epub', cfi: MARK_B }]);
+  view.annotations = [];
+  view.dispatchEvent(new CustomEvent('create-overlay', { detail: { index: 2 } }));
+  assert.deepEqual(view.annotations, [['add', MARK_B]]);
+});
+
+test('only a bookmark is drawn as a mark', () => {
+  const view = annotatingView();
+  const reader = makeReader(view, {});
+  reader.showBookmarks([{ kind: 'epub', cfi: MARK_B }]);
+  const drawn = [];
+  const ask = (value) => view.dispatchEvent(new CustomEvent('draw-annotation', {
+    detail: { draw: (paint) => drawn.push([value, typeof paint]), annotation: { value }, range: {} },
+  }));
+  ask(MARK_B);
+  ask(MARK_A);
+  assert.deepEqual(drawn, [[MARK_B, 'function']]);
+});

@@ -948,6 +948,20 @@ async function showBookmarkCount() {
   }
   const count = await invoke('state_bookmark_count', { key: entry.key });
   if (activeEntry() === entry) tabTools.setBookmarks(count);
+  await showBookmarkMarks(entry, count);
+}
+
+/** The places of the bookmarks of a document, marked beside its text: only to be seen. */
+async function showBookmarkMarks(entry, count) {
+  const { reader } = entry;
+  if (!reader?.showBookmarks) return;
+  let positions = [];
+  if (count > 0) {
+    const [{ bookmarks }, { bookmarksOf }] = await Promise.all([invoke('state_get'), import('../core/places.js')]);
+    positions = bookmarksOf(bookmarks, entry.key).map(({ position }) => position);
+  }
+  // The document may have been read again meanwhile, and its new reader is marked by the call that follows it.
+  if (entry.reader === reader) await reader.showBookmarks(positions);
 }
 
 function drawTabsPanel() {

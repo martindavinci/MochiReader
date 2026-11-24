@@ -875,6 +875,19 @@ test('ctrl+d adds a bookmark at the current point and says so, and again takes i
   assert.notEqual(shell.toast().textContent, added);
 });
 
+test('the paragraph of a bookmark has a mark beside it, which comes and goes with the bookmark', async () => {
+  const shell = await startShell(async (path) => markdownDoc(path, 'Il brano'), { pending: [PATH_A] });
+  await shell.settled();
+  const marked = () => shell.panes()[0].querySelectorAll('[data-bookmark]').length;
+  assert.equal(marked(), 0);
+  await shell.press('d', CTRL);
+  await shell.settled();
+  assert.equal(marked(), 1);
+  await shell.press('d', CTRL);
+  await shell.settled();
+  assert.equal(marked(), 0);
+});
+
 test('ctrl+d with no text does nothing', async () => {
   const shell = await startShell(failure('not_found'), { pending: [PATH_A] });
   await shell.settled();

@@ -2,6 +2,7 @@
 // Nothing of foliate-js loads until the first book opens: a Markdown file never pays for it.
 import { debounce, SAVE_DEBOUNCE_MS, SCROLL_KEYS } from '../core/position.js';
 import { HIGHLIGHT_RULE, relativeDocumentSizes, relativeSizes } from './epub-style.js';
+import { drawBookmarkMark } from './bookmark-mark.js';
 import { epubKey, mainTitle } from './epub-key.js';
 import { isUnreadablePage, keepSectionsLoading, sectionPage, sectionType } from './epub-section.js';
 import { excerptOf } from './excerpt.js';
@@ -367,6 +368,25 @@ export function makeReader(view, { key, title, onInput = () => {}, place = null,
   }, SAVE_DEBOUNCE_MS);
   view.addEventListener('relocate', notifyMove);
 
+  // The places of the bookmarks, marked beside the text. foliate keeps the marks of a section only while it is loaded,
+  // and asks again how to draw them when it is laid out anew.
+  let marks = new Set();
+  const markSection = () => marks.forEach((value) => view.addAnnotation({ value }).catch(() => {}));
+  const drawMark = ({ detail: { draw, annotation, range } }) => {
+    if (marks.has(annotation.value)) draw(() => drawBookmarkMark(range, view.ownerDocument));
+  };
+  view.addEventListener('create-overlay', markSection);
+  view.addEventListener('draw-annotation', drawMark);
+  const showBookmarks = (positions) => {
+    const next = new Set(positions.map(({ cfi }) => cfi).filter(Boolean));
+    marks.forEach((value) => {
+      if (!next.has(value)) view.deleteAnnotation({ value }).catch(() => {});
+    });
+    const added = [...next].filter((value) => !marks.has(value));
+    marks = next;
+    added.forEach((value) => view.addAnnotation({ value }).catch(() => {}));
+  };
+
   const shownDocs = () => view.renderer.getContents().filter(({ doc }) => doc?.body && doc.URL !== EMPTY_FRAME_URL);
 
   const moveSection = (delta) => {
@@ -445,6 +465,7 @@ export function makeReader(view, { key, title, onInput = () => {}, place = null,
     goLeft: () => view.goLeft(),
     goRight: () => view.goRight(),
     next: () => view.next(),
+    showBookmarks,
     setFlow: (choice) => view.renderer.setAttribute('flow', flowFor(choice, view.book?.toc)),
     /** The keys only reach the book from inside its frame, and only there can they scroll it. */
     focus: () => shownDocs()[0]?.doc.defaultView?.focus(),
@@ -458,6 +479,8 @@ export function makeReader(view, { key, title, onInput = () => {}, place = null,
       view.removeEventListener('relocate', notifyProgress);
       view.renderer.removeEventListener('relocate', onRelocate);
       view.removeEventListener('load', onSectionLoad);
+      view.removeEventListener('create-overlay', markSection);
+      view.removeEventListener('draw-annotation', drawMark);
       closeView(view);
     },
   };

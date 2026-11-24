@@ -72,6 +72,14 @@ async function startBookShell({ bookmarks = [], makeBook = async () => goodBook(
       goTo: async (target) => {
         element.goes.push(target);
       },
+      // foliate draws the marks of the bookmarks: here they are only kept.
+      marks: [],
+      addAnnotation: async ({ value }) => {
+        element.marks.push(value);
+      },
+      deleteAnnotation: async ({ value }) => {
+        element.marks = element.marks.filter((kept) => kept !== value);
+      },
       close: () => {
         element.closed = true;
         element.lastLocation = null;

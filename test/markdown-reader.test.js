@@ -802,3 +802,14 @@ test('a large document offers its parts one by one, so that reading can start wi
   assert.deepEqual(roots.map(({ root }) => root), [...host.querySelector('article').children]);
   reader.destroy();
 });
+
+test('the blocks of the bookmarks are marked, and only those', async () => {
+  const { reader, blocks } = setup();
+  const marked = () => blocks.map((block) => block.hasAttribute('data-bookmark'));
+  await reader.showBookmarks([{ kind: 'md', line: 5, sentence: 2 }, { kind: 'md', line: 9, sentence: 0 }]);
+  assert.deepEqual(marked(), [false, false, true, true]);
+  await reader.showBookmarks([{ kind: 'md', line: 3, sentence: 0 }]);
+  assert.deepEqual(marked(), [false, true, false, false]);
+  await reader.showBookmarks([]);
+  assert.deepEqual(marked(), [false, false, false, false]);
+});

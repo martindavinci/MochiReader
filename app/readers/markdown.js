@@ -300,6 +300,17 @@ export function openMarkdown(doc, host) {
       handCallbacks.push(callback);
     },
     excerpt: () => excerptOf(currentBlock()?.textContent ?? ''),
+    showBookmarks: async (positions) => {
+      await filled;
+      if (destroyed) return;
+      const all = blocks();
+      const lines = all.map(lineOf);
+      const marked = new Set(positions.map(({ line }) => all[nearestBlock(lines, line)]).filter(Boolean));
+      for (const block of article.querySelectorAll('[data-bookmark]')) {
+        if (!marked.has(block)) block.removeAttribute('data-bookmark');
+      }
+      for (const block of marked) block.setAttribute('data-bookmark', '');
+    },
     moveBlock: (delta) => step(landingBlocks, delta),
     moveSection: (delta) => step(headingBlocks, delta),
     destroy: () => {
