@@ -13,7 +13,9 @@ permissions:
 env:
   ESPEAK_TAG: '1.52.0'
   ORT_VERSION: '1.32.0'
-  ORT_SHA256: 'aaa1d04fcf86bd31e84b90bc0cbde80e632bd0720dcc5d8ba05c4fe45c09d127'
+  # The NuGet package of ONNX Runtime (Microsoft.ML.OnnxRuntime): its GitHub releases are gone since 2026-11-18, and the
+  # package holds the same onnxruntime.dll, byte for byte.
+  ORT_SHA256: 'a9150bc2992cbbb6722070da9910e1ffa989a8bfc67bdd5bb8e745ca755641db'
 
 jobs:
   build:
@@ -44,7 +46,8 @@ jobs:
       - name: ONNX Runtime
         shell: pwsh
         run: |
-          $url = "https://github.com/microsoft/onnxruntime/releases/download/v$env:ORT_VERSION/onnxruntime-win-x64-$env:ORT_VERSION.zip"
+          $url = "https://www.nuget.org/api/v2/package/Microsoft.ML.OnnxRuntime/$env:ORT_VERSION"
+          # a .nupkg is a zip; the name keeps Expand-Archive happy
           Invoke-WebRequest $url -OutFile ort.zip
       - name: Engine folder
         shell: pwsh

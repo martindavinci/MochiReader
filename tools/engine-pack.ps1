@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Puts the voice engine together, in the folder the app is built with (src-tauri\engine): ONNX Runtime as Microsoft
-# publishes it, and eSpeak NG from its build, with the dictionaries of the languages that have voices in
-# app/speech/voices.json only. It only copies files: it never loads the libraries.
+# publishes it in its NuGet package (Microsoft.ML.OnnxRuntime), and eSpeak NG from its build, with the dictionaries of the
+# languages that have voices in app/speech/voices.json only. It only copies files: it never loads the libraries.
 param(
   [Parameter(Mandatory)] [string] $EspeakBuild,
   [Parameter(Mandatory)] [string] $EspeakSource,
@@ -16,7 +16,7 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $found = (Get-FileHash -Algorithm SHA256 $OrtZip).Hash.ToLowerInvariant()
-if ($found -ne $OrtSha256.ToLowerInvariant()) { throw "ONNX Runtime zip: SHA-256 $found, expected $OrtSha256" }
+if ($found -ne $OrtSha256.ToLowerInvariant()) { throw "ONNX Runtime package: SHA-256 $found, expected $OrtSha256" }
 
 $root = Split-Path -Parent $PSScriptRoot
 $catalog = Get-Content (Join-Path $root 'app/speech/voices.json') -Raw | ConvertFrom-Json
@@ -27,10 +27,10 @@ if (Test-Path $Out) { Remove-Item $Out -Recurse -Force }
 New-Item -ItemType Directory -Force (Join-Path $Out 'LICENSES') | Out-Null
 $work = Join-Path ([IO.Path]::GetTempPath()) ('engine-pack-' + [Guid]::NewGuid())
 Expand-Archive $OrtZip -DestinationPath $work
-$ort = Get-ChildItem $work -Directory | Select-Object -First 1
-Copy-Item (Join-Path $ort.FullName 'lib/onnxruntime.dll') $Out
-Copy-Item (Join-Path $ort.FullName 'LICENSE') (Join-Path $Out 'LICENSES/onnxruntime.txt')
-Copy-Item (Join-Path $ort.FullName 'ThirdPartyNotices.txt') (Join-Path $Out 'LICENSES/ThirdPartyNotices-onnxruntime.txt')
+# the package's layout: the library under runtimes/win-x64/native, its license and notices at the root
+Copy-Item (Join-Path $work 'runtimes/win-x64/native/onnxruntime.dll') $Out
+Copy-Item (Join-Path $work 'LICENSE') (Join-Path $Out 'LICENSES/onnxruntime.txt')
+Copy-Item (Join-Path $work 'ThirdPartyNotices.txt') (Join-Path $Out 'LICENSES/ThirdPartyNotices-onnxruntime.txt')
 Remove-Item $work -Recurse -Force
 
 $espeak = Get-ChildItem $EspeakBuild -Recurse -Filter 'espeak-ng.dll' | Select-Object -First 1
@@ -50,8 +50,8 @@ foreach ($language in $languages) {
 Copy-Item (Join-Path $EspeakSource 'COPYING') (Join-Path $Out 'LICENSES/espeak-ng.txt')
 
 $sources = @(
-  "ONNX Runtime $OrtVersion (MIT): https://github.com/microsoft/onnxruntime/releases/tag/v$OrtVersion",
-  "  onnxruntime-win-x64-$OrtVersion.zip, SHA-256 $OrtSha256",
+  "ONNX Runtime $OrtVersion (MIT): https://www.nuget.org/packages/Microsoft.ML.OnnxRuntime/$OrtVersion",
+  "  Microsoft.ML.OnnxRuntime.$OrtVersion.nupkg, SHA-256 $OrtSha256",
   "eSpeak NG $EspeakTag (GPL-3.0-or-later): https://github.com/espeak-ng/espeak-ng/tree/$EspeakTag",
   '  built by .github/workflows/engine.yml of https://github.com/martindavinci/MochiReader;',
   "  its source is espeak-ng-$EspeakTag-source.tar.gz, in the release of MochiReader this engine came with.",
