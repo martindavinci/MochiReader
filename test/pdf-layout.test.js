@@ -201,3 +201,12 @@ test('hasText is false for pages with no text', () => {
   assert.equal(hasText([page(picture(0, 0, WIDTH, HEIGHT))]), false);
   assert.equal(hasText([page(...paragraph(100, full('Words'), 'here.'))]), true);
 });
+
+test('the title a page shows below a decoration is said once, by the mark', () => {
+  const chapters = reflow([page(
+    picture(117, 60, 378, 85),
+    line('Chapter Two', 180, { size: 24, bold: true }),
+    ...paragraph(220, full('Text'), 'ends.'),
+  )], [{ title: 'Chapter Two', page: 0, y: 50, depth: 0 }]);
+  assert.deepEqual(texts(chapters[0].blocks), ['heading: Chapter Two', '[figure null]', `paragraph: ${full('Text')} ends.`]);
+});

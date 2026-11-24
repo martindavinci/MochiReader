@@ -344,15 +344,16 @@ export function reflow(pages, marks) {
 
   return parts.map((part, index) => {
     if (index === 0) return { ...part, blocks: part.blocks.map((block) => finished(block, 2)) };
-    let start = 0;
-    // The title the page shows is the mark's: it is said once.
-    while (part.blocks[start]?.kind === 'heading' && sameTitle(part.blocks[start].text, part.title)) start += 1;
+    // The title the page shows is the mark's: it is said once. It may come below a decoration, never after the text.
+    const lead = part.blocks.findIndex(({ kind }) => kind === 'paragraph');
+    const opening = lead === -1 ? part.blocks : part.blocks.slice(0, lead);
+    const shown = new Set(opening.filter((block) => block.kind === 'heading' && sameTitle(block.text, part.title)));
     const level = Math.min(part.depth + 2, MAX_LEVEL);
     return {
       ...part,
       blocks: [
         { kind: 'heading', level: Math.min(part.depth + 1, MAX_LEVEL), text: part.title },
-        ...part.blocks.slice(start).map((block) => finished(block, level)),
+        ...part.blocks.filter((block) => !shown.has(block)).map((block) => finished(block, level)),
       ],
     };
   }).filter((part, index) => index > 0 || part.blocks.length > 0 || part.notes.length > 0);
