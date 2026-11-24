@@ -77,3 +77,11 @@ test('cropOf rounds outwards and stays on the page', () => {
   assert.deepEqual(cropOf({ x: 10.4, y: 0, width: 20.2, height: 5 }, 2), { x: 20, y: 0, width: 42, height: 10 });
   assert.deepEqual(cropOf({ x: -3, y: -1, width: 10, height: 10 }, 1), { x: 0, y: 0, width: 7, height: 9 });
 });
+
+test('a title with its brackets escaped twice reads plainly', async () => {
+  const fake = fakePdfjs();
+  const doc = await fake.getDocument().promise;
+  doc.getMetadata = async () => ({ info: { Title: 'A book \\( site \\).pdf' } });
+  const { info } = await readPdf(new Uint8Array(1), { ...fake, getDocument: () => ({ promise: Promise.resolve(doc) }) });
+  assert.equal(info.title, 'A book ( site ).pdf');
+});

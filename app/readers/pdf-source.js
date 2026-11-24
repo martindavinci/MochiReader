@@ -18,6 +18,7 @@ const PASSWORD_EXCEPTION = 'PasswordException';
 const BOLD_NAME = /bold|black|heavy|semibold|demi/i;
 const DESTINATION_TOP = { XYZ: 3, FitH: 2, FitBH: 2, FitR: 5 };
 const IDENTITY = [1, 0, 0, 1, 0, 0];
+const ESCAPED_BRACKET = /\\([()])/g;
 
 /** @returns {number[]} The transform `matrix` then `current`, as PDF composes them. */
 function compose([a, b, c, d, e, f], [A, B, C, D, E, F]) {
@@ -128,7 +129,8 @@ export async function readPdf(data, pdfjs) {
   const { info, metadata } = (await pdf.getMetadata().catch(() => null)) ?? {};
   return {
     info: {
-      title: textOrNull(info?.Title),
+      // Some makers escape the brackets of a title a second time, and the backslashes stay in it.
+      title: textOrNull(info?.Title)?.replace(ESCAPED_BRACKET, '$1') ?? null,
       author: textOrNull(info?.Author),
       language: textOrNull(info?.Language) ?? textOrNull(metadata?.get?.('dc:language')),
     },
