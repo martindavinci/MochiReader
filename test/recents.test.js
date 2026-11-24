@@ -95,3 +95,7 @@ test('drawing again replaces the list', () => {
   assert.equal(host.querySelectorAll('h1').length, 1);
 });
 
+test('a PDF is marked as one', () => {
+  const { host } = draw([{ ...recent('C:\\x\\a.pdf'), kind: 'pdf', chapter: 1, chapters: 4 }]);
+  assert.equal(host.querySelector('.recent-open').getAttribute('data-kind'), 'pdf');
+});

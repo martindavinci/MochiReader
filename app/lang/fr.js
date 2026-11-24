@@ -41,6 +41,11 @@ export default {
   'file.notReloaded': 'Ce fichier a changé et ne peut pas être lu pour l’instant. Vous lisez la dernière version ouverte.',
   'epub.errorTitle': 'Impossible d’ouvrir ce livre',
   'epub.error': '{name} est peut-être endommagé ou protégé par des DRM. MochiReader n’ouvre que les livres sans DRM.',
+  'pdf.passwordTitle': 'Ce PDF est verrouillé',
+  'pdf.password': '{name} a un mot de passe. MochiReader n’ouvre que les PDF sans mot de passe.',
+  'pdf.noTextTitle': 'Ce PDF n’a pas de texte',
+  'pdf.noText': '{name} ne contient que des images de pages (un scan). MochiReader lit les PDF qui ont leur texte.',
+  'pdf.notes': 'Notes',
   'epub.sectionError': 'Cette partie du livre est illisible : son fichier est endommagé. Les flèches permettent de passer au-delà.',
 
   'book.chapter': 'Chapitre {n} sur {total}',

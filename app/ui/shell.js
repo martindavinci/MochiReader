@@ -2,7 +2,7 @@
 import { getLang, getLocale, loadLang, t } from '../core/i18n.js';
 import { resolveKey } from '../core/keys.js';
 import { linkAction } from '../core/links.js';
-import { fileName, isSupported, OPENABLE_EXTENSIONS } from '../core/paths.js';
+import { fileName, isBook, isSupported, OPENABLE_EXTENSIONS } from '../core/paths.js';
 import { Tabs } from '../core/tabs.js';
 import { bookStyle } from '../readers/epub-style.js';
 import { openMarkdown } from '../readers/markdown.js';
@@ -34,7 +34,7 @@ const STATUS_MISSING = 'missing';
 const CODE_NOT_FOUND = 'not_found';
 const CODE_TIMEOUT = 'timeout';
 const CODE_UNREADABLE = 'unreadable';
-const KIND_EPUB = 'epub';
+const KIND_PDF = 'pdf';
 const KEY_DOWN = 'keydown';
 const DARK_SYSTEM_THEME = '(prefers-color-scheme: dark)';
 const THEME_SYSTEM = 'system';
@@ -350,7 +350,7 @@ const holdToast = () => clearTimeout(toastTimer);
  * foliate holds the place of a book through a change of layout, by what is on the page. Sending it to the start of the
  * page instead gives that up: the page has reflowed and starts earlier, and each change loses a little more.
  */
-const holdsItsPlace = ({ kind }) => kind === KIND_EPUB;
+const holdsItsPlace = ({ kind }) => isBook(kind);
 
 /** A message above text that stays readable. An empty one takes it away. */
 function setFileNotice(entry, message) {
@@ -431,7 +431,7 @@ function follow(action, pane) {
   else if (action?.type === 'anchor') pane.querySelector(`#${CSS.escape(action.id)}`)?.scrollIntoView();
 }
 
-const openBooks = () => [...entries.values()].filter(({ kind, reader }) => kind === KIND_EPUB && reader);
+const openBooks = () => [...entries.values()].filter(({ kind, reader }) => isBook(kind) && reader);
 
 const currentBookStyle = () => bookStyle(options, matchMedia(DARK_SYSTEM_THEME).matches);
 
@@ -539,15 +539,20 @@ function onBookInput(entry, event) {
 }
 
 async function showBook(doc, host, savedPosition) {
-  const { openEpub } = await import('../readers/epub.js');
+  const [{ openEpub }, { pdfFoliate }] = await Promise.all([import('../readers/epub.js'), import('../readers/pdf-open.js')]);
+  const hash = () => invoke('file_hash', { path: doc.path });
+  // A PDF is read as an EPUB made from it: only the way the book is made differs.
+  const loadFoliate = doc.kind === KIND_PDF
+    ? pdfFoliate({ hash, notesTitle: t('pdf.notes'), name: fileName(doc.path), document: host.ownerDocument })
+    : undefined;
   return openEpub(doc.fileUrl, host, {
     flow: options.epubView,
     style: currentBookStyle(),
-    hash: () => invoke('file_hash', { path: doc.path }),
+    hash,
     savedPosition,
     openExternal: (url) => invoke('open_external', { url }),
     unreadableSection: t('epub.sectionError'),
-  });
+  }, loadFoliate);
 }
 
 async function openBook(doc, id, entry, savedPosition) {
@@ -560,10 +565,12 @@ async function openBook(doc, id, entry, savedPosition) {
   } catch (error) {
     console.warn(error);
     if (entries.get(id) === entry) {
+      const { bookError } = await import('../readers/pdf-open.js');
+      const { title, text } = bookError(error, fileName(entry.path), t);
       showState(entry, STATUS_ERROR, {
         glyph: 'lock',
-        title: t('epub.errorTitle'),
-        text: t('epub.error', { name: fileName(entry.path) }),
+        title,
+        text,
         actions: [closeTabAction(entry, true), showInFolderAction(entry)],
       });
     }
@@ -648,7 +655,7 @@ async function mount(doc, id, entry, savedPosition) {
   entry.title = doc.name;
   entry.modified = doc.modifiedMs ?? null;
   entry.restored = false;
-  if (doc.kind === KIND_EPUB) await mountBook(doc, id, entry, savedPosition);
+  if (isBook(doc.kind)) await mountBook(doc, id, entry, savedPosition);
   else mountMarkdown(doc, entry);
 }
 
@@ -708,7 +715,7 @@ async function reloadBook(doc, id, entry) {
 async function reload(id, entry) {
   const doc = await invoke('open_document', { path: entry.path });
   if (entries.get(id) !== entry) return;
-  if (doc.kind === KIND_EPUB) {
+  if (isBook(doc.kind)) {
     await reloadBook(doc, id, entry);
     return;
   }
@@ -964,18 +971,18 @@ function drawTabsPanel() {
 function drawTocPanel() {
   const reader = activeEntry()?.reader;
   const toc = reader?.toc() ?? [];
-  const isBook = activeEntry()?.kind === KIND_EPUB;
-  const count = isBook ? toc.filter(({ level }) => level === 1).length : toc.length;
+  const book = isBook(activeEntry()?.kind);
+  const count = book ? toc.filter(({ level }) => level === 1).length : toc.length;
   const progress = reader?.progress?.();
   renderToc(panelHost, toc, {
     labels: {
       title: t('toc.title'),
       empty: t('toc.empty'),
       here: progress?.page ? t('book.page', { n: progress.page, total: progress.pages }) : t('toc.here'),
-      count: t(isBook ? 'toc.chapters' : 'toc.headings', { n: count }),
+      count: t(book ? 'toc.chapters' : 'toc.headings', { n: count }),
     },
     current: reader?.currentToc?.() ?? -1,
-    numbered: isBook,
+    numbered: book,
     onGo: openingRow(async (target) => {
       const entry = activeEntry();
       closePanel();
@@ -1470,7 +1477,7 @@ function onKeyDown(event) {
   const kind = activeEntry()?.kind ?? '';
   const speaking = speech?.active() ?? false;
   const action = resolveKey(chord, { speaking, kind });
-  if (!action || (PAGE_ACTIONS.has(action) && kind !== KIND_EPUB)) return;
+  if (!action || (PAGE_ACTIONS.has(action) && !isBook(kind))) return;
   if (!event.ctrlKey && CONTROL_KEYS.has(event.key) && event.target.closest?.(CONTROLS)) return;
   event.preventDefault();
   event.stopPropagation();

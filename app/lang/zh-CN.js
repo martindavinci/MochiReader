@@ -41,6 +41,11 @@ export default {
   'file.notReloaded': '此文件已更改，暂时无法读取。你正在阅读最后一次打开的版本。',
   'epub.errorTitle': '无法打开这本书',
   'epub.error': '{name} 可能已损坏，或受 DRM 保护。MochiReader 只能打开没有 DRM 的书。',
+  'pdf.passwordTitle': '此 PDF 已加密',
+  'pdf.password': '{name} 设有密码。MochiReader 只能打开没有密码的 PDF。',
+  'pdf.noTextTitle': '此 PDF 没有文本',
+  'pdf.noText': '{name} 只包含页面图片（扫描件）。MochiReader 只读取含有文本的 PDF。',
+  'pdf.notes': '注释',
   'epub.sectionError': '无法读取书的这一部分：它的文件已损坏。按方向键可以跳过。',
 
   'book.chapter': '第 {n} 章，共 {total} 章',

@@ -41,6 +41,11 @@ export default {
   'file.notReloaded': '이 파일이 바뀌었는데 지금은 읽을 수 없습니다. 마지막으로 연 버전을 읽고 있습니다.',
   'epub.errorTitle': '이 책을 열 수 없습니다',
   'epub.error': '{name}이(가) 손상되었거나 DRM으로 보호되어 있을 수 있습니다. MochiReader는 DRM이 없는 책만 엽니다.',
+  'pdf.passwordTitle': '이 PDF는 잠겨 있습니다',
+  'pdf.password': '{name}에 암호가 있습니다. MochiReader는 암호가 없는 PDF만 열 수 있습니다.',
+  'pdf.noTextTitle': '이 PDF에는 텍스트가 없습니다',
+  'pdf.noText': '{name}에는 페이지 이미지만 있습니다(스캔). MochiReader는 텍스트가 있는 PDF를 읽습니다.',
+  'pdf.notes': '주석',
   'epub.sectionError': '책의 이 부분은 읽을 수 없습니다. 파일이 손상되었습니다. 화살표 키로 넘어갈 수 있습니다.',
 
   'book.chapter': '{total}장 중 {n}장',

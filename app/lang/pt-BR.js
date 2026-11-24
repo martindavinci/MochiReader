@@ -41,6 +41,11 @@ export default {
   'file.notReloaded': 'Este arquivo mudou e não pode ser lido agora. Você está lendo a última versão aberta.',
   'epub.errorTitle': 'Não é possível abrir este livro',
   'epub.error': '{name} pode estar danificado ou protegido por DRM. O MochiReader abre apenas livros sem DRM.',
+  'pdf.passwordTitle': 'Este PDF está bloqueado',
+  'pdf.password': '{name} tem senha. O MochiReader só abre PDFs sem senha.',
+  'pdf.noTextTitle': 'Este PDF não tem texto',
+  'pdf.noText': '{name} contém só imagens de páginas (uma digitalização). O MochiReader lê PDFs que têm o próprio texto.',
+  'pdf.notes': 'Notas',
   'epub.sectionError': 'Esta parte do livro não pode ser lida: o arquivo dela está danificado. Com as setas você segue adiante.',
 
   'book.chapter': 'Capítulo {n} de {total}',

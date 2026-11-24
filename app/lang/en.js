@@ -41,6 +41,11 @@ export default {
   'file.notReloaded': 'This file has changed and cannot be read now. You are reading the last version opened.',
   'epub.errorTitle': 'This book can’t be opened',
   'epub.error': '{name} may be damaged, or protected by DRM. MochiReader can open only books without DRM.',
+  'pdf.passwordTitle': 'This PDF is locked',
+  'pdf.password': '{name} has a password. MochiReader can open only PDFs without one.',
+  'pdf.noTextTitle': 'This PDF has no text',
+  'pdf.noText': '{name} holds only pictures of pages (a scan). MochiReader reads PDFs that have their text.',
+  'pdf.notes': 'Notes',
   'epub.sectionError': 'This part of the book cannot be read: its file is damaged. The arrow keys go on past it.',
 
   'book.chapter': 'Chapter {n} of {total}',

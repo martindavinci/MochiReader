@@ -41,6 +41,11 @@ export default {
   'file.notReloaded': 'このファイルは変更され、今は読み込めません。最後に開いた版を表示しています。',
   'epub.errorTitle': 'この本は開けません',
   'epub.error': '{name} は破損しているか、DRM で保護されている可能性があります。MochiReader が開けるのは DRM のない本だけです。',
+  'pdf.passwordTitle': 'この PDF はロックされています',
+  'pdf.password': '{name} にはパスワードがあります。MochiReader はパスワードのない PDF だけを開けます。',
+  'pdf.noTextTitle': 'この PDF にはテキストがありません',
+  'pdf.noText': '{name} はページの画像だけです（スキャン）。MochiReader はテキストのある PDF を読みます。',
+  'pdf.notes': '注',
   'epub.sectionError': '本のこの部分は読み込めません。ファイルが破損しています。矢印キーで先に進めます。',
 
   'book.chapter': '第 {n} 章 / 全 {total} 章',

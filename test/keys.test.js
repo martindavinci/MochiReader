@@ -122,3 +122,10 @@ test('alt, which altgr also sets, never triggers a shortcut', () => {
   assert.equal(resolveKey({ key: '+', ctrl: true, alt: true }, IDLE_MD), null);
   assert.equal(resolveKey({ key: 'F5', alt: true }, IDLE_MD), null);
 });
+
+test('the arrows turn the pages of a PDF as of an EPUB', () => {
+  for (const key of ['ArrowRight', 'ArrowLeft']) {
+    assert.equal(resolveKey({ key }, { speaking: false, kind: 'pdf' }), resolveKey({ key }, IDLE_EPUB));
+  }
+  assert.ok(resolveKey({ key: 'ArrowRight' }, { speaking: false, kind: 'pdf' }));
+});

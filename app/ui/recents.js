@@ -6,7 +6,7 @@ import { elementIn, panelEmpty, panelFoot, panelHead } from './panel-parts.js';
 const REMOVE_MARK = '×';
 const SEP = /[\\/]/;
 const EPUB = 'epub';
-const KINDS = { [EPUB]: 'epub', markdown: 'md' };
+const KINDS = { [EPUB]: 'epub', pdf: 'pdf', markdown: 'md' };
 
 /**
  * A book goes by the title it declares, and the volumes of a series can all declare the same one.

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import { isBook } from './paths.js';
 
 // Chords are written lower case, modifiers first: `ctrl+shift+s`.
 
@@ -64,5 +65,5 @@ export function resolveKey(event, ctx) {
   const arrow = ARROWS.get(chord);
   if (!arrow) return null;
   if (ctx.speaking) return arrow[0];
-  return ctx.kind === 'epub' ? arrow[1] : null;
+  return isBook(ctx.kind) ? arrow[1] : null;
 }

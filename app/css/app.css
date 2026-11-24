@@ -359,6 +359,7 @@ article:empty { display: none; }
   letter-spacing: .04em;
 }
 .recent-open[data-kind="epub"]::before { content: "EPUB"; border-color: transparent; background: var(--accent-soft); color: var(--accent); }
+.recent-open[data-kind="pdf"]::before { content: "PDF"; border-color: transparent; background: var(--accent-soft); color: var(--accent); }
 .recent.missing .recent-open::before { border: 1.5px dashed var(--line-strong); background: none; color: var(--muted); }
 .recent-open:focus-visible { outline-offset: -2px; }
 
