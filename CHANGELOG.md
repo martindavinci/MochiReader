@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.8.0] - 2026-11-24
+
+### Added
+
+- PDF files open as books: their text flows like an EPUB's, with chapters from the PDF's own table of contents, its figures, bookmarks and listening. Open them from Open, by dropping them on the window, or with "Open with" on a PDF: the installer lists MochiReader there without making it the default app for PDFs. Scanned PDFs and PDFs with a password are not read.
+
+### Changed
+
+- Books open in an automatic view by default: pages when the book has a table of contents, one scrolling page when it has none. Pages and Scroll are still in Options, and a view chosen there stays.
+- In a narrow Voices panel the languages are a drop-down list, instead of a row that scrolled sideways and hid the last ones.
+
 ## [0.7.1] - 2026-11-24
 
 ### Fixed
