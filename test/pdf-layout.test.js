@@ -269,3 +269,38 @@ test('a line a seventh bigger than the body is a heading', () => {
   )]);
   assert.deepEqual(blocks[0], { kind: 'heading', level: 2, text: 'Where It Began' });
 });
+
+test('a raised note number stays in its sentence', () => {
+  const blocks = blocksOf([page(
+    ...paragraph(100, full('A sentence starts'), full('and it says here')),
+    { text: '12', x: LEFT + full('and it says here').length * BODY * CHAR, y: 100 + GAP - 4, width: 7, size: 7, bold: false },
+    line('and it goes on to its end.', 100 + 2 * GAP),
+  )]);
+  assert.equal(blocks.length, 1);
+  assert.match(blocks[0].text, /says here.*12 and it goes on to its end\.$/);
+});
+
+test('a drop cap on the baseline of the second line joins the first', () => {
+  const blocks = blocksOf([page(
+    line('Chapter', 80, { size: 24 }),
+    line(full('his chapter starts with a large letter'), 250, { x: 92 }),
+    line('T', 266, { size: 30 }),
+    line(full('and the text beside it wraps'), 266, { x: 92 }),
+    line('until it is past it.', 282),
+  )]);
+  assert.equal(blocks.length, 2);
+  assert.match(blocks[1].text, /^This chapter starts with a large letter .* and the text beside it wraps .* until it is past it\.$/);
+});
+
+test('marks that say no place on their page go to the headings bearing their titles', () => {
+  const chapters = reflow([page(
+    line('Part One', 100, { size: 24 }),
+    ...paragraph(140, full('Part text'), 'ends.'),
+    line('The Start', 300, { size: 24 }),
+    ...paragraph(340, full('Start text'), 'ends.'),
+  )], [{ title: 'Part One', page: 0, y: null, depth: 0 }, { title: 'The Start', page: 0, y: null, depth: 0 }]);
+  assert.deepEqual(chapters.map(({ blocks }) => texts(blocks)), [
+    ['heading: Part One', `paragraph: ${full('Part text')} ends.`],
+    ['heading: The Start', `paragraph: ${full('Start text')} ends.`],
+  ]);
+});

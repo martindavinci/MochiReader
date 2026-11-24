@@ -8,7 +8,7 @@
  *   from the top of the page, in points.
  * @typedef {{x: number, y: number, width: number, height: number}} Box y: the top edge, from the top of the page.
  * @typedef {{width: number, height: number, runs: Run[], images: Box[]}} Page
- * @typedef {{title: string, page: number, y: number, depth: number}} Mark An entry of the outline: page from 0, y from
+ * @typedef {{title: string, page: number, y: number|null, depth: number}} Mark An entry of the outline: page from 0, y from
  *   the top.
  * @typedef {{kind: 'heading', level: number, text: string} | {kind: 'paragraph', text: string}
  *   | {kind: 'figure', page: number, box: Box, caption: string|null}} Block
@@ -37,6 +37,10 @@ const HEADING_SIZE = 1.1;
 const NOTE_SIZE = 0.85;
 const DROP_CAP_SIZE = 1.8;
 const DROP_CAP_LETTERS = 2;
+// A note number: digits or a mark, set smaller and raised above the baseline of its line.
+const NOTE_MARK = /^[\d*†‡]{1,4}$/u;
+const RAISED_SIZE = 0.75;
+const RAISED_RISE = 0.7;
 const NEW_PARAGRAPH_GAP = 1.4;
 const LONE_LINE_GAP = 1.3;
 // A line ending this many body sizes short of the right edge, after a full stop, ends its paragraph.
@@ -98,7 +102,19 @@ function linesOf({ runs }, page) {
     if (line) line.runs.push(run);
     else lines.push({ y: run.y, size: run.size, runs: [run] });
   }
-  return lines.map(({ runs: parts }) => {
+  // A note number set above the line it belongs to is part of that line.
+  const raised = lines.filter((marker) => {
+    const text = marker.runs.map((run) => run.text).join('').trim();
+    if (!NOTE_MARK.test(text)) return false;
+    const owner = lines.find((line) => line !== marker && marker.size <= RAISED_SIZE * line.size
+      && line.y - marker.y > 0 && line.y - marker.y <= RAISED_RISE * line.size
+      && marker.runs[0].x >= Math.min(...line.runs.map(({ x }) => x)) - 1
+      && marker.runs[0].x <= Math.max(...line.runs.map(({ x, width }) => x + width)) + line.size);
+    if (!owner) return false;
+    owner.runs.push(...marker.runs);
+    return true;
+  });
+  return lines.filter((line) => !raised.includes(line)).map(({ runs: parts }) => {
     parts.sort((a, b) => a.x - b.x);
     let text = '';
     let end = -Infinity;
@@ -122,6 +138,7 @@ function linesOf({ runs }, page) {
       y: parts[0].y,
       size,
       bold: parts.every(({ bold }) => bold),
+      lead: parts[0],
     };
   }).sort((a, b) => a.y - b.y || a.x - b.x);
 }
@@ -161,6 +178,21 @@ function withDropCaps(lines, body, left) {
       if (line === first) return { ...line, text: `${cap.text}${line.text}`, x: cap.x };
       if (beside.includes(line)) return { ...line, x: left };
       return line;
+    });
+  }
+  // A cap set on the baseline of the second line it spans: it begins the line above, beside it.
+  for (const line of [...result]) {
+    const { lead } = line;
+    if (!lead || letterCount(lead.text) === 0 || lead.text.trim().length > DROP_CAP_LETTERS
+      || lead.size < DROP_CAP_SIZE * body || line.size >= DROP_CAP_SIZE * body) continue;
+    const capRight = lead.x + lead.width;
+    const above = result.find((other) => other !== line && other.y < line.y - 1 && other.y > line.y - lead.size
+      && other.x >= capRight - 2);
+    if (!above) continue;
+    result = result.map((other) => {
+      if (other === above) return { ...other, text: `${lead.text.trim()}${other.text}`, x: lead.x };
+      if (other === line) return { ...other, text: other.text.slice(lead.text.trim().length).trim(), x: left };
+      return other;
     });
   }
   return result;
@@ -336,7 +368,13 @@ function placeMarks(marks, blocks) {
   const placed = [];
   let last = null;
   for (const mark of marks) {
-    let at = { page: mark.page, y: mark.y };
+    let at = { page: mark.page, y: mark.y ?? 0 };
+    // A mark that names its page and no place on it is where its title is, on that page.
+    if (mark.y === null) {
+      const heading = blocks.find((block) => block.kind === 'heading' && block.at.page === mark.page
+        && (!last || !before(block.at, last)) && partOfTitle(block.text, mark.title));
+      if (heading) at = { page: mark.page, y: heading.at.y - 1 };
+    }
     if (last && before(at, last)) {
       const heading = blocks.find((block) => block.kind === 'heading' && !before(block.at, last)
         && letterCount(block.text) >= MIN_TITLE_LETTERS && partOfTitle(block.text, mark.title));

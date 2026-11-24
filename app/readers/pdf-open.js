@@ -4,30 +4,33 @@
 import { PdfError } from './pdf-source.js';
 
 const PDFJS_URL = new URL('../vendor/pdfjs/pdf.min.mjs', import.meta.url);
+// The book view registers <foliate-view>, which openEpub makes: a PDF opened before any EPUB needs it loaded too.
+const VIEW_URL = new URL('../vendor/foliate/view.js', import.meta.url);
+const EPUB_URL = new URL('../vendor/foliate/epub.js', import.meta.url);
+const BOOK_URL = new URL('./pdf-book.js', import.meta.url);
 const WORKER_URL = new URL('../vendor/pdfjs/pdf.worker.min.mjs', import.meta.url);
 const ERROR_TEXTS = {
   password: ['pdf.passwordTitle', 'pdf.password'],
   'no-text': ['pdf.noTextTitle', 'pdf.noText'],
 };
 
-async function loadPdfjs() {
-  const pdfjs = await import(PDFJS_URL.href);
-  pdfjs.GlobalWorkerOptions.workerSrc = WORKER_URL.href;
-  return pdfjs;
-}
+const importModule = (url) => import(url);
 
 /**
  * What openEpub takes as its `loadFoliate`, for a PDF.
  * @param {{hash: () => Promise<string>, notesTitle: string, name: string, document: Document}} opts
+ * @param {(url: string) => Promise<object>} [load] How a module is loaded.
  * @returns {() => Promise<{makeBook: (file: File) => Promise<object>}>}
  */
-export function pdfFoliate({ hash, notesTitle, name, document }) {
+export function pdfFoliate({ hash, notesTitle, name, document }, load = importModule) {
   return async () => {
-    const [pdfjs, { EPUB }, { makePdfBook }] = await Promise.all([
-      loadPdfjs(),
-      import('../vendor/foliate/epub.js'),
-      import('./pdf-book.js'),
+    const [pdfjs, , { EPUB }, { makePdfBook }] = await Promise.all([
+      load(PDFJS_URL.href),
+      load(VIEW_URL.href),
+      load(EPUB_URL.href),
+      load(BOOK_URL.href),
     ]);
+    pdfjs.GlobalWorkerOptions.workerSrc = WORKER_URL.href;
     return { makeBook: (file) => makePdfBook(file, { pdfjs, EPUB, hash, notesTitle, name, document }) };
   };
 }

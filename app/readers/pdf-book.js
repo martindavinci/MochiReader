@@ -147,15 +147,27 @@ export function pdfLoader({ files, figures }, draw) {
  */
 export async function makePdfBook(file, { pdfjs, EPUB, hash, notesTitle, name, document }) {
   const { info, pages, marks, pdf } = await readPdf(new Uint8Array(await file.arrayBuffer()), pdfjs);
-  const identifier = `pdf:${await hash()}|reflow-${REFLOW_VERSION}`;
-  const title = (info.title ?? name ?? '').replace(PDF_NAME, '').trim() || name;
-  const book = epubFiles({
-    title,
-    author: info.author,
-    language: info.language,
-    identifier,
-    chapters: reflow(pages, marks),
-    notesTitle,
-  });
-  return new EPUB(pdfLoader(book, (page, box) => drawFigure(pdf, page, box, document))).init();
+  try {
+    const identifier = `pdf:${await hash()}|reflow-${REFLOW_VERSION}`;
+    const title = (info.title ?? name ?? '').replace(PDF_NAME, '').trim() || name;
+    const files = epubFiles({
+      title,
+      author: info.author,
+      language: info.language,
+      identifier,
+      chapters: reflow(pages, marks),
+      notesTitle,
+    });
+    const book = await new EPUB(pdfLoader(files, (page, box) => drawFigure(pdf, page, box, document))).init();
+    // The reader destroys the book when its tab closes or reloads: pdf.js and its worker go with it.
+    const destroyBook = book.destroy?.bind(book);
+    book.destroy = () => {
+      destroyBook?.();
+      pdf.destroy?.();
+    };
+    return book;
+  } catch (error) {
+    pdf.destroy?.();
+    throw error;
+  }
 }

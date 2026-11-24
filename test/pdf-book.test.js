@@ -136,3 +136,26 @@ test('a PDF with no title is named after its file', async () => {
   const { loader } = await bookOf(new File([fixtureBytes('book.pdf')], 'book.epub'), { pdfjs: untitled, name: 'Some File.PDF' });
   assert.match(loader.loadText('OEBPS/content.opf'), /<dc:title>Some File<\/dc:title>/);
 });
+
+test('closing the book lets pdf.js go', async () => {
+  let destroyed = 0;
+  let epubDestroyed = 0;
+  const watched = {
+    ...pdfjs,
+    getDocument: (options) => ({
+      promise: pdfjs.getDocument(options).promise.then((doc) => new Proxy(doc, {
+        get: (target, key) => (key === 'destroy' ? async () => { destroyed += 1; return target.destroy(); } : Reflect.get(target, key, target)),
+      })),
+    }),
+  };
+  class ClosingEpub extends RecordingEpub {
+    destroy() {
+      epubDestroyed += 1;
+    }
+  }
+  const book = await bookOf(new File([fixtureBytes('book.pdf')], 'book.epub'), { pdfjs: watched, EPUB: ClosingEpub });
+  assert.equal(destroyed, 0);
+  book.destroy();
+  assert.equal(epubDestroyed, 1);
+  assert.equal(destroyed, 1);
+});

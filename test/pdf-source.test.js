@@ -85,3 +85,26 @@ test('a title with its brackets escaped twice reads plainly', async () => {
   const { info } = await readPdf(new Uint8Array(1), { ...fake, getDocument: () => ({ promise: Promise.resolve(doc) }) });
   assert.equal(info.title, 'A book ( site ).pdf');
 });
+
+test('a mark with no top on its page has no y', async () => {
+  const outline = [{ title: 'z', dest: [{ num: 1, gen: 0 }, { name: 'Fit' }], items: [] }];
+  const { marks } = await readPdf(new Uint8Array(1), fakePdfjs({ outline }));
+  assert.deepEqual(marks, [{ title: 'z', page: 0, y: null, depth: 0 }]);
+});
+
+test('pages are let go once read, and a refused PDF is let go whole', async () => {
+  const fake = fakePdfjs();
+  const doc = await fake.getDocument().promise;
+  const page = await doc.getPage(1);
+  let cleaned = 0;
+  let destroyed = 0;
+  page.cleanup = () => { cleaned += 1; };
+  doc.destroy = async () => { destroyed += 1; };
+  const open = { ...fake, getDocument: () => ({ promise: Promise.resolve(doc) }) };
+  await readPdf(new Uint8Array(1), open);
+  assert.equal(cleaned, 1);
+  assert.equal(destroyed, 0);
+  page.getTextContent = async () => ({ items: [], styles: {} });
+  await assert.rejects(readPdf(new Uint8Array(1), open), (error) => error.code === 'no-text');
+  assert.equal(destroyed, 1);
+});

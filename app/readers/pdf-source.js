@@ -61,6 +61,8 @@ async function readPage(page, OPS) {
   const [x0, y0, x1, y1] = page.view;
   const operators = await page.getOperatorList();
   const { items, styles } = await page.getTextContent();
+  // What the page decoded to be read (its images above all) is let go: a figure is drawn again when it is shown.
+  page.cleanup?.();
   const runs = items.filter(({ str }) => str && str.trim()).map(({ str, transform, width, fontName }) => ({
     text: str,
     x: transform[4] - x0,
@@ -87,7 +89,8 @@ async function markOf(doc, { title, dest }, depth, pages) {
   const at = DESTINATION_TOP[fit?.name];
   const top = at === undefined ? null : destination[at];
   const height = pages[page]?.height ?? 0;
-  return { title: (title ?? '').trim(), page, y: typeof top === 'number' ? Math.max(0, height - top) : 0, depth };
+  // No top on the page (a Fit, or an XYZ without one): the mark is placed by its title (pdf-layout.js).
+  return { title: (title ?? '').trim(), page, y: typeof top === 'number' ? Math.max(0, height - top) : null, depth };
 }
 
 /** The outline, depth first, as marks; an entry that leads nowhere is left out, its children are not. */
@@ -121,6 +124,16 @@ export async function readPdf(data, pdfjs) {
     if (error?.name === PASSWORD_EXCEPTION) throw new PdfError('password');
     throw error;
   }
+  try {
+    return await readOpened(pdf, pdfjs);
+  } catch (error) {
+    // A PDF that is not read lets its worker go.
+    await pdf.destroy?.();
+    throw error;
+  }
+}
+
+async function readOpened(pdf, pdfjs) {
   const pages = [];
   for (let number = 1; number <= pdf.numPages; number++) {
     pages.push(await readPage(await pdf.getPage(number), pdfjs.OPS));
