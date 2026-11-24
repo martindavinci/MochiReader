@@ -59,3 +59,11 @@ test('main title of a missing title is empty', () => {
   assert.equal(mainTitle(undefined), '');
   assert.equal(mainTitle({}), '');
 });
+
+test('a book made from a PDF is known by its file hash alone, so renaming the file keeps its place', async () => {
+  const identifier = 'pdf:abc|reflow-1';
+  const before = await epubKey({ identifier, title: 'old name' }, noHash, 12);
+  const after = await epubKey({ identifier, title: 'new name' }, noHash, 12);
+  assert.equal(before, 'epub:pdf:abc|reflow-1');
+  assert.equal(after, before);
+});

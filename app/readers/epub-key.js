@@ -2,6 +2,9 @@
 
 // foliate-js gives a plain string, or a map from language to title whose first
 // entry is the title the book itself declares as its main one.
+// The identifier of a book made from a PDF (pdf-book.js): it holds the hash of the file and the reflow version.
+export const PDF_IDENTIFIER_PREFIX = 'pdf:';
+
 export const mainTitle = (title) =>
   (title && typeof title === 'object' ? Object.values(title)[0] : title) ?? '';
 
@@ -13,6 +16,9 @@ export const mainTitle = (title) =>
  * It is optional only to keep the plain `epub:<identifier>|<title>` form: the
  * reader must pass it, or those volumes share one position and their bookmarks.
  *
+ * A book made from a PDF is known by its identifier alone: it already holds the hash of the file, and its title may
+ * be the file's name, which a rename would change.
+ *
  * @param {{identifier?: string, title?: string | Record<string, string> | null}} metadata
  * @param {() => Promise<string>} hash computed only when the book has no identifier
  * @param {number} [sectionCount] the number of sections in the spine
@@ -21,6 +27,7 @@ export const mainTitle = (title) =>
 export async function epubKey(metadata, hash, sectionCount) {
   const { identifier, title } = metadata;
   if (!identifier) return `sha256:${await hash()}`;
+  if (identifier.startsWith(PDF_IDENTIFIER_PREFIX)) return `epub:${identifier}`;
   const key = `epub:${identifier}|${mainTitle(title)}`;
   return sectionCount === undefined ? key : `${key}|${sectionCount}`;
 }

@@ -2,6 +2,7 @@
 // A PDF made into an EPUB on the fly, file by file, for foliate's own EPUB class: places, the table of contents,
 // sections and styles then work as they do for any EPUB. Nothing is zipped; the files are asked for by name, and a
 // figure is drawn from its page only when foliate asks for its picture.
+import { PDF_IDENTIFIER_PREFIX } from './epub-key.js';
 import { REFLOW_VERSION, reflow } from './pdf-layout.js';
 import { drawFigure, readPdf } from './pdf-source.js';
 
@@ -148,7 +149,7 @@ export function pdfLoader({ files, figures }, draw) {
 export async function makePdfBook(file, { pdfjs, EPUB, hash, notesTitle, name, document }) {
   const { info, pages, marks, pdf } = await readPdf(new Uint8Array(await file.arrayBuffer()), pdfjs);
   try {
-    const identifier = `pdf:${await hash()}|reflow-${REFLOW_VERSION}`;
+    const identifier = `${PDF_IDENTIFIER_PREFIX}${await hash()}|reflow-${REFLOW_VERSION}`;
     const title = (info.title ?? name ?? '').replace(PDF_NAME, '').trim() || name;
     const files = epubFiles({
       title,
