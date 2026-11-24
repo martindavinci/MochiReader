@@ -27,6 +27,23 @@ test('the installer works for one user, fetches WebView2 when missing and offers
   assert.deepEqual(conf.bundle.fileAssociations.flatMap(({ ext }) => ext), ['md', 'markdown', 'epub']);
 });
 
+test('the installer puts the app in the Open with list of a PDF, never as its default app, and the uninstaller takes it out', () => {
+  assert.equal(conf.bundle.windows.nsis.installerHooks, 'windows/hooks.nsh');
+  const hooks = read('src-tauri/windows/hooks.nsh');
+  const macro = (name) => hooks.split(`!macro ${name}\n`)[1]?.split('!macroend')[0] ?? '';
+  const lines = (text) => text.split('\n').map((line) => line.trim());
+  const install = lines(macro('NSIS_HOOK_POSTINSTALL'));
+  assert.ok(install.includes('WriteRegStr SHCTX "Software\\Classes\\.pdf\\OpenWithProgids" "MochiReader.Pdf" ""'), install.join('\n'));
+  assert.ok(install.includes(
+    'WriteRegStr SHCTX "Software\\Classes\\MochiReader.Pdf\\shell\\open\\command" "" \'"$INSTDIR\\${MAINBINARYNAME}.exe" "%1"\'',
+  ), install.join('\n'));
+  // The default app of a PDF is the value of .pdf itself: it is never written.
+  assert.ok(!hooks.includes('"Software\\Classes\\.pdf" ""'));
+  const uninstall = lines(macro('NSIS_HOOK_POSTUNINSTALL'));
+  assert.ok(uninstall.includes('DeleteRegValue SHCTX "Software\\Classes\\.pdf\\OpenWithProgids" "MochiReader.Pdf"'), uninstall.join('\n'));
+  assert.ok(uninstall.includes('DeleteRegKey SHCTX "Software\\Classes\\MochiReader.Pdf"'), uninstall.join('\n'));
+});
+
 test('the CSP blocks everything the app does not use', () => {
   assert.equal(
     conf.app.security.csp,
