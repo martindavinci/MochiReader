@@ -278,6 +278,17 @@ export function renderVoiceManager(host, view, handlers) {
     item.addEventListener('click', () => handlers.onSelect?.(key));
     nav.append(item);
   }
+  // The same choice in a drop-down list, which a narrow panel shows in place of the column (app.css).
+  const picker = element('select', 'voice-lang-select');
+  picker.setAttribute('aria-label', t('voices.languages'));
+  picker.dataset.focus = 'lang-select';
+  picker.append(...entries.map(([key, name, many]) => {
+    const option = element('option', undefined, many === null ? name : `${name} · ${many}`);
+    option.setAttribute('value', key);
+    if (key === selected) option.setAttribute('selected', '');
+    return option;
+  }));
+  picker.addEventListener('change', () => handlers.onSelect?.(picker.value));
 
   const summary = element('div', 'voice-summary');
   summary.append(
@@ -314,7 +325,7 @@ export function renderVoiceManager(host, view, handlers) {
   }
 
   const panel = element('div', 'voice-panel');
-  panel.append(nav, main);
+  panel.append(picker, nav, main);
   const body = element('div', 'panel-body voice-manager');
   body.append(summary, panel);
   host.replaceChildren(panelHead(host, { glyph: 'speaker', title: t('voices.title') }), body);

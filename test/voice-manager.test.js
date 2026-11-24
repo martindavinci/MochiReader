@@ -249,6 +249,22 @@ test('the column lists the languages with their counts and marks the selected on
   assert.deepEqual(calls[0], ['onSelect', 'en']);
 });
 
+test('a narrow panel has the same languages in a drop-down list, on the selected one', () => {
+  const { host, calls } = drawPanel({ selected: 'it', mixes: [] });
+  const column = [...host.querySelectorAll('.voice-langs [data-lang]')].map((item) => item.dataset.lang);
+  const select = host.querySelector('select.voice-lang-select');
+  assert.ok(select, 'the drop-down list is drawn');
+  assert.deepEqual([...select.options].map((option) => option.value), column);
+  assert.equal(column.at(-1), 'mine');
+  assert.equal(select.value, 'it');
+  assert.match(select.options[0].textContent, /Italian · 2/);
+  assert.equal(select.options[column.indexOf('*')].textContent, en['voices.allLanguages']);
+  assert.equal(select.getAttribute('aria-label'), en['voices.languages']);
+  select.querySelectorAll('option').forEach((option) => option.toggleAttribute('selected', option.getAttribute('value') === 'en'));
+  select.dispatchEvent(new select.ownerDocument.defaultView.Event('change'));
+  assert.deepEqual(calls[0], ['onSelect', 'en']);
+});
+
 test('a language says which voice reads it, and choosing one sets the default', () => {
   const { host, calls } = drawPanel({ selected: 'it', everywhere: ['zira'] });
   const select = host.querySelector('.voice-default');
