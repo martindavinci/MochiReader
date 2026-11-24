@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.7.1] - 2026-11-24
+
+### Fixed
+
+- The voice engine comes with the installer again: ONNX Runtime, whose releases left GitHub, now comes from its official NuGet package (the same library). The Hindi Kokoro voices have their dictionary in it.
+
 ## [0.7.0] - 2026-11-23
 
 ### Added
