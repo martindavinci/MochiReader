@@ -137,6 +137,7 @@ export default {
   'options.sound.radio': '라디오',
   'options.sound.night': '밤',
   'options.epubView': '보기',
+  'options.epubAuto': '자동',
   'options.epubPaginated': '페이지',
   'options.epubScrolled': '스크롤',
   'options.language': '언어',

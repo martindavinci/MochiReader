@@ -47,7 +47,7 @@ const FIELDS = [
     name: 'epubView',
     label: 'options.epubView',
     group: 'options.groupBooks',
-    choices: [keyed('paginated', 'options.epubPaginated'), keyed('scrolled', 'options.epubScrolled')],
+    choices: [keyed('auto', 'options.epubAuto'), keyed('paginated', 'options.epubPaginated'), keyed('scrolled', 'options.epubScrolled')],
   },
   {
     name: 'sourceMode',

@@ -445,7 +445,7 @@ export function makeReader(view, { key, title, onInput = () => {}, place = null,
     goLeft: () => view.goLeft(),
     goRight: () => view.goRight(),
     next: () => view.next(),
-    setFlow: (flow) => view.renderer.setAttribute('flow', flow),
+    setFlow: (choice) => view.renderer.setAttribute('flow', flowFor(choice, view.book?.toc)),
     /** The keys only reach the book from inside its frame, and only there can they scroll it. */
     focus: () => shownDocs()[0]?.doc.defaultView?.focus(),
     // Not in the contract: only the report of the tabs asks, to tell a page on screen from a book that says it opened.
@@ -512,10 +512,22 @@ async function showFirstPage(view, cfi) {
 }
 
 /**
+ * The view a book is shown in. `auto` turns the pages of a book that has a table of contents, and scrolls one that
+ * has none (a PDF with no outline, say): with nothing to jump to, it reads as one long page.
+ * @param {'auto'|'paginated'|'scrolled'} choice
+ * @param {object[]|undefined} toc
+ * @returns {'paginated'|'scrolled'}
+ */
+export function flowFor(choice, toc) {
+  if (choice !== 'auto') return choice;
+  return toc?.length ? 'paginated' : 'scrolled';
+}
+
+/**
  * Every failure comes out of this one call, and a book that fails leaves nothing behind in `host`.
  * @param {string} url Where the file is.
  * @param {HTMLElement} host Takes the book in place of what it holds, once the book has a page to show.
- * @param {{flow: 'paginated'|'scrolled', style: string, hash: () => Promise<string>,
+ * @param {{flow: 'auto'|'paginated'|'scrolled', style: string, hash: () => Promise<string>,
  *   savedPosition: (key: string) => Promise<import('./reader.js').Position|null>, openExternal: (url: string) => void,
  *   unreadableSection: string, parser?: object, serializer?: object}} opts
  * @param {() => Promise<{makeBook: (file: File) => Promise<object>}>} [loadFoliate]
@@ -537,7 +549,7 @@ export async function openEpub(url, host, opts, loadFoliate = importFoliate) {
       opts.openExternal(event.detail.href_);
     });
     await view.open(book);
-    view.renderer.setAttribute('flow', opts.flow);
+    view.renderer.setAttribute('flow', flowFor(opts.flow, book.toc));
     view.renderer.setAttribute('max-column-count', COLUMN_COUNT);
     view.renderer.setAttribute('max-inline-size', COLUMN_WIDTH);
     view.renderer.setStyles?.(opts.style);

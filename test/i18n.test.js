@@ -18,7 +18,7 @@ const REQUIRED_KEYS = [
   'toc.title', 'toc.empty',
   'options.title', 'options.theme', 'options.themeSystem', 'options.themeLight', 'options.themeDark',
   'options.textSize', 'options.voice', 'options.source', 'options.sourceSkip', 'options.sourceName',
-  'options.epubView', 'options.epubPaginated', 'options.epubScrolled', 'options.language',
+  'options.epubView', 'options.epubAuto', 'options.epubPaginated', 'options.epubScrolled', 'options.language',
   'speech.readFromHere', 'speech.follow', 'speech.reading', 'speech.play', 'speech.pause', 'speech.resume',
   'speech.stop', 'speech.rate', 'speech.voice', 'speech.nothingToRead', 'speech.error',
   'speech.noVoice', 'speech.hiddenVoice', 'speech.sourceLabel',

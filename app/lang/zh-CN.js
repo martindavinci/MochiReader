@@ -137,6 +137,7 @@ export default {
   'options.sound.radio': '收音机',
   'options.sound.night': '夜间',
   'options.epubView': '视图',
+  'options.epubAuto': '自动',
   'options.epubPaginated': '分页',
   'options.epubScrolled': '滚动',
   'options.language': '语言',

@@ -36,7 +36,7 @@
  * @property {() => Promise<void>} [goLeft] To the page on the left, if the format has pages.
  * @property {() => Promise<void>} [goRight] To the page on the right, if the format has pages.
  * @property {() => Promise<void>} [next] To the next page in reading order, if the format has pages.
- * @property {(flow: 'paginated'|'scrolled') => void} [setFlow] The view of a book.
+ * @property {(flow: 'auto'|'paginated'|'scrolled') => void} [setFlow] The view of a book.
  * @property {() => void} [focus] Sends the keys to the text, if the shell cannot do it by focusing the pane.
  * @property {(node: Node, offset: number) => {position: Position, excerpt: string}|null} [placeAt] A place in the text as
  *   a bookmark would keep it.

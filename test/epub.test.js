@@ -1229,3 +1229,23 @@ test('a right click in a section of the book reaches the reader too', async (t) 
   document.dispatchEvent(new window.Event('contextmenu'));
   assert.deepEqual(seen, ['contextmenu']);
 });
+
+for (const [toc, flow] of [[[{ label: 'One', href: 'a' }], 'paginated'], [[], 'scrolled'], [undefined, 'scrolled']]) {
+  test(`the automatic view of a book with ${toc?.length ?? 'no'} entries in its table of contents is ${flow}`, async (t) => {
+    t.after(stubFetch(okFile()));
+    const { host, view, foliate } = fakeFoliate({ makeBook: async () => ({ ...plainBook(), toc }) });
+    await openEpub('u', host, openOptions({ flow: 'auto' }), foliate);
+    assert.equal(view.renderer.attributes.get('flow'), flow);
+  });
+}
+
+test('a view chosen by hand holds whatever the book has', async (t) => {
+  t.after(stubFetch(okFile()));
+  const { host, view, foliate } = fakeFoliate({ makeBook: async () => ({ ...plainBook(), toc: [] }) });
+  const reader = await openEpub('u', host, openOptions({ flow: 'paginated' }), foliate);
+  assert.equal(view.renderer.attributes.get('flow'), 'paginated');
+  reader.setFlow('auto');
+  assert.equal(view.renderer.attributes.get('flow'), 'scrolled');
+  reader.setFlow('paginated');
+  assert.equal(view.renderer.attributes.get('flow'), 'paginated');
+});

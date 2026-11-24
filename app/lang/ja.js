@@ -137,6 +137,7 @@ export default {
   'options.sound.radio': 'ラジオ',
   'options.sound.night': 'ナイト',
   'options.epubView': '表示',
+  'options.epubAuto': '自動',
   'options.epubPaginated': 'ページ',
   'options.epubScrolled': 'スクロール',
   'options.language': '言語',

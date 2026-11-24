@@ -137,6 +137,7 @@ export default {
   'options.sound.radio': 'Radio',
   'options.sound.night': 'Nacht',
   'options.epubView': 'Ansicht',
+  'options.epubAuto': 'Automatisch',
   'options.epubPaginated': 'Seiten',
   'options.epubScrolled': 'Scrollen',
   'options.language': 'Sprache',

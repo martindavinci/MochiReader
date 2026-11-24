@@ -52,7 +52,7 @@ test('nothing saved means the defaults, which follow Windows', () => {
   assert.equal(DEFAULT_OPTIONS.theme, 'system');
   assert.equal(DEFAULT_OPTIONS.language, 'system');
   assert.equal(DEFAULT_OPTIONS.sourceMode, 'skip');
-  assert.equal(DEFAULT_OPTIONS.epubView, 'paginated');
+  assert.equal(DEFAULT_OPTIONS.epubView, 'auto');
   assert.ok(TEXT_SIZES.includes(DEFAULT_OPTIONS.textSize));
 });
 
@@ -110,7 +110,7 @@ test('the panel offers what the plan lists, in order, each showing its current v
   const { host } = draw(options);
   assert.deepEqual(radioValues(host, 'theme'), ['system', 'light', 'dark']);
   assert.deepEqual(radioValues(host, 'sourceMode'), ['skip', 'name']);
-  assert.deepEqual(radioValues(host, 'epubView'), ['paginated', 'scrolled']);
+  assert.deepEqual(radioValues(host, 'epubView'), ['auto', 'paginated', 'scrolled']);
   assert.deepEqual(values(host.querySelector('select[name="language"]')), ['system', 'en', 'it', 'de', 'es', 'fr', 'pt-BR', 'ja', 'ko', 'zh-CN']);
   assert.equal(selected(host.querySelector('select[name="language"]')), 'it');
   for (const name of ['theme', 'sourceMode', 'epubView']) assert.equal(checked(host, name), options[name], name);
