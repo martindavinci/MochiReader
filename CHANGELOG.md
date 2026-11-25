@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.9.0] - 2026-11-25
+
+### Added
+
+- Text (.txt), Word (.docx), OpenDocument (.odt) and RTF (.rtf) documents open to be read aloud: their text in order, with the headings they mark, list items and table rows; images, layout, notes and comments are left out, and of a document with tracked changes the final text is read. A plain text and an RTF document are read in their code page, so accented, Cyrillic or Japanese letters come out right. The installer lists MochiReader under "Open with" for them, without becoming their default app.
+
+### Changed
+
+- The messages of the app speak of documents and books; only the refusal of a file lists every format it opens.
+
 ## [0.8.3] - 2026-11-25
 
 ### Changed
