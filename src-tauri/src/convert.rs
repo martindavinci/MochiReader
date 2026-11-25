@@ -400,8 +400,84 @@ pub fn convert_docx(bytes: &[u8]) -> Result<Rendered, ConvertError> {
     Ok(blocks.finish())
 }
 
-pub fn convert_odt(_bytes: &[u8]) -> Result<Rendered, ConvertError> {
-    Err(ConvertError)
+// What an OpenDocument keeps beside the text read: deleted revisions, notes, comments, frames (pictures, text boxes).
+const ODF_SKIPPED: [&str; 4] = ["tracked-changes", "note", "annotation", "frame"];
+
+/// A block of an OpenDocument being read: a heading of its level, or a paragraph.
+struct OdfBlock {
+    heading: Option<u8>,
+    text: String,
+}
+
+/// An OpenDocument text (.odt): its body, read in order.
+pub fn convert_odt(bytes: &[u8]) -> Result<Rendered, ConvertError> {
+    let content = zip_part(bytes, "content.xml")?.ok_or(ConvertError)?;
+    let mut blocks = Blocks::default();
+    let mut skipped = 0usize;
+    let mut block: Option<OdfBlock> = None;
+    let mut lists = 0usize;
+    let mut tables = 0usize;
+    let mut cells: Vec<String> = Vec::new();
+    walk(&content, |step| {
+        if skipped > 0 {
+            match step {
+                Step::Open(_, false) => skipped += 1,
+                Step::Close(_) => skipped -= 1,
+                _ => {}
+            }
+            return;
+        }
+        match step {
+            Step::Open(element, _) => {
+                let name = local_name(element);
+                if ODF_SKIPPED.contains(&name.as_str()) {
+                    skipped = 1;
+                    return;
+                }
+                match (name.as_str(), block.as_mut()) {
+                    ("s" | "tab" | "line-break", Some(open)) => open.text.push(' '),
+                    (_, Some(_)) => {}
+                    ("h", None) => {
+                        let level = attribute(element, "outline-level").and_then(|level| level.parse().ok());
+                        block = Some(OdfBlock { heading: Some(level.unwrap_or(1)), text: String::new() });
+                    }
+                    ("p", None) => block = Some(OdfBlock { heading: None, text: String::new() }),
+                    ("list", None) => lists += 1,
+                    ("table", None) => tables += 1,
+                    ("table-row", None) if tables == 1 => cells.clear(),
+                    ("table-cell", None) if tables == 1 => cells.push(String::new()),
+                    _ => {}
+                }
+            }
+            Step::Text(text) => {
+                if let Some(open) = block.as_mut() {
+                    open.text.push_str(&text);
+                }
+            }
+            Step::Close(name) => match name.as_str() {
+                "h" | "p" => {
+                    let Some(done) = block.take() else { return };
+                    if tables > 0 {
+                        if let Some(cell) = cells.last_mut() {
+                            cell.push(' ');
+                            cell.push_str(&done.text);
+                        }
+                    } else if let Some(level) = done.heading {
+                        blocks.heading(level, &done.text);
+                    } else if lists > 0 {
+                        blocks.item(&done.text);
+                    } else {
+                        blocks.paragraph(&done.text);
+                    }
+                }
+                "list" => lists = lists.saturating_sub(1),
+                "table-row" if tables == 1 => blocks.row(&cells),
+                "table" => tables = tables.saturating_sub(1),
+                _ => {}
+            },
+        }
+    })?;
+    Ok(blocks.finish())
 }
 
 pub fn convert_rtf(_bytes: &[u8]) -> Result<Rendered, ConvertError> {
@@ -530,6 +606,68 @@ mod tests {
         assert_eq!(convert_docx(b"not a zip").unwrap_err(), ConvertError);
         assert_eq!(convert_docx(&zip_of(&[("word/other.xml", "<x/>")])).unwrap_err(), ConvertError);
         assert_eq!(convert_docx(&zip_of(&[("word/document.xml", "<w:document><w:body><w:p>")])).unwrap_err(), ConvertError);
+    }
+
+    fn odt(text: &str) -> Vec<u8> {
+        let content = format!(
+            "<?xml version=\"1.0\"?><office:document-content \
+             xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" \
+             xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\" \
+             xmlns:table=\"urn:oasis:names:tc:opendocument:xmlns:table:1.0\" \
+             xmlns:draw=\"urn:oasis:names:tc:opendocument:xmlns:drawing:1.0\">\
+             <office:body><office:text>{text}</office:text></office:body></office:document-content>"
+        );
+        zip_of(&[("mimetype", "application/vnd.oasis.opendocument.text"), ("content.xml", &content)])
+    }
+
+    #[test]
+    fn an_opendocument_has_its_headings_by_outline_level() {
+        let rendered = convert_odt(&odt(
+            "<text:h text:outline-level=\"1\">Un capitolo</text:h>\
+             <text:h text:outline-level=\"2\"><text:span>Una</text:span> sezione</text:h>\
+             <text:h>Senza livello</text:h><text:p>Un testo.</text:p>",
+        ))
+        .unwrap();
+        assert_eq!(headings_of(&rendered), [(1, "Un capitolo"), (2, "Una sezione"), (1, "Senza livello")]);
+        assert!(rendered.html.ends_with("<p data-sourcepos=\"4:1-4:1\">Un testo.</p>\n"));
+    }
+
+    #[test]
+    fn an_opendocument_is_read_without_its_notes_comments_frames_and_deletions() {
+        let rendered = convert_odt(&odt(
+            "<text:tracked-changes><text:changed-region><text:deletion><text:p>tolto</text:p></text:deletion>\
+             </text:changed-region></text:tracked-changes>\
+             <text:p>Uno<text:s text:c=\"3\"/>due<text:tab/>tre<text:line-break/>quattro<text:note>\
+             <text:note-citation>1</text:note-citation><text:note-body><text:p>nota</text:p></text:note-body></text:note>.\
+             <office:annotation><text:p>commento</text:p></office:annotation> &amp; <text:a>fine</text:a></text:p>\
+             <draw:frame><draw:text-box><text:p>in un riquadro</text:p></draw:text-box></draw:frame>",
+        ))
+        .unwrap();
+        assert_eq!(rendered.html, "<p data-sourcepos=\"1:1-1:1\">Uno due tre quattro. &amp; fine</p>\n");
+    }
+
+    #[test]
+    fn an_opendocument_keeps_its_list_items_and_table_rows() {
+        let rendered = convert_odt(&odt(
+            "<text:list><text:list-item><text:p>una voce</text:p></text:list-item><text:list-item><text:list>\
+             <text:list-item><text:p>annidata</text:p></text:list-item></text:list></text:list-item></text:list>\
+             <table:table><table:table-row><table:table-cell><text:p>a</text:p></table:table-cell>\
+             <table:table-cell><text:p>b</text:p><text:p>c</text:p></table:table-cell></table:table-row></table:table>\
+             <text:p>dopo</text:p>",
+        ))
+        .unwrap();
+        assert_eq!(
+            rendered.html,
+            "<ul>\n<li data-sourcepos=\"1:1-1:1\">una voce</li>\n<li data-sourcepos=\"2:1-2:1\">annidata</li>\n</ul>\n\
+             <table><tbody>\n<tr data-sourcepos=\"3:1-3:1\"><td>a</td><td>b c</td></tr>\n</tbody></table>\n\
+             <p data-sourcepos=\"4:1-4:1\">dopo</p>\n"
+        );
+    }
+
+    #[test]
+    fn a_damaged_opendocument_says_so() {
+        assert_eq!(convert_odt(b"not a zip").unwrap_err(), ConvertError);
+        assert_eq!(convert_odt(&zip_of(&[("styles.xml", "<x/>")])).unwrap_err(), ConvertError);
     }
 
     #[test]
