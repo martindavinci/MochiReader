@@ -52,7 +52,7 @@ test('nothing saved means the defaults, which follow Windows', () => {
   assert.equal(DEFAULT_OPTIONS.theme, 'system');
   assert.equal(DEFAULT_OPTIONS.language, 'system');
   assert.equal(DEFAULT_OPTIONS.sourceMode, 'skip');
-  assert.equal(DEFAULT_OPTIONS.epubView, 'auto');
+  assert.equal(DEFAULT_OPTIONS.epubView, 'scrolled');
   assert.ok(TEXT_SIZES.includes(DEFAULT_OPTIONS.textSize));
 });
 

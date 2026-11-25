@@ -47,6 +47,8 @@ const FIELDS = [
     name: 'epubView',
     label: 'options.epubView',
     group: 'options.groupBooks',
+    // A chapter reads as one long page, and the next one comes at its end.
+    fallback: 'scrolled',
     choices: [keyed('auto', 'options.epubAuto'), keyed('paginated', 'options.epubPaginated'), keyed('scrolled', 'options.epubScrolled')],
   },
   {
