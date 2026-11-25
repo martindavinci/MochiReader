@@ -982,3 +982,26 @@ test('a voice unticked during a reading stays in the bar while it reads, and lea
   assert.deepEqual(bar.view.voices.others.map(({ id }) => id), [PAOLA.id]);
   assert.equal(bar.view.voiceId, PAOLA.id);
 });
+
+test('a voice downloaded while reading joins the bar, even when its language already has a voice chosen', async () => {
+  const voices = [ELSA, COSIMO];
+  const { session, bar } = setup({ voices, state: { voices: { it: 'elsa' } } });
+  await session.start(fakeTab(TWO).entry);
+  await flush();
+  assert.deepEqual(bar.view.voices.own.map(({ id }) => id), ['elsa', 'cosimo']);
+  voices.push(PAOLA);
+  assert.equal(await session.voiceInstalled('it', PAOLA.id), false);
+  await flush();
+  assert.deepEqual(bar.view.voices.own.map(({ id }) => id), ['elsa', 'cosimo', PAOLA.id]);
+});
+
+test('a voice deleted while reading leaves the bar', async () => {
+  const voices = [ELSA, COSIMO, PAOLA];
+  const { session, bar } = setup({ voices, state: { voices: { it: 'elsa' } } });
+  await session.start(fakeTab(TWO).entry);
+  await flush();
+  voices.splice(voices.indexOf(PAOLA), 1);
+  await session.voicesChanged();
+  await flush();
+  assert.deepEqual(bar.view.voices.own.map(({ id }) => id), ['elsa', 'cosimo']);
+});

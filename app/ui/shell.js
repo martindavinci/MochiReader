@@ -1213,6 +1213,7 @@ async function drawVoicesPanel() {
     onDeleteMix: async (id) => {
       await invoke('tts_mix_delete', { id }).catch(() => {});
       await untick(`${KOKORO_PREFIX}mix-${id}`);
+      await speech?.voicesChanged();
       drawVoicesPanel();
     },
     onSave: async (draft) => {
@@ -1235,6 +1236,7 @@ async function drawVoicesPanel() {
       await invoke('tts_delete', { voiceId }).catch(() => {});
       const deleted = catalog.voices.find(({ id }) => id === voiceId);
       if (deleted) await untick(voiceIdOf(deleted));
+      await speech?.voicesChanged();
       downloads.delete(voiceId);
       drawVoicesPanel();
     },

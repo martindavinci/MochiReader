@@ -260,12 +260,20 @@ class SpeechSession {
    * @returns {Promise<boolean>} Whether it did.
    */
   async voiceInstalled(language, voiceId) {
+    // The bar offers it at once, whether or not it becomes the voice of its language.
+    await this.voicesChanged();
     const { voices } = await this.#invoke('state_get');
     if (voices?.[language]) return false;
     await this.#invoke('state_set_voice', { lang: language, voiceId });
-    if (this.active()) this.#voices = await this.#listVoices().catch(() => this.#voices);
     this.defaultVoiceChanged(language, voiceId);
     return true;
+  }
+
+  /** The voices on this PC changed (one downloaded, deleted or mixed): while it reads, the bar offers them as they are. */
+  async voicesChanged() {
+    if (!this.active()) return;
+    this.#voices = await this.#listVoices().catch(() => this.#voices);
+    this.#draw();
   }
 
   /** Draws the bar again, in the language the interface has now. */
