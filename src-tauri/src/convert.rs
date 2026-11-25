@@ -158,7 +158,7 @@ pub fn decode_any(bytes: &[u8]) -> String {
     }
     match std::str::from_utf8(bytes) {
         Ok(text) => text.to_string(),
-        Err(_) => bytes.iter().map(|&byte| windows_1252(byte)).collect(),
+        Err(_) => decode_code_page(bytes, system_code_page()),
     }
 }
 
@@ -170,6 +170,35 @@ fn utf16(bytes: &[u8], unit: fn([u8; 2]) -> u16) -> String {
         .map(|&pair| unit(pair))
         .collect();
     String::from_utf16_lossy(&units)
+}
+
+/// Bytes in a code page of Windows, as Windows itself reads them: a Japanese, Chinese or Korean one takes two bytes for
+/// some letters. A code page Windows does not know reads as Windows-1252.
+pub fn decode_code_page(bytes: &[u8], code_page: u32) -> String {
+    use windows::Win32::Globalization::{MultiByteToWideChar, MULTI_BYTE_TO_WIDE_CHAR_FLAGS};
+    if bytes.is_empty() {
+        return String::new();
+    }
+    let flags = MULTI_BYTE_TO_WIDE_CHAR_FLAGS(0);
+    // SAFETY: both buffers are slices Windows only reads or writes within their lengths.
+    let needed = unsafe { MultiByteToWideChar(code_page, flags, bytes, None) };
+    if needed > 0 {
+        let mut units = vec![0u16; needed as usize];
+        // SAFETY: as above; `units` holds the length Windows asked for.
+        let written = unsafe { MultiByteToWideChar(code_page, flags, bytes, Some(&mut units)) };
+        if written > 0 {
+            units.truncate(written as usize);
+            return String::from_utf16_lossy(&units);
+        }
+    }
+    bytes.iter().map(|&byte| windows_1252(byte)).collect()
+}
+
+/// The code page Windows reads a plain text in when it says nothing of itself: Windows-1252 in western Europe,
+/// Shift-JIS in Japan, and so on.
+fn system_code_page() -> u32 {
+    // SAFETY: GetACP takes nothing and only reads a setting of the system.
+    unsafe { windows::Win32::Globalization::GetACP() }
 }
 
 pub(crate) fn windows_1252(byte: u8) -> char {
@@ -236,7 +265,7 @@ fn attribute(element: &BytesStart, name: &str) -> Option<String> {
 /// What an XML document says, event by event: its elements by local name, and its text with the references in it
 /// resolved. A document cut short, or not well formed, is an error.
 enum Step<'a> {
-    Open(&'a BytesStart<'a>, bool),
+    Open(&'a BytesStart<'a>),
     Close(String),
     Text(String),
 }
@@ -248,10 +277,10 @@ fn walk(xml: &str, mut on: impl FnMut(Step)) -> Result<(), ConvertError> {
         match reader.read_event().map_err(|_| ConvertError)? {
             Event::Start(element) => {
                 depth += 1;
-                on(Step::Open(&element, false));
+                on(Step::Open(&element));
             }
             Event::Empty(element) => {
-                on(Step::Open(&element, true));
+                on(Step::Open(&element));
                 on(Step::Close(local_name(&element)));
             }
             Event::End(element) => {
@@ -287,7 +316,7 @@ fn word_styles(xml: &str) -> Result<HashMap<String, WordStyle>, ConvertError> {
     let mut styles = HashMap::new();
     let mut current: Option<(String, WordStyle)> = None;
     walk(xml, |step| match step {
-        Step::Open(element, _) => match local_name(element).as_str() {
+        Step::Open(element) => match local_name(element).as_str() {
             "style" => {
                 current = attribute(element, "styleId").map(|id| {
                     (
@@ -367,8 +396,19 @@ struct WordParagraph {
     numbered: bool,
 }
 
-// What Word keeps beside the text read: deleted revisions, field codes, the second copy of a choice, drawings.
-const WORD_SKIPPED: [&str; 6] = ["del", "delText", "instrText", "Fallback", "drawing", "pict"];
+// What Word keeps beside the text read: deleted or moved-away revisions, the properties a revision replaced, field
+// codes, the second copy of a choice, drawings.
+const WORD_SKIPPED: [&str; 9] = [
+    "del",
+    "delText",
+    "moveFrom",
+    "pPrChange",
+    "rPrChange",
+    "instrText",
+    "Fallback",
+    "drawing",
+    "pict",
+];
 
 /// A Word document (.docx): its body, read in order.
 pub fn convert_docx(bytes: &[u8]) -> Result<Rendered, ConvertError> {
@@ -386,14 +426,14 @@ pub fn convert_docx(bytes: &[u8]) -> Result<Rendered, ConvertError> {
     walk(&document, |step| {
         if skipped > 0 {
             match step {
-                Step::Open(_, false) => skipped += 1,
+                Step::Open(..) => skipped += 1,
                 Step::Close(_) => skipped -= 1,
                 _ => {}
             }
             return;
         }
         match step {
-            Step::Open(element, _) => {
+            Step::Open(element) => {
                 let name = local_name(element);
                 if WORD_SKIPPED.contains(&name.as_str()) {
                     // An empty one closes at once, and its close takes the count back down.
@@ -480,14 +520,14 @@ pub fn convert_odt(bytes: &[u8]) -> Result<Rendered, ConvertError> {
     walk(&content, |step| {
         if skipped > 0 {
             match step {
-                Step::Open(_, false) => skipped += 1,
+                Step::Open(..) => skipped += 1,
                 Step::Close(_) => skipped -= 1,
                 _ => {}
             }
             return;
         }
         match step {
-            Step::Open(element, _) => {
+            Step::Open(element) => {
                 let name = local_name(element);
                 if ODF_SKIPPED.contains(&name.as_str()) {
                     skipped = 1;
@@ -582,6 +622,8 @@ const RTF_START: &[u8] = b"{\\rtf";
 // The characters RTF writes after a Unicode one, for readers that know no Unicode, unless it says otherwise.
 const RTF_DEFAULT_FALLBACK: usize = 1;
 const UTF16_UNITS: i32 = 0x1_0000;
+// What RTF is written in when it does not say: Windows-1252.
+const WINDOWS_1252: u32 = 1252;
 
 /// What a group of RTF carries: whether its text is read, how many characters follow a Unicode one, and the
 /// outline level of its paragraphs.
@@ -592,19 +634,42 @@ struct RtfGroup {
     outline: Option<u8>,
 }
 
-/// The text of an RTF document as it is read: the paragraph being written, and the characters still to skip.
+/// The text of an RTF document as it is read: the paragraph being written, the bytes of its code page not yet
+/// decoded (a character of a Japanese or Chinese one takes two), and the characters still to skip.
 struct RtfText {
     blocks: Blocks,
     paragraph: String,
     to_skip: usize,
     high_half: Option<u16>,
+    pending: Vec<u8>,
+    code_page: u32,
 }
 
 impl RtfText {
+    /// The bytes waiting for their code page, as the letters they make.
+    fn flush(&mut self) {
+        if !self.pending.is_empty() {
+            let bytes = std::mem::take(&mut self.pending);
+            self.paragraph
+                .push_str(&decode_code_page(&bytes, self.code_page));
+        }
+    }
+
+    /// A byte of the text, in the code page of the document.
+    fn push_byte(&mut self, group: RtfGroup, byte: u8) {
+        if self.to_skip > 0 {
+            self.to_skip -= 1;
+        } else if !group.skipped {
+            self.high_half = None;
+            self.pending.push(byte);
+        }
+    }
+
     fn push(&mut self, group: RtfGroup, character: char) {
         if self.to_skip > 0 {
             self.to_skip -= 1;
         } else if !group.skipped {
+            self.flush();
             self.high_half = None;
             self.paragraph.push(character);
         }
@@ -615,6 +680,7 @@ impl RtfText {
         if group.skipped {
             return;
         }
+        self.flush();
         match (unit, self.high_half.take()) {
             (0xD800..=0xDBFF, _) => self.high_half = Some(unit),
             (0xDC00..=0xDFFF, Some(high)) => {
@@ -626,7 +692,12 @@ impl RtfText {
         }
     }
 
+    /// The end of a paragraph of the text read: one inside a note or another skipped group is not one.
     fn end_paragraph(&mut self, group: RtfGroup) {
+        if group.skipped {
+            return;
+        }
+        self.flush();
         let text = std::mem::take(&mut self.paragraph);
         match group.outline {
             Some(outline) => self.blocks.heading(outline.saturating_add(1), &text),
@@ -674,6 +745,8 @@ pub fn convert_rtf(bytes: &[u8]) -> Result<Rendered, ConvertError> {
         paragraph: String::new(),
         to_skip: 0,
         high_half: None,
+        pending: Vec::new(),
+        code_page: WINDOWS_1252,
     };
     let mut at = 0;
     while at < bytes.len() {
@@ -714,6 +787,13 @@ pub fn convert_rtf(bytes: &[u8]) -> Result<Rendered, ConvertError> {
                         "rquote" => text.push(group, '’'),
                         "ldblquote" => text.push(group, '“'),
                         "rdblquote" => text.push(group, '”'),
+                        "ansicpg" => {
+                            if let Some(code_page) =
+                                number.and_then(|page| u32::try_from(page).ok())
+                            {
+                                text.code_page = code_page;
+                            }
+                        }
                         "pard" => current.outline = None,
                         "outlinelevel" => {
                             current.outline = number.and_then(|level| u8::try_from(level).ok())
@@ -744,7 +824,7 @@ pub fn convert_rtf(bytes: &[u8]) -> Result<Rendered, ConvertError> {
                                 .and_then(|pair| std::str::from_utf8(pair).ok());
                             if let Some(byte) = hex.and_then(|hex| u8::from_str_radix(hex, 16).ok())
                             {
-                                text.push(group, windows_1252(byte));
+                                text.push_byte(group, byte);
                                 at += 2;
                             }
                         }
@@ -762,7 +842,7 @@ pub fn convert_rtf(bytes: &[u8]) -> Result<Rendered, ConvertError> {
                 }
             }
             byte => {
-                text.push(group, windows_1252(byte));
+                text.push_byte(group, byte);
                 at += 1;
             }
         }
@@ -1046,6 +1126,61 @@ Ultimo senza fine";
     fn a_character_beyond_the_first_plane_comes_from_its_two_halves() {
         let rendered = convert_rtf(br"{\rtf1 Uno \u-10179?\u-8704? due\par}").unwrap();
         assert_eq!(paragraphs_of(&rendered), ["Uno \u{1F600} due"]);
+    }
+
+    #[test]
+    fn an_empty_element_inside_what_is_skipped_does_not_end_the_skip() {
+        let word = docx(
+            "<w:p><w:r><w:t>Prima</w:t></w:r><w:r><w:drawing><wp:anchor><wp:simplePos x=\"0\" y=\"0\"/>\
+             <wp:extent cx=\"1\" cy=\"1\"/><w:txbxContent><w:p><w:r><w:t>RIQUADRO</w:t></w:r></w:p></w:txbxContent>\
+             </wp:anchor></w:drawing></w:r><w:r><w:t> dopo</w:t></w:r></w:p>",
+            None,
+        );
+        assert_eq!(paragraphs_of(&convert_docx(&word).unwrap()), ["Prima dopo"]);
+        let open = odt(
+            "<text:p>Prima<office:annotation><text:p>x<text:line-break/>y<text:line-break/>z</text:p>\
+             </office:annotation> dopo</text:p>",
+        );
+        assert_eq!(paragraphs_of(&convert_odt(&open).unwrap()), ["Prima dopo"]);
+    }
+
+    #[test]
+    fn a_word_document_reads_a_moved_text_once_and_its_paragraphs_as_they_are_now() {
+        let styles = "<w:style w:type=\"paragraph\" w:styleId=\"Sez\"><w:name w:val=\"heading 2\"/></w:style>\
+            <w:style w:type=\"paragraph\" w:styleId=\"Cap\"><w:name w:val=\"heading 1\"/></w:style>";
+        let body = "<w:p><w:moveFrom><w:r><w:t>vecchio posto</w:t></w:r></w:moveFrom><w:r><w:t>testo</w:t></w:r>\
+            <w:moveTo><w:r><w:t> nuovo posto</w:t></w:r></w:moveTo></w:p>\
+            <w:p><w:pPr><w:pStyle w:val=\"Sez\"/><w:pPrChange w:id=\"1\"><w:pPr><w:pStyle w:val=\"Cap\"/>\
+            <w:numPr><w:ilvl w:val=\"0\"/></w:numPr></w:pPr></w:pPrChange></w:pPr><w:r><w:rPr><w:rPrChange w:id=\"2\">\
+            <w:rPr/></w:rPrChange></w:rPr><w:t>Ora una sezione</w:t></w:r></w:p>";
+        let rendered = convert_docx(&docx(body, Some(styles))).unwrap();
+        assert_eq!(paragraphs_of(&rendered), ["testo nuovo posto"]);
+        assert_eq!(headings_of(&rendered), [(2, "Ora una sezione")]);
+    }
+
+    #[test]
+    fn a_paragraph_mark_inside_a_skipped_group_does_not_cut_the_paragraph() {
+        let rendered =
+            convert_rtf(br"{\rtf1 Prima parte {\footnote\pard Nota.\par Altra.}seconda parte\par}")
+                .unwrap();
+        assert_eq!(paragraphs_of(&rendered), ["Prima parte seconda parte"]);
+    }
+
+    #[test]
+    fn an_rtf_document_is_read_in_its_code_page() {
+        let japanese = convert_rtf(br"{\rtf1\ansi\ansicpg932 \'82\'a0\'82\'a2\par}").unwrap();
+        assert_eq!(paragraphs_of(&japanese), ["あい"]);
+        let russian =
+            convert_rtf(br"{\rtf1\ansi\ansicpg1251 \'cf\'f0\'e8\'e2\'e5\'f2\par}").unwrap();
+        assert_eq!(paragraphs_of(&russian), ["Привет"]);
+    }
+
+    #[test]
+    fn bytes_are_read_in_the_code_page_asked_for() {
+        assert_eq!(decode_code_page(b"\x82\xa0", 932), "あ");
+        assert_eq!(decode_code_page(b"caff\xe8", 1252), "caffè");
+        // A code page Windows does not know reads as Windows-1252.
+        assert_eq!(decode_code_page(b"caff\xe8", 12345), "caffè");
     }
 
     #[test]
