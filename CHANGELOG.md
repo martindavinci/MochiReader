@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.8.2] - 2026-11-25
+
+### Fixed
+
+- A bookmark in a book shows the text of its own place in the list of bookmarks, not the text at the top of the page it was made on.
+- The home page, the drop message and the messages of a file that cannot be opened name PDF along with Markdown and EPUB.
+- A bookmark on a row of a Markdown table shows: the row is tinted, since the table cuts off the ribbon in the margin.
+
 ## [0.8.1] - 2026-11-25
 
 ### Added
