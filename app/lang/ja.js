@@ -1,23 +1,23 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 export default {
-  'app.unsupported': '{name} は Markdown、EPUB、PDF のいずれのファイルでもありません。',
+  'app.unsupported': '{name} は MochiReader で開けるファイルではありません。',
 
   'home.welcome': 'MochiReader へようこそ',
-  'home.intro': 'Markdown、EPUB、PDF のファイルを開いて読むか、Windows の音声に読み上げてもらいましょう。すべてこのコンピューターの中で完結します。',
+  'home.intro': 'ドキュメントや本を開いて読むか、音声に読み上げてもらいましょう。すべてこのコンピューターの中で完結します。',
   'home.open': 'ファイルを開く…',
   'home.drop': 'またはこのウィンドウのどこかにファイルをドロップ',
-  'home.hint': 'または Markdown、EPUB、PDF のファイルをこのウィンドウにドロップしてください。',
+  'home.hint': 'またはドキュメントや本をこのウィンドウにドロップしてください。',
   'home.keyRead': '読み上げ',
   'home.keyBookmark': 'しおりを追加',
   'home.keyPage': 'ページをめくる',
 
   'dialog.open': 'ファイルを開く',
-  'dialog.filter': 'Markdown、EPUB、PDF',
+  'dialog.filter': 'ドキュメントと本',
 
   'drop.title': 'ドロップして開く',
-  'drop.text': 'Markdown (.md)、EPUB (.epub)、PDF (.pdf) のファイルは新しいタブで開きます。',
+  'drop.text': 'ドキュメントと本は新しいタブで開きます。',
   'drop.refusedTitle': '{name} は開けません',
-  'drop.refusedText': 'MochiReader が開けるのは Markdown (.md)、EPUB (.epub)、PDF (.pdf) のファイルです。',
+  'drop.refusedText': 'MochiReader が開けるのは Markdown、テキスト、Word、OpenDocument、RTF のドキュメントと、EPUB、PDF の本です。',
 
   'open.loading': '{name} を開いています…',
   'open.title.not_found': 'このファイルはもうここにありません',
@@ -26,7 +26,7 @@ export default {
   'open.title.timeout': 'ファイルが時間内に応答しませんでした',
   'open.error.not_found': '{name} は前回開いたあとに移動、名前の変更、または削除されました。',
   'open.error.unreadable': '{name} を読み込めません。ほかのプログラムが使用中か、アクセス権がない可能性があります。',
-  'open.error.unsupported': '{name} は Markdown、EPUB、PDF のいずれのファイルでもありません。',
+  'open.error.unsupported': '{name} は MochiReader で開けるファイルではありません。',
   'open.error.timeout': '{name} があるドライブが遅いか、接続されていない可能性があります。',
 
   'state.closeTab': 'タブを閉じる',

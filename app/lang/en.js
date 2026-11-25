@@ -1,23 +1,23 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 export default {
-  'app.unsupported': '{name} is not a Markdown, EPUB or PDF file.',
+  'app.unsupported': '{name} is not a file MochiReader can open.',
 
   'home.welcome': 'Welcome to MochiReader',
-  'home.intro': 'Open a Markdown, EPUB or PDF file to read it, or let a Windows voice read it to you. Everything stays on this computer.',
+  'home.intro': 'Open a document or a book to read it, or let a voice read it to you. Everything stays on this computer.',
   'home.open': 'Open a file…',
   'home.drop': 'or drop a file anywhere on this window',
-  'home.hint': 'Or drop a Markdown, EPUB or PDF file on this window.',
+  'home.hint': 'Or drop a document or a book on this window.',
   'home.keyRead': 'Read aloud',
   'home.keyBookmark': 'Add a bookmark',
   'home.keyPage': 'Turn a page',
 
   'dialog.open': 'Open a file',
-  'dialog.filter': 'Markdown, EPUB and PDF',
+  'dialog.filter': 'Documents and books',
 
   'drop.title': 'Drop to open',
-  'drop.text': 'Markdown (.md), EPUB (.epub) and PDF (.pdf) files open in a new tab.',
+  'drop.text': 'Documents and books open in a new tab.',
   'drop.refusedTitle': '{name} can’t be opened',
-  'drop.refusedText': 'MochiReader opens Markdown (.md), EPUB (.epub) and PDF (.pdf) files.',
+  'drop.refusedText': 'MochiReader opens Markdown, text, Word, OpenDocument and RTF documents, and EPUB and PDF books.',
 
   'open.loading': 'Opening {name}…',
   'open.title.not_found': 'This file is no longer here',
@@ -26,7 +26,7 @@ export default {
   'open.title.timeout': 'The file didn’t answer in time',
   'open.error.not_found': '{name} was moved, renamed or deleted since you last opened it.',
   'open.error.unreadable': '{name} can’t be read. It may be in use by another program, or you may not have access to it.',
-  'open.error.unsupported': '{name} is not a Markdown, EPUB or PDF file.',
+  'open.error.unsupported': '{name} is not a file MochiReader can open.',
   'open.error.timeout': 'The drive that holds {name} may be slow or disconnected.',
 
   'state.closeTab': 'Close tab',

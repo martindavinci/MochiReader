@@ -99,3 +99,10 @@ test('a PDF is marked as one', () => {
   const { host } = draw([{ ...recent('C:\\x\\a.pdf'), kind: 'pdf', chapter: 1, chapters: 4 }]);
   assert.equal(host.querySelector('.recent-open').getAttribute('data-kind'), 'pdf');
 });
+
+test('a text, Word, OpenDocument or RTF document is marked as its kind', () => {
+  for (const kind of ['txt', 'docx', 'odt', 'rtf']) {
+    const { host } = draw([{ ...recent(`C:\\x\\a.${kind}`), kind }]);
+    assert.equal(host.querySelector('.recent-open').getAttribute('data-kind'), kind, kind);
+  }
+});

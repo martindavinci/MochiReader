@@ -39,17 +39,15 @@ test('every language has the keys of English, with the same placeholders, and no
   }
 });
 
-// What the app opens, wherever a message names it.
-const FORMAT_MESSAGES = ['app.unsupported', 'home.intro', 'home.hint', 'drop.text', 'drop.refusedText', 'open.error.unsupported'];
+// The one message that lists what the app opens: the others speak of documents and books, so a new format leaves them be.
+const FORMAT_NAMES = ['Markdown', 'Word', 'OpenDocument', 'RTF', 'EPUB', 'PDF'];
+const GENERAL_MESSAGES = ['app.unsupported', 'home.intro', 'home.hint', 'drop.text', 'open.error.unsupported', 'dialog.filter'];
 
-test('every message that names the formats the app opens names PDF too', async () => {
+test('the refusal of a file names every format the app opens, and no other message lists them', async () => {
   for (const file of FILES) {
     const table = await tableOf(file);
-    for (const key of FORMAT_MESSAGES) {
-      assert.match(table[key], /Markdown/, `${file}: ${key}`);
-      assert.match(table[key], /EPUB/, `${file}: ${key}`);
-      assert.match(table[key], /PDF/, `${file}: ${key}`);
-    }
+    for (const name of FORMAT_NAMES) assert.match(table['drop.refusedText'], new RegExp(name), `${file}: ${name}`);
+    for (const key of GENERAL_MESSAGES) assert.doesNotMatch(table[key], /EPUB|PDF/, `${file}: ${key}`);
   }
 });
 

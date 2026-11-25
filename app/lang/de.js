@@ -1,23 +1,23 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 export default {
-  'app.unsupported': '{name} ist keine Markdown-, EPUB- oder PDF-Datei.',
+  'app.unsupported': '{name} ist keine Datei, die MochiReader öffnen kann.',
 
   'home.welcome': 'Willkommen bei MochiReader',
-  'home.intro': 'Öffne eine Markdown-, EPUB- oder PDF-Datei, um sie zu lesen oder dir von einer Windows-Stimme vorlesen zu lassen. Alles bleibt auf diesem Computer.',
+  'home.intro': 'Öffne ein Dokument oder ein Buch, um es zu lesen oder dir von einer Stimme vorlesen zu lassen. Alles bleibt auf diesem Computer.',
   'home.open': 'Datei öffnen…',
   'home.drop': 'oder ziehe eine Datei irgendwo auf dieses Fenster',
-  'home.hint': 'Oder ziehe eine Markdown-, EPUB- oder PDF-Datei auf dieses Fenster.',
+  'home.hint': 'Oder ziehe ein Dokument oder ein Buch auf dieses Fenster.',
   'home.keyRead': 'Vorlesen',
   'home.keyBookmark': 'Lesezeichen setzen',
   'home.keyPage': 'Umblättern',
 
   'dialog.open': 'Datei öffnen',
-  'dialog.filter': 'Markdown, EPUB und PDF',
+  'dialog.filter': 'Dokumente und Bücher',
 
   'drop.title': 'Zum Öffnen loslassen',
-  'drop.text': 'Markdown- (.md), EPUB- (.epub) und PDF-Dateien (.pdf) öffnen sich in einem neuen Tab.',
+  'drop.text': 'Dokumente und Bücher öffnen sich in einem neuen Tab.',
   'drop.refusedTitle': '{name} kann nicht geöffnet werden',
-  'drop.refusedText': 'MochiReader öffnet Markdown- (.md), EPUB- (.epub) und PDF-Dateien (.pdf).',
+  'drop.refusedText': 'MochiReader öffnet Markdown-, Text-, Word-, OpenDocument- und RTF-Dokumente sowie EPUB- und PDF-Bücher.',
 
   'open.loading': '{name} wird geöffnet…',
   'open.title.not_found': 'Diese Datei ist nicht mehr hier',
@@ -26,7 +26,7 @@ export default {
   'open.title.timeout': 'Die Datei hat nicht rechtzeitig geantwortet',
   'open.error.not_found': '{name} wurde seit dem letzten Öffnen verschoben, umbenannt oder gelöscht.',
   'open.error.unreadable': '{name} kann nicht gelesen werden. Vielleicht wird sie von einem anderen Programm verwendet, oder dir fehlt der Zugriff.',
-  'open.error.unsupported': '{name} ist keine Markdown-, EPUB- oder PDF-Datei.',
+  'open.error.unsupported': '{name} ist keine Datei, die MochiReader öffnen kann.',
   'open.error.timeout': 'Das Laufwerk mit {name} ist vielleicht langsam oder nicht verbunden.',
 
   'state.closeTab': 'Tab schließen',

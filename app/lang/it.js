@@ -1,23 +1,23 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 export default {
-  'app.unsupported': '{name} non è un file Markdown, EPUB o PDF.',
+  'app.unsupported': '{name} non è un file che MochiReader sa aprire.',
 
   'home.welcome': 'Benvenuto in MochiReader',
-  'home.intro': 'Apri un file Markdown, EPUB o PDF per leggerlo, o per farlo leggere da una voce di Windows. Tutto resta su questo computer.',
+  'home.intro': 'Apri un documento o un libro per leggerlo, o per farlo leggere da una voce. Tutto resta su questo computer.',
   'home.open': 'Apri un file…',
   'home.drop': 'oppure trascina un file in un punto qualsiasi della finestra',
-  'home.hint': 'Oppure trascina un file Markdown, EPUB o PDF su questa finestra.',
+  'home.hint': 'Oppure trascina un documento o un libro su questa finestra.',
   'home.keyRead': 'Leggi ad alta voce',
   'home.keyBookmark': 'Aggiungi un segnalibro',
   'home.keyPage': 'Volta pagina',
 
   'dialog.open': 'Apri un file',
-  'dialog.filter': 'Markdown, EPUB e PDF',
+  'dialog.filter': 'Documenti e libri',
 
   'drop.title': 'Rilascia per aprire',
-  'drop.text': 'I file Markdown (.md), EPUB (.epub) e PDF (.pdf) si aprono in una nuova scheda.',
+  'drop.text': 'I documenti e i libri si aprono in una nuova scheda.',
   'drop.refusedTitle': '{name} non si può aprire',
-  'drop.refusedText': 'MochiReader apre i file Markdown (.md), EPUB (.epub) e PDF (.pdf).',
+  'drop.refusedText': 'MochiReader apre i documenti Markdown, di testo, Word, OpenDocument e RTF, e i libri EPUB e PDF.',
 
   'open.loading': 'Apertura di {name}…',
   'open.title.not_found': 'Questo file non è più qui',
@@ -26,7 +26,7 @@ export default {
   'open.title.timeout': 'Il file non ha risposto in tempo',
   'open.error.not_found': '{name} è stato spostato, rinominato o eliminato dopo l’ultima apertura.',
   'open.error.unreadable': '{name} non si può leggere. Potrebbe essere in uso da un altro programma, o potresti non avere accesso.',
-  'open.error.unsupported': '{name} non è un file Markdown, EPUB o PDF.',
+  'open.error.unsupported': '{name} non è un file che MochiReader sa aprire.',
   'open.error.timeout': 'L’unità che contiene {name} potrebbe essere lenta o scollegata.',
 
   'state.closeTab': 'Chiudi scheda',

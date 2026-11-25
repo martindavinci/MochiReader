@@ -1,23 +1,23 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 export default {
-  'app.unsupported': '{name} 不是 Markdown、EPUB 或 PDF 文件。',
+  'app.unsupported': '{name} 不是 MochiReader 能打开的文件。',
 
   'home.welcome': '欢迎使用 MochiReader',
-  'home.intro': '打开 Markdown、EPUB 或 PDF 文件来阅读，或让 Windows 语音为你朗读。一切都留在这台电脑上。',
+  'home.intro': '打开文档或书籍来阅读，或让语音为你朗读。一切都留在这台电脑上。',
   'home.open': '打开文件…',
   'home.drop': '或将文件拖放到此窗口的任意位置',
-  'home.hint': '或将 Markdown、EPUB 或 PDF 文件拖放到此窗口。',
+  'home.hint': '或将文档或书籍拖放到此窗口。',
   'home.keyRead': '朗读',
   'home.keyBookmark': '添加书签',
   'home.keyPage': '翻页',
 
   'dialog.open': '打开文件',
-  'dialog.filter': 'Markdown、EPUB 和 PDF',
+  'dialog.filter': '文档和书籍',
 
   'drop.title': '松开即可打开',
-  'drop.text': 'Markdown (.md)、EPUB (.epub) 和 PDF (.pdf) 文件会在新标签页中打开。',
+  'drop.text': '文档和书籍会在新标签页中打开。',
   'drop.refusedTitle': '无法打开 {name}',
-  'drop.refusedText': 'MochiReader 可以打开 Markdown (.md)、EPUB (.epub) 和 PDF (.pdf) 文件。',
+  'drop.refusedText': 'MochiReader 可以打开 Markdown、文本、Word、OpenDocument 和 RTF 文档，以及 EPUB 和 PDF 书籍。',
 
   'open.loading': '正在打开 {name}…',
   'open.title.not_found': '此文件已不在这里',
@@ -26,7 +26,7 @@ export default {
   'open.title.timeout': '文件没有及时响应',
   'open.error.not_found': '自上次打开以来，{name} 已被移动、重命名或删除。',
   'open.error.unreadable': '无法读取 {name}。它可能正被其他程序使用，或者你没有访问权限。',
-  'open.error.unsupported': '{name} 不是 Markdown、EPUB 或 PDF 文件。',
+  'open.error.unsupported': '{name} 不是 MochiReader 能打开的文件。',
   'open.error.timeout': '存放 {name} 的驱动器可能速度很慢或已断开连接。',
 
   'state.closeTab': '关闭标签页',

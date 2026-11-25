@@ -888,6 +888,14 @@ test('the paragraph of a bookmark has a mark beside it, which comes and goes wit
   assert.equal(marked(), 0);
 });
 
+test('a plain document opens like a Markdown file and is kept among the recents as its kind', async () => {
+  const path = 'C:\\x\\note.txt';
+  const shell = await startShell(async (opened) => ({ ...markdownDoc(opened, 'Un testo semplice'), kind: 'txt' }), { pending: [path] });
+  await shell.settled();
+  assert.equal(shell.panes()[0].querySelector('article p').textContent, 'Un testo semplice');
+  assert.deepEqual(shell.state.touched.map(({ kind }) => kind), ['txt']);
+});
+
 test('ctrl+d with no text does nothing', async () => {
   const shell = await startShell(failure('not_found'), { pending: [PATH_A] });
   await shell.settled();

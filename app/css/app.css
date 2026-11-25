@@ -360,6 +360,11 @@ article:empty { display: none; }
 }
 .recent-open[data-kind="epub"]::before { content: "EPUB"; border-color: transparent; background: var(--accent-soft); color: var(--accent); }
 .recent-open[data-kind="pdf"]::before { content: "PDF"; border-color: transparent; background: var(--accent-soft); color: var(--accent); }
+/* A document only read aloud keeps the plain badge of a Markdown file, with its own name. */
+.recent-open[data-kind="txt"]::before { content: "TXT"; }
+.recent-open[data-kind="docx"]::before { content: "DOCX"; }
+.recent-open[data-kind="odt"]::before { content: "ODT"; }
+.recent-open[data-kind="rtf"]::before { content: "RTF"; }
 .recent.missing .recent-open::before { border: 1.5px dashed var(--line-strong); background: none; color: var(--muted); }
 .recent-open:focus-visible { outline-offset: -2px; }
 
