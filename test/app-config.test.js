@@ -118,3 +118,10 @@ test('a chosen theme overrides the one of Windows', () => {
 test('the text size only reaches the text', () => {
   assert.match(/\narticle \{[^}]*\}/.exec(read('app/css/app.css'))[0], /font: 400 var\(--text-size/);
 });
+
+test('a bookmark in a table, which clips what stands outside it, tints its row instead of a ribbon in the margin', () => {
+  const css = read('app/css/app.css');
+  assert.ok(css.includes('article table[data-bookmark]::after, article table [data-bookmark]::after { content: none; }'));
+  assert.ok(css.includes('article tr[data-bookmark] > *, article table[data-bookmark] tr:first-child > * { background: var(--accent-soft); }'));
+  assert.match(/\ntable \{[^}]*\}/.exec(css)[0], /overflow-x: auto/);
+});

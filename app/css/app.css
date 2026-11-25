@@ -662,6 +662,10 @@ article [data-bookmark]:not(hr)::after {
   content: ""; position: absolute; left: -18px; top: calc(.825em - 6.5px); width: 8px; height: 13px;
   background: var(--accent); clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 69%, 0 100%); pointer-events: none;
 }
+/* A table scrolls, so it clips whatever stands outside it: there the row of a bookmark is tinted instead (the first row
+   when the bookmark is on the table itself). */
+article table[data-bookmark]::after, article table [data-bookmark]::after { content: none; }
+article tr[data-bookmark] > *, article table[data-bookmark] tr:first-child > * { background: var(--accent-soft); }
 
 /* A part clips what leaves its box, so it spans the padding of the text: list numbers stand out to the left. */
 article.large > .part {
