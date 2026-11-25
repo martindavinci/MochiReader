@@ -10,17 +10,17 @@ test('the name is the last segment of either slash', () => {
   assert.equal(fileName('a.md'), 'a.md');
 });
 
-test('only Markdown and EPUB files can be opened, in any case', () => {
+test('only the documents and books the app reads can be opened, in any case', () => {
   for (const ok of ['C:\\x\\a.md', 'C:\\x\\a.MD', 'C:\\x\\a.markdown', 'C:\\x\\a.Epub', 'a b, è.md']) {
     assert.equal(isSupported(ok), true, ok);
   }
-  for (const no of ['C:\\x\\a.txt', 'C:\\x\\a.md.txt', 'C:\\x\\md', 'C:\\x.md\\a', '.', '']) {
+  for (const no of ['C:\\x\\a.doc', 'C:\\x\\a.txt.bak', 'C:\\x\\md', 'C:\\x.md\\a', '.', '']) {
     assert.equal(isSupported(no), false, no);
   }
 });
 
 test('the extensions the file dialog offers are the ones that open', () => {
-  assert.deepEqual(OPENABLE_EXTENSIONS, ['md', 'markdown', 'epub', 'pdf']);
+  assert.deepEqual(OPENABLE_EXTENSIONS, ['md', 'markdown', 'epub', 'pdf', 'txt', 'docx', 'odt', 'rtf']);
   for (const extension of OPENABLE_EXTENSIONS) assert.ok(isSupported(`C:\\x\\a.${extension.toUpperCase()}`), extension);
   assert.equal(isSupported('C:\\x\\amd'), false);
 });
@@ -31,5 +31,6 @@ test('a PDF opens, and is a book like an EPUB', () => {
   assert.equal(isBook('pdf'), true);
   assert.equal(isBook('epub'), true);
   assert.equal(isBook('markdown'), false);
+  for (const kind of ['txt', 'docx', 'odt', 'rtf']) assert.equal(isBook(kind), false, kind);
   assert.equal(isBook(null), false);
 });

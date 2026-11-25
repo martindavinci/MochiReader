@@ -3,7 +3,8 @@
 use crate::native::sha256;
 use crate::protocol::{file_url, Roots};
 use crate::render::{decode_text, render_markdown, RenderCtx, Rendered};
-use crate::vault::{find_vault, is_book, is_markdown, is_openable, is_pdf};
+use crate::convert::convert;
+use crate::vault::{find_vault, is_book, is_markdown, is_openable, is_pdf, is_plain_document};
 use serde::Serialize;
 use std::fs;
 use std::io;
@@ -29,6 +30,20 @@ pub enum DocKind {
     Markdown,
     Epub,
     Pdf,
+    Txt,
+    Docx,
+    Odt,
+    Rtf,
+}
+
+/// The kind of a text, Word, OpenDocument or RTF document, by its name.
+fn plain_kind(file: &Path) -> DocKind {
+    match file.extension().map(|extension| extension.to_string_lossy().to_lowercase()).as_deref() {
+        Some("docx") => DocKind::Docx,
+        Some("odt") => DocKind::Odt,
+        Some("rtf") => DocKind::Rtf,
+        _ => DocKind::Txt,
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -133,6 +148,9 @@ fn load(path: &str, read: impl FnOnce(&Path) -> io::Result<Vec<u8>>) -> LoadResu
         let rendered = render_markdown(&source, &ctx);
         let key = markdown_key(file);
         (DocKind::Markdown, Some(key), Some(rendered), None)
+    } else if is_plain_document(file) {
+        let rendered = convert(file, &read(file)?).map_err(|_| OpenError::from(OpenErrorCode::Unreadable))?;
+        (plain_kind(file), Some(markdown_key(file)), Some(rendered), None)
     } else {
         if !fs::metadata(file)?.is_file() {
             return Err(OpenErrorCode::Unreadable.into());
@@ -418,9 +436,36 @@ mod tests {
     }
 
     #[test]
+    fn a_text_document_opens_as_its_blocks_under_the_key_of_its_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("Note.TXT");
+        fs::write(&path, b"Prima riga\n\nCaff\xe8").unwrap();
+        let doc = open(&path).unwrap();
+        assert_eq!(doc.kind, DocKind::Txt);
+        assert!(doc.key.unwrap().starts_with(MARKDOWN_KEY_PREFIX));
+        assert_eq!(doc.file_url, None);
+        let html = doc.rendered.unwrap().html;
+        assert!(html.contains(">Prima riga</p>"));
+        assert!(html.contains(">Caffè</p>"));
+    }
+
+    #[test]
+    fn a_damaged_word_document_is_unreadable() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in ["a.docx", "a.odt"] {
+            let path = dir.path().join(name);
+            fs::write(&path, b"not a zip").unwrap();
+            assert_eq!(open(&path).unwrap_err().code, OpenErrorCode::Unreadable, "{name}");
+        }
+        let path = dir.path().join("a.rtf");
+        fs::write(&path, b"plain words").unwrap();
+        assert_eq!(open(&path).unwrap_err().code, OpenErrorCode::Unreadable);
+    }
+
+    #[test]
     fn unknown_extension_is_unsupported() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("a.txt");
+        let path = dir.path().join("a.xyz");
         fs::write(&path, "x").unwrap();
         assert_eq!(open(&path).unwrap_err().code, OpenErrorCode::Unsupported);
     }
@@ -428,7 +473,7 @@ mod tests {
     #[test]
     fn unknown_extension_does_not_touch_the_disk() {
         let read = |_: &Path| -> io::Result<Vec<u8>> { panic!("read") };
-        let error = open_with("Z:\\a.txt", read, OPEN_TIMEOUT).err().unwrap();
+        let error = open_with("Z:\\a.xyz", read, OPEN_TIMEOUT).err().unwrap();
         assert_eq!(error.code, OpenErrorCode::Unsupported);
     }
 

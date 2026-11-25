@@ -1311,13 +1311,13 @@ test('ctrl plus with the options open shows the new size there', async () => {
   assert.equal(shell.panel().querySelector('.stepper output').textContent, String(shell.state.options.textSize));
 });
 
-test('ctrl+o asks for Markdown, EPUB and PDF files and opens each chosen one', async () => {
+test('ctrl+o asks for every document and book the app reads and opens each chosen one', async () => {
   const shell = await startShell(async (path) => markdownDoc(path, 'Testo'), { picked: [PATH_A, PATH_B] });
   await shell.press('o', CTRL);
   await shell.settled();
   assert.equal(shell.state.dialogs.length, 1);
   assert.equal(shell.state.dialogs[0].multiple, true);
-  assert.deepEqual(shell.state.dialogs[0].filters[0].extensions, ['md', 'markdown', 'epub', 'pdf']);
+  assert.deepEqual(shell.state.dialogs[0].filters[0].extensions, ['md', 'markdown', 'epub', 'pdf', 'txt', 'docx', 'odt', 'rtf']);
   assert.deepEqual(shell.calls, [PATH_A, PATH_B]);
 });
 

@@ -2,7 +2,7 @@
 
 const SEPARATORS = /[\\/]/;
 /** What the app opens. */
-export const OPENABLE_EXTENSIONS = ['md', 'markdown', 'epub', 'pdf'];
+export const OPENABLE_EXTENSIONS = ['md', 'markdown', 'epub', 'pdf', 'txt', 'docx', 'odt', 'rtf'];
 const OPENABLE = new RegExp(`\\.(${OPENABLE_EXTENSIONS.join('|')})$`, 'i');
 /** The kinds of document the book reader shows: a PDF is read as an EPUB made from it. */
 export const BOOK_KINDS = new Set(['epub', 'pdf']);

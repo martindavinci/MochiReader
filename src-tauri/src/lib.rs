@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 mod comments;
+pub mod convert;
 pub mod docs;
 pub mod launch;
 mod native;

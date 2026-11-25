@@ -15,6 +15,8 @@ const PARENT_FOLDER: &str = "..";
 const MARKDOWN_EXTENSIONS: [&str; 2] = ["md", "markdown"];
 const EPUB_EXTENSION: &str = "epub";
 const PDF_EXTENSION: &str = "pdf";
+// Documents only read aloud: their text, converted for the reader of Markdown files (convert.rs).
+const PLAIN_EXTENSIONS: [&str; 4] = ["txt", "docx", "odt", "rtf"];
 const IMAGE_EXTENSIONS: [&str; 8] = ["avif", "bmp", "gif", "jpeg", "jpg", "png", "svg", "webp"];
 
 pub struct Vault {
@@ -65,6 +67,11 @@ pub fn is_pdf(path: &Path) -> bool {
     has_extension(path, &[PDF_EXTENSION])
 }
 
+/// A text, Word, OpenDocument or RTF document: shown as its text, like a Markdown file.
+pub fn is_plain_document(path: &Path) -> bool {
+    has_extension(path, &PLAIN_EXTENSIONS)
+}
+
 /// A file the reader shows as a book, served whole to the page.
 pub fn is_book(path: &Path) -> bool {
     is_epub(path) || is_pdf(path)
@@ -78,7 +85,7 @@ pub fn is_document(path: &Path) -> bool {
 
 /// Whether the app can open the file in a tab.
 pub fn is_openable(path: &Path) -> bool {
-    is_document(path) || is_pdf(path)
+    is_document(path) || is_pdf(path) || is_plain_document(path)
 }
 
 fn has_extension(path: &Path, extensions: &[&str]) -> bool {
