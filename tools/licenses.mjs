@@ -82,7 +82,7 @@ export const VENDORED = [
   },
   {
     name: 'pdf.js',
-    version: '5.7.284',
+    version: '6.5.438',
     license: 'Apache-2.0',
     licenseFile: 'app/vendor/pdfjs/LICENSE',
   },

@@ -4,7 +4,7 @@
 // figure is drawn from its page only when foliate asks for its picture.
 import { PDF_IDENTIFIER_PREFIX } from './epub-key.js';
 import { REFLOW_VERSION, reflow } from './pdf-layout.js';
-import { drawFigure, readPdf } from './pdf-source.js';
+import { drawFigure, readPdf, releasePdf } from './pdf-source.js';
 
 const ROOT = 'OEBPS';
 const CONTAINER = 'META-INF/container.xml';
@@ -164,11 +164,11 @@ export async function makePdfBook(file, { pdfjs, EPUB, hash, notesTitle, name, d
     const destroyBook = book.destroy?.bind(book);
     book.destroy = () => {
       destroyBook?.();
-      pdf.destroy?.();
+      releasePdf(pdf).catch(() => {});
     };
     return book;
   } catch (error) {
-    pdf.destroy?.();
+    releasePdf(pdf).catch(() => {});
     throw error;
   }
 }

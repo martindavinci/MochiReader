@@ -6,8 +6,8 @@
 # moved by hand, after testing, together with the pdfjs-dist version in package.json that the tests read PDFs with.
 set -euo pipefail
 
-readonly PDFJS_VERSION=5.7.284
-readonly PDFJS_SHA256=f14db72530dec74fe666910e246242b9bb698df30f0e06622c4471b340a0413d
+readonly PDFJS_VERSION=6.5.438
+readonly PDFJS_SHA256=7461aefcd27c4ef0dd76f9ca5760f09466eb6b3f934432670c12132e7b3d6faa
 readonly ARCHIVE_URL="https://registry.npmjs.org/pdfjs-dist/-/pdfjs-dist-${PDFJS_VERSION}.tgz"
 # Only what reading the text and drawing a figure need: no viewer, no CMaps, no standard fonts, no WebAssembly.
 readonly KEPT_FILES=(

@@ -99,7 +99,7 @@ test('pages are let go once read, and a refused PDF is let go whole', async () =
   let cleaned = 0;
   let destroyed = 0;
   page.cleanup = () => { cleaned += 1; };
-  doc.destroy = async () => { destroyed += 1; };
+  doc.loadingTask = { destroy: async () => { destroyed += 1; } };
   const open = { ...fake, getDocument: () => ({ promise: Promise.resolve(doc) }) };
   await readPdf(new Uint8Array(1), open);
   assert.equal(cleaned, 1);

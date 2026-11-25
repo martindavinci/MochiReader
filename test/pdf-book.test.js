@@ -143,8 +143,11 @@ test('closing the book lets pdf.js go', async () => {
   const watched = {
     ...pdfjs,
     getDocument: (options) => ({
+      // pdf.js 6 lets a document go through the task that loaded it: the document itself has no destroy.
       promise: pdfjs.getDocument(options).promise.then((doc) => new Proxy(doc, {
-        get: (target, key) => (key === 'destroy' ? async () => { destroyed += 1; return target.destroy(); } : Reflect.get(target, key, target)),
+        get: (target, key) => (key === 'loadingTask'
+          ? { destroy: async () => { destroyed += 1; return target.loadingTask.destroy(); } }
+          : Reflect.get(target, key, target)),
       })),
     }),
   };

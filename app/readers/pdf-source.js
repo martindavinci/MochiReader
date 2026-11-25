@@ -108,6 +108,13 @@ async function marksOf(doc, pages) {
   return marks;
 }
 
+/**
+ * Lets a document pdf.js opened go, with its worker. Since pdf.js 6 this goes through the task that loaded it.
+ * @param {object} pdf
+ * @returns {Promise<void>}
+ */
+export const releasePdf = (pdf) => pdf.loadingTask.destroy();
+
 const textOrNull = (value) => (typeof value === 'string' && value.trim() ? value.trim() : null);
 
 /**
@@ -128,7 +135,7 @@ export async function readPdf(data, pdfjs) {
     return await readOpened(pdf, pdfjs);
   } catch (error) {
     // A PDF that is not read lets its worker go.
-    await pdf.destroy?.();
+    await releasePdf(pdf);
     throw error;
   }
 }
