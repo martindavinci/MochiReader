@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Makes the portable zip from the release build: the program, the voice engine when the build has it, the file that
-# makes it portable, and the texts. Run it after `cargo tauri build`. The zip goes to
+# makes it portable, and the texts. Run it after `npx tauri build`. The zip goes to
 # src-tauri\target\release\bundle\portable.
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.IO.Compression

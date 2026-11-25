@@ -131,7 +131,7 @@ export const VENDORED = [
   },
 ];
 
-// What `cargo tauri build` puts around the program in the *-setup.exe that release.yml
+// What `tauri build` puts around the program in the *-setup.exe that release.yml
 // publishes, and no metadata lists: the NSIS stub, LZMA module and plug-ins, the
 // plug-in of Tauri, and the script Tauri writes for them. tauri-cli picks these
 // versions: a test holds this one to release.yml, and when that moves, read them again

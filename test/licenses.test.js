@@ -124,9 +124,14 @@ test('the installer list holds what the NSIS bundle puts in the installer', () =
 });
 
 test('the installer list follows the tauri-cli that builds the release', () => {
+  const { devDependencies } = JSON.parse(readFileSync(join(REPO_ROOT, 'package.json'), 'utf8'));
+  assert.equal(devDependencies['@tauri-apps/cli'], INSTALLER_TAURI_CLI);
+});
+
+test('the release builds with the tauri-cli of npm, already compiled, never compiling its own', () => {
   const release = readFileSync(join(REPO_ROOT, '.github', 'workflows', 'release.yml'), 'utf8');
-  const [, pinned] = release.match(/TAURI_CLI_VERSION:\s*['"]?([\d.]+)/);
-  assert.equal(pinned, INSTALLER_TAURI_CLI);
+  assert.match(release, /run: npx tauri build --config src-tauri\/tauri\.engine\.conf\.json/);
+  assert.doesNotMatch(release, /cargo install tauri-cli|cargo tauri build|TAURI_CLI_VERSION/);
 });
 
 test('the license of NSIS holds each license it names, and the exception for the LZMA module', () => {

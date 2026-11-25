@@ -89,11 +89,11 @@ Every file is checked against the SHA-256 the app carries before it is used. Ope
 
 ## Build from source
 
-You need Rust 1.90 or later, Node 24 and `tauri-cli` 2.12.3.
+You need Rust 1.90 or later and Node 24. `npm ci` also brings `tauri-cli` 2.12.3, already compiled.
 
 ```
 npm ci
-cargo tauri build
+npx tauri build
 ```
 
 The installer lands in `src-tauri/target/release/bundle/nsis/`.
@@ -105,7 +105,7 @@ The installer lands in `src-tauri/target/release/bundle/nsis/`.
 
 GitHub Actions runs the tests, builds the installer and creates a draft release with it. Publish the draft when you are happy with it.
 
-The release workflow first builds the voice engine with `.github/workflows/engine.yml`: eSpeak NG from its source, with the dictionaries of the languages that have voices, and ONNX Runtime as Microsoft publishes it. It puts the engine in `src-tauri/engine`, builds with `cargo tauri build --config src-tauri/tauri.engine.conf.json`, and adds the source of eSpeak NG to the release beside the installer. A plain `cargo tauri build` makes an installer without the engine, whose voice manager says so. `node tools/piper-catalog.mjs --write` fills in the files of the voices listed in `app/speech/voices.json`.
+The release workflow first builds the voice engine with `.github/workflows/engine.yml`: eSpeak NG from its source, with the dictionaries of the languages that have voices, and ONNX Runtime as Microsoft publishes it. It puts the engine in `src-tauri/engine`, builds with `npx tauri build --config src-tauri/tauri.engine.conf.json`, and adds the source of eSpeak NG to the release beside the installer. A plain `npx tauri build` makes an installer without the engine, whose voice manager says so. `node tools/piper-catalog.mjs --write` fills in the files of the voices listed in `app/speech/voices.json`.
 
 ## License
 
