@@ -6,7 +6,19 @@
 //! sentence being read by that line, as it does for a Markdown file.
 
 use crate::render::{Heading, Rendered};
+use quick_xml::escape::resolve_predefined_entity;
+use quick_xml::events::{BytesStart, Event};
+use quick_xml::{Reader, XmlVersion};
+use std::collections::HashMap;
+use std::io::{Cursor, Read};
 use std::path::Path;
+
+// The most a part of a zipped document may unpack to: a file made to fill the memory is refused.
+const MOST_PART_BYTES: u64 = 64 << 20;
+// An outline level a paragraph of body text has, in Word.
+const BODY_OUTLINE_LEVEL: u8 = 9;
+// How far a style may be based on another: a loop in the styles ends here.
+const MOST_STYLE_PARENTS: usize = 16;
 
 const UTF8_MARK: &[u8] = b"\xEF\xBB\xBF";
 const UTF16_LE_MARK: [u8; 2] = [0xFF, 0xFE];
@@ -155,8 +167,237 @@ pub fn convert(path: &Path, bytes: &[u8]) -> Result<Rendered, ConvertError> {
     }
 }
 
-pub fn convert_docx(_bytes: &[u8]) -> Result<Rendered, ConvertError> {
-    Err(ConvertError)
+/// A part of a zipped document, as text: `None` when the zip has no such part.
+fn zip_part(bytes: &[u8], name: &str) -> Result<Option<String>, ConvertError> {
+    let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).map_err(|_| ConvertError)?;
+    let file = match archive.by_name(name) {
+        Ok(file) => file,
+        Err(zip::result::ZipError::FileNotFound) => return Ok(None),
+        Err(_) => return Err(ConvertError),
+    };
+    let mut text = String::new();
+    file.take(MOST_PART_BYTES + 1).read_to_string(&mut text).map_err(|_| ConvertError)?;
+    if text.len() as u64 > MOST_PART_BYTES {
+        return Err(ConvertError);
+    }
+    Ok(Some(text))
+}
+
+fn local_name(element: &BytesStart) -> String {
+    element.local_name().as_ref().to_string()
+}
+
+/// An attribute by its name without prefix.
+fn attribute(element: &BytesStart, name: &str) -> Option<String> {
+    element
+        .attributes()
+        .flatten()
+        .find(|attribute| attribute.key.local_name().as_ref() == name)
+        .and_then(|attribute| attribute.normalized_value(XmlVersion::Implicit1_0).ok().map(|value| value.into_owned()))
+}
+
+/// What an XML document says, event by event: its elements by local name, and its text with the references in it
+/// resolved. A document cut short, or not well formed, is an error.
+enum Step<'a> {
+    Open(&'a BytesStart<'a>, bool),
+    Close(String),
+    Text(String),
+}
+
+fn walk(xml: &str, mut on: impl FnMut(Step)) -> Result<(), ConvertError> {
+    let mut reader = Reader::from_str(xml);
+    let mut depth = 0usize;
+    loop {
+        match reader.read_event().map_err(|_| ConvertError)? {
+            Event::Start(element) => {
+                depth += 1;
+                on(Step::Open(&element, false));
+            }
+            Event::Empty(element) => {
+                on(Step::Open(&element, true));
+                on(Step::Close(local_name(&element)));
+            }
+            Event::End(element) => {
+                depth = depth.checked_sub(1).ok_or(ConvertError)?;
+                on(Step::Close(element.local_name().as_ref().to_string()));
+            }
+            Event::Text(text) => on(Step::Text(text.xml10_content().into_owned())),
+            Event::CData(text) => on(Step::Text(text.xml10_content().into_owned())),
+            Event::GeneralRef(reference) => {
+                let resolved = match reference.resolve_char_ref() {
+                    Ok(Some(character)) => character.to_string(),
+                    _ => resolve_predefined_entity(&reference.xml10_content()).unwrap_or_default().to_string(),
+                };
+                on(Step::Text(resolved));
+            }
+            Event::Eof if depth == 0 => return Ok(()),
+            Event::Eof => return Err(ConvertError),
+            _ => {}
+        }
+    }
+}
+
+/// What a paragraph style of Word says of its outline: its level, its name, the style it is based on.
+struct WordStyle {
+    outline: Option<u8>,
+    name: String,
+    based_on: Option<String>,
+}
+
+fn word_styles(xml: &str) -> Result<HashMap<String, WordStyle>, ConvertError> {
+    let mut styles = HashMap::new();
+    let mut current: Option<(String, WordStyle)> = None;
+    walk(xml, |step| match step {
+        Step::Open(element, _) => match local_name(element).as_str() {
+            "style" => {
+                current = attribute(element, "styleId")
+                    .map(|id| (id, WordStyle { outline: None, name: String::new(), based_on: None }));
+            }
+            "name" => {
+                if let Some((_, style)) = &mut current {
+                    style.name = attribute(element, "val").unwrap_or_default().to_lowercase();
+                }
+            }
+            "outlineLvl" => {
+                if let Some((_, style)) = &mut current {
+                    style.outline = attribute(element, "val").and_then(|level| level.parse().ok());
+                }
+            }
+            "basedOn" => {
+                if let Some((_, style)) = &mut current {
+                    style.based_on = attribute(element, "val");
+                }
+            }
+            _ => {}
+        },
+        Step::Close(name) if name == "style" => {
+            if let Some((id, style)) = current.take() {
+                styles.insert(id, style);
+            }
+        }
+        _ => {}
+    })?;
+    Ok(styles)
+}
+
+/// The heading level of an outline level of Word, counted from 0; body text has none.
+fn outline_heading(outline: u8) -> Option<u8> {
+    (outline < BODY_OUTLINE_LEVEL).then_some(outline + 1)
+}
+
+/// The heading level a style gives its paragraphs: by its outline level, or its name ("heading 2", "Title"; Word
+/// keeps the English names of its own styles in every language), or the style it is based on.
+fn style_heading(styles: &HashMap<String, WordStyle>, id: &str) -> Option<u8> {
+    let mut style = styles.get(id);
+    for _ in 0..MOST_STYLE_PARENTS {
+        let current = style?;
+        if let Some(outline) = current.outline {
+            return outline_heading(outline);
+        }
+        if current.name == "title" {
+            return Some(1);
+        }
+        if let Some(level) = current.name.strip_prefix("heading ").and_then(|level| level.parse::<u8>().ok()) {
+            return Some(level);
+        }
+        style = current.based_on.as_deref().and_then(|parent| styles.get(parent));
+    }
+    None
+}
+
+#[derive(Default)]
+struct WordParagraph {
+    text: String,
+    style: Option<String>,
+    outline: Option<u8>,
+    numbered: bool,
+}
+
+// What Word keeps beside the text read: deleted revisions, field codes, the second copy of a choice, drawings.
+const WORD_SKIPPED: [&str; 6] = ["del", "delText", "instrText", "Fallback", "drawing", "pict"];
+
+/// A Word document (.docx): its body, read in order.
+pub fn convert_docx(bytes: &[u8]) -> Result<Rendered, ConvertError> {
+    let document = zip_part(bytes, "word/document.xml")?.ok_or(ConvertError)?;
+    let styles = match zip_part(bytes, "word/styles.xml")? {
+        Some(xml) => word_styles(&xml)?,
+        None => HashMap::new(),
+    };
+    let mut blocks = Blocks::default();
+    let mut skipped = 0usize;
+    let mut in_text = false;
+    let mut paragraph: Option<WordParagraph> = None;
+    let mut tables = 0usize;
+    let mut cells: Vec<String> = Vec::new();
+    walk(&document, |step| {
+        if skipped > 0 {
+            match step {
+                Step::Open(_, false) => skipped += 1,
+                Step::Close(_) => skipped -= 1,
+                _ => {}
+            }
+            return;
+        }
+        match step {
+            Step::Open(element, _) => {
+                let name = local_name(element);
+                if WORD_SKIPPED.contains(&name.as_str()) {
+                    // An empty one closes at once, and its close takes the count back down.
+                    skipped = 1;
+                    return;
+                }
+                let Some(open) = paragraph.as_mut() else {
+                    match name.as_str() {
+                        "p" => paragraph = Some(WordParagraph::default()),
+                        "tbl" => tables += 1,
+                        "tr" if tables == 1 => cells.clear(),
+                        "tc" if tables == 1 => cells.push(String::new()),
+                        _ => {}
+                    }
+                    return;
+                };
+                match name.as_str() {
+                    "pStyle" => open.style = attribute(element, "val"),
+                    "outlineLvl" => open.outline = attribute(element, "val").and_then(|level| level.parse().ok()),
+                    "numPr" => open.numbered = true,
+                    "t" => in_text = true,
+                    "tab" | "br" | "cr" => open.text.push(' '),
+                    _ => {}
+                }
+            }
+            Step::Text(text) => {
+                if let (true, Some(open)) = (in_text, paragraph.as_mut()) {
+                    open.text.push_str(&text);
+                }
+            }
+            Step::Close(name) => match name.as_str() {
+                "t" => in_text = false,
+                "p" => {
+                    let Some(done) = paragraph.take() else { return };
+                    if tables > 0 {
+                        if let Some(cell) = cells.last_mut() {
+                            cell.push(' ');
+                            cell.push_str(&done.text);
+                        }
+                    } else if let Some(level) = done
+                        .outline
+                        .and_then(outline_heading)
+                        .or_else(|| done.style.as_deref().and_then(|style| style_heading(&styles, style)))
+                    {
+                        blocks.heading(level, &done.text);
+                    } else if done.numbered {
+                        blocks.item(&done.text);
+                    } else {
+                        blocks.paragraph(&done.text);
+                    }
+                }
+                "tr" if tables == 1 => blocks.row(&cells),
+                "tbl" => tables = tables.saturating_sub(1),
+                _ => {}
+            },
+        }
+    })?;
+    Ok(blocks.finish())
 }
 
 pub fn convert_odt(_bytes: &[u8]) -> Result<Rendered, ConvertError> {
@@ -191,6 +432,104 @@ mod tests {
             .skip(1)
             .map(|rest| rest.split(':').next().unwrap().parse().unwrap())
             .collect()
+    }
+
+    /// A zip holding these files, stored as they are.
+    fn zip_of(files: &[(&str, &str)]) -> Vec<u8> {
+        use std::io::Write;
+        let mut writer = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        let options = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+        for (name, text) in files {
+            writer.start_file(*name, options).unwrap();
+            writer.write_all(text.as_bytes()).unwrap();
+        }
+        writer.finish().unwrap().into_inner()
+    }
+
+    const W: &str = "xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" \
+                     xmlns:mc=\"http://schemas.openxmlformats.org/markup-compatibility/2006\"";
+
+    fn docx(body: &str, styles: Option<&str>) -> Vec<u8> {
+        let document = format!("<?xml version=\"1.0\"?><w:document {W}><w:body>{body}</w:body></w:document>");
+        let styles = styles.map(|styles| format!("<?xml version=\"1.0\"?><w:styles {W}>{styles}</w:styles>"));
+        let mut files = vec![("word/document.xml", document.as_str())];
+        if let Some(styles) = &styles {
+            files.push(("word/styles.xml", styles.as_str()));
+        }
+        zip_of(&files)
+    }
+
+    fn headings_of(rendered: &Rendered) -> Vec<(u8, &str)> {
+        rendered.headings.iter().map(|heading| (heading.level, heading.text.as_str())).collect()
+    }
+
+    const DOCX_STYLES: &str = "<w:style w:type=\"paragraph\" w:styleId=\"Titolo1\"><w:name w:val=\"heading 1\"/></w:style>\
+        <w:style w:type=\"paragraph\" w:styleId=\"Sezione\"><w:name w:val=\"Sezione mia\"/>\
+          <w:pPr><w:outlineLvl w:val=\"1\"/></w:pPr></w:style>\
+        <w:style w:type=\"paragraph\" w:styleId=\"SezioneFiglia\"><w:name w:val=\"Figlia\"/><w:basedOn w:val=\"Sezione\"/></w:style>\
+        <w:style w:type=\"paragraph\" w:styleId=\"Title\"><w:name w:val=\"Title\"/></w:style>\
+        <w:style w:type=\"paragraph\" w:styleId=\"Corpo\"><w:name w:val=\"Body Text\"/></w:style>";
+
+    fn para(style: &str, text: &str) -> String {
+        format!("<w:p><w:pPr><w:pStyle w:val=\"{style}\"/></w:pPr><w:r><w:t>{text}</w:t></w:r></w:p>")
+    }
+
+    #[test]
+    fn a_word_document_has_its_headings_by_style_name_outline_level_or_parent_style() {
+        let body = [
+            para("Titolo1", "Un capitolo"),
+            para("Sezione", "Una sezione"),
+            para("SezioneFiglia", "Una sezione figlia"),
+            "<w:p><w:pPr><w:outlineLvl w:val=\"2\"/></w:pPr><w:r><w:t>Livello tre</w:t></w:r></w:p>".to_string(),
+            para("Title", "Il titolo"),
+            para("Corpo", "Un testo &amp; altro."),
+            "<w:p><w:pPr><w:outlineLvl w:val=\"9\"/></w:pPr><w:r><w:t>Corpo anche questo</w:t></w:r></w:p>".to_string(),
+        ]
+        .concat();
+        let rendered = convert_docx(&docx(&body, Some(DOCX_STYLES))).unwrap();
+        assert_eq!(
+            headings_of(&rendered),
+            [(1, "Un capitolo"), (2, "Una sezione"), (2, "Una sezione figlia"), (3, "Livello tre"), (1, "Il titolo")]
+        );
+        assert!(rendered.html.contains("<p data-sourcepos=\"6:1-6:1\">Un testo &amp; altro.</p>"));
+        assert!(rendered.html.contains(">Corpo anche questo</p>"));
+        assert_eq!(rendered.title.as_deref(), Some("Un capitolo"));
+    }
+
+    #[test]
+    fn a_word_document_is_read_as_its_final_text() {
+        let body = "<w:p><w:r><w:t xml:space=\"preserve\">Uno </w:t></w:r><w:r><w:t>due</w:t><w:tab/><w:t>tre</w:t>\
+            <w:br/><w:t>quattro</w:t></w:r><w:del><w:r><w:delText>tolto</w:delText></w:r></w:del>\
+            <w:ins><w:r><w:t> aggiunto</w:t></w:r></w:ins><w:r><w:footnoteReference w:id=\"1\"/></w:r>\
+            <w:r><w:fldChar w:fldCharType=\"begin\"/></w:r><w:r><w:instrText>HYPERLINK x</w:instrText></w:r>\
+            <w:r><w:t>.</w:t></w:r>\
+            <mc:AlternateContent><mc:Choice><w:r><w:t>scelta</w:t></w:r></mc:Choice>\
+            <mc:Fallback><w:r><w:t>doppione</w:t></w:r></mc:Fallback></mc:AlternateContent></w:p>";
+        let rendered = convert_docx(&docx(body, None)).unwrap();
+        assert_eq!(rendered.html, "<p data-sourcepos=\"1:1-1:1\">Uno due tre quattro aggiunto.scelta</p>\n");
+    }
+
+    #[test]
+    fn a_word_document_keeps_its_list_items_and_table_rows() {
+        let body = "<w:p><w:pPr><w:numPr><w:ilvl w:val=\"0\"/><w:numId w:val=\"1\"/></w:numPr></w:pPr>\
+            <w:r><w:t>una voce</w:t></w:r></w:p>\
+            <w:tbl><w:tr><w:tc><w:p><w:r><w:t>a</w:t></w:r></w:p></w:tc>\
+            <w:tc><w:p><w:r><w:t>b</w:t></w:r></w:p><w:p><w:r><w:t>c</w:t></w:r></w:p></w:tc></w:tr></w:tbl>\
+            <w:p><w:r><w:t>dopo</w:t></w:r></w:p>";
+        let rendered = convert_docx(&docx(body, None)).unwrap();
+        assert_eq!(
+            rendered.html,
+            "<ul>\n<li data-sourcepos=\"1:1-1:1\">una voce</li>\n</ul>\n\
+             <table><tbody>\n<tr data-sourcepos=\"2:1-2:1\"><td>a</td><td>b c</td></tr>\n</tbody></table>\n\
+             <p data-sourcepos=\"3:1-3:1\">dopo</p>\n"
+        );
+    }
+
+    #[test]
+    fn a_damaged_word_document_says_so() {
+        assert_eq!(convert_docx(b"not a zip").unwrap_err(), ConvertError);
+        assert_eq!(convert_docx(&zip_of(&[("word/other.xml", "<x/>")])).unwrap_err(), ConvertError);
+        assert_eq!(convert_docx(&zip_of(&[("word/document.xml", "<w:document><w:body><w:p>")])).unwrap_err(), ConvertError);
     }
 
     #[test]

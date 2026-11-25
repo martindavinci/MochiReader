@@ -22,10 +22,11 @@ tauri-build = { version = "=2.7.3", features = [] }
 [dependencies]
 ammonia = "=4.2.4"
 comrak = { version = "=0.59.0", default-features = false }
-# The inflate of zip, in Rust: the engine pack is a zip.
 libloading = "0.9"
 # load-dynamic: ONNX Runtime comes with the engine pack the reader downloads, and is loaded from its folder by path.
 ort = { version = "=2.0.0-rc.15", default-features = false, features = ["load-dynamic", "std"] }
+# The XML of Word and OpenDocument documents (convert.rs).
+quick-xml = "=0.42.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # custom-protocol: serve the embedded pages from every build, since the app has no dev server.
@@ -49,6 +50,8 @@ windows = { version = "=0.62.2", features = [
   "Win32_UI_Shell",
   "Win32_UI_WindowsAndMessaging",
 ] }
+# A Word or OpenDocument document is a zip: only its deflate is needed to read it.
+zip = { version = "=9.5.1", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 
 [dev-dependencies]
 tempfile = "3"
