@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 export default {
-  'app.unsupported': '{name} non è un file Markdown o EPUB.',
+  'app.unsupported': '{name} non è un file Markdown, EPUB o PDF.',
 
   'home.welcome': 'Benvenuto in MochiReader',
-  'home.intro': 'Apri un file Markdown o EPUB per leggerlo, o per farlo leggere da una voce di Windows. Tutto resta su questo computer.',
+  'home.intro': 'Apri un file Markdown, EPUB o PDF per leggerlo, o per farlo leggere da una voce di Windows. Tutto resta su questo computer.',
   'home.open': 'Apri un file…',
   'home.drop': 'oppure trascina un file in un punto qualsiasi della finestra',
-  'home.hint': 'Oppure trascina un file Markdown o EPUB su questa finestra.',
+  'home.hint': 'Oppure trascina un file Markdown, EPUB o PDF su questa finestra.',
   'home.keyRead': 'Leggi ad alta voce',
   'home.keyBookmark': 'Aggiungi un segnalibro',
   'home.keyPage': 'Volta pagina',
@@ -15,9 +15,9 @@ export default {
   'dialog.filter': 'Markdown, EPUB e PDF',
 
   'drop.title': 'Rilascia per aprire',
-  'drop.text': 'I file Markdown (.md) ed EPUB (.epub) si aprono in una nuova scheda.',
+  'drop.text': 'I file Markdown (.md), EPUB (.epub) e PDF (.pdf) si aprono in una nuova scheda.',
   'drop.refusedTitle': '{name} non si può aprire',
-  'drop.refusedText': 'MochiReader apre i file Markdown (.md) ed EPUB (.epub).',
+  'drop.refusedText': 'MochiReader apre i file Markdown (.md), EPUB (.epub) e PDF (.pdf).',
 
   'open.loading': 'Apertura di {name}…',
   'open.title.not_found': 'Questo file non è più qui',
@@ -26,7 +26,7 @@ export default {
   'open.title.timeout': 'Il file non ha risposto in tempo',
   'open.error.not_found': '{name} è stato spostato, rinominato o eliminato dopo l’ultima apertura.',
   'open.error.unreadable': '{name} non si può leggere. Potrebbe essere in uso da un altro programma, o potresti non avere accesso.',
-  'open.error.unsupported': '{name} non è un file Markdown o EPUB.',
+  'open.error.unsupported': '{name} non è un file Markdown, EPUB o PDF.',
   'open.error.timeout': 'L’unità che contiene {name} potrebbe essere lenta o scollegata.',
 
   'state.closeTab': 'Chiudi scheda',

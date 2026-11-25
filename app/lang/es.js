@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 export default {
-  'app.unsupported': '{name} no es un archivo Markdown ni EPUB.',
+  'app.unsupported': '{name} no es un archivo Markdown, EPUB ni PDF.',
 
   'home.welcome': 'Te damos la bienvenida a MochiReader',
-  'home.intro': 'Abre un archivo Markdown o EPUB para leerlo, o deja que una voz de Windows te lo lea. Todo se queda en este equipo.',
+  'home.intro': 'Abre un archivo Markdown, EPUB o PDF para leerlo, o deja que una voz de Windows te lo lea. Todo se queda en este equipo.',
   'home.open': 'Abrir un archivo…',
   'home.drop': 'o suelta un archivo en cualquier parte de esta ventana',
-  'home.hint': 'O suelta un archivo Markdown o EPUB en esta ventana.',
+  'home.hint': 'O suelta un archivo Markdown, EPUB o PDF en esta ventana.',
   'home.keyRead': 'Leer en voz alta',
   'home.keyBookmark': 'Añadir un marcador',
   'home.keyPage': 'Pasar página',
@@ -15,9 +15,9 @@ export default {
   'dialog.filter': 'Markdown, EPUB y PDF',
 
   'drop.title': 'Suelta para abrir',
-  'drop.text': 'Los archivos Markdown (.md) y EPUB (.epub) se abren en una pestaña nueva.',
+  'drop.text': 'Los archivos Markdown (.md), EPUB (.epub) y PDF (.pdf) se abren en una pestaña nueva.',
   'drop.refusedTitle': '{name} no se puede abrir',
-  'drop.refusedText': 'MochiReader abre archivos Markdown (.md) y EPUB (.epub).',
+  'drop.refusedText': 'MochiReader abre archivos Markdown (.md), EPUB (.epub) y PDF (.pdf).',
 
   'open.loading': 'Abriendo {name}…',
   'open.title.not_found': 'Este archivo ya no está aquí',
@@ -26,7 +26,7 @@ export default {
   'open.title.timeout': 'El archivo no respondió a tiempo',
   'open.error.not_found': '{name} se movió, cambió de nombre o se eliminó desde la última vez que lo abriste.',
   'open.error.unreadable': '{name} no se puede leer. Puede que otro programa lo esté usando o que no tengas acceso.',
-  'open.error.unsupported': '{name} no es un archivo Markdown ni EPUB.',
+  'open.error.unsupported': '{name} no es un archivo Markdown, EPUB ni PDF.',
   'open.error.timeout': 'La unidad que contiene {name} puede estar lenta o desconectada.',
 
   'state.closeTab': 'Cerrar pestaña',

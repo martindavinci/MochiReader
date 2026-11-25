@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 export default {
-  'app.unsupported': '{name} não é um arquivo Markdown ou EPUB.',
+  'app.unsupported': '{name} não é um arquivo Markdown, EPUB ou PDF.',
 
   'home.welcome': 'Boas-vindas ao MochiReader',
-  'home.intro': 'Abra um arquivo Markdown ou EPUB para ler, ou deixe uma voz do Windows ler para você. Tudo fica neste computador.',
+  'home.intro': 'Abra um arquivo Markdown, EPUB ou PDF para ler, ou deixe uma voz do Windows ler para você. Tudo fica neste computador.',
   'home.open': 'Abrir um arquivo…',
   'home.drop': 'ou solte um arquivo em qualquer lugar desta janela',
-  'home.hint': 'Ou solte um arquivo Markdown ou EPUB nesta janela.',
+  'home.hint': 'Ou solte um arquivo Markdown, EPUB ou PDF nesta janela.',
   'home.keyRead': 'Ler em voz alta',
   'home.keyBookmark': 'Adicionar um marcador',
   'home.keyPage': 'Virar a página',
@@ -15,9 +15,9 @@ export default {
   'dialog.filter': 'Markdown, EPUB e PDF',
 
   'drop.title': 'Solte para abrir',
-  'drop.text': 'Arquivos Markdown (.md) e EPUB (.epub) abrem em uma nova aba.',
+  'drop.text': 'Arquivos Markdown (.md), EPUB (.epub) e PDF (.pdf) abrem em uma nova aba.',
   'drop.refusedTitle': 'Não é possível abrir {name}',
-  'drop.refusedText': 'O MochiReader abre arquivos Markdown (.md) e EPUB (.epub).',
+  'drop.refusedText': 'O MochiReader abre arquivos Markdown (.md), EPUB (.epub) e PDF (.pdf).',
 
   'open.loading': 'Abrindo {name}…',
   'open.title.not_found': 'Este arquivo não está mais aqui',
@@ -26,7 +26,7 @@ export default {
   'open.title.timeout': 'O arquivo não respondeu a tempo',
   'open.error.not_found': '{name} foi movido, renomeado ou excluído desde a última vez que você o abriu.',
   'open.error.unreadable': 'Não é possível ler {name}. Talvez ele esteja em uso por outro programa, ou você não tenha acesso a ele.',
-  'open.error.unsupported': '{name} não é um arquivo Markdown ou EPUB.',
+  'open.error.unsupported': '{name} não é um arquivo Markdown, EPUB ou PDF.',
   'open.error.timeout': 'A unidade que contém {name} pode estar lenta ou desconectada.',
 
   'state.closeTab': 'Fechar aba',

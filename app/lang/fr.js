@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 export default {
-  'app.unsupported': '{name} n’est pas un fichier Markdown ou EPUB.',
+  'app.unsupported': '{name} n’est pas un fichier Markdown, EPUB ou PDF.',
 
   'home.welcome': 'Bienvenue dans MochiReader',
-  'home.intro': 'Ouvrez un fichier Markdown ou EPUB pour le lire, ou laissez une voix de Windows vous le lire. Tout reste sur cet ordinateur.',
+  'home.intro': 'Ouvrez un fichier Markdown, EPUB ou PDF pour le lire, ou laissez une voix de Windows vous le lire. Tout reste sur cet ordinateur.',
   'home.open': 'Ouvrir un fichier…',
   'home.drop': 'ou déposez un fichier n’importe où dans cette fenêtre',
-  'home.hint': 'Ou déposez un fichier Markdown ou EPUB dans cette fenêtre.',
+  'home.hint': 'Ou déposez un fichier Markdown, EPUB ou PDF dans cette fenêtre.',
   'home.keyRead': 'Lire à voix haute',
   'home.keyBookmark': 'Ajouter un signet',
   'home.keyPage': 'Tourner la page',
@@ -15,9 +15,9 @@ export default {
   'dialog.filter': 'Markdown, EPUB et PDF',
 
   'drop.title': 'Déposez pour ouvrir',
-  'drop.text': 'Les fichiers Markdown (.md) et EPUB (.epub) s’ouvrent dans un nouvel onglet.',
+  'drop.text': 'Les fichiers Markdown (.md), EPUB (.epub) et PDF (.pdf) s’ouvrent dans un nouvel onglet.',
   'drop.refusedTitle': 'Impossible d’ouvrir {name}',
-  'drop.refusedText': 'MochiReader ouvre les fichiers Markdown (.md) et EPUB (.epub).',
+  'drop.refusedText': 'MochiReader ouvre les fichiers Markdown (.md), EPUB (.epub) et PDF (.pdf).',
 
   'open.loading': 'Ouverture de {name}…',
   'open.title.not_found': 'Ce fichier n’est plus ici',
@@ -26,7 +26,7 @@ export default {
   'open.title.timeout': 'Le fichier n’a pas répondu à temps',
   'open.error.not_found': '{name} a été déplacé, renommé ou supprimé depuis sa dernière ouverture.',
   'open.error.unreadable': 'Impossible de lire {name}. Il est peut-être utilisé par un autre programme, ou vous n’y avez pas accès.',
-  'open.error.unsupported': '{name} n’est pas un fichier Markdown ou EPUB.',
+  'open.error.unsupported': '{name} n’est pas un fichier Markdown, EPUB ou PDF.',
   'open.error.timeout': 'Le lecteur qui contient {name} est peut-être lent ou déconnecté.',
 
   'state.closeTab': 'Fermer l’onglet',

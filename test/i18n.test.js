@@ -39,6 +39,20 @@ test('every language has the keys of English, with the same placeholders, and no
   }
 });
 
+// What the app opens, wherever a message names it.
+const FORMAT_MESSAGES = ['app.unsupported', 'home.intro', 'home.hint', 'drop.text', 'drop.refusedText', 'open.error.unsupported'];
+
+test('every message that names the formats the app opens names PDF too', async () => {
+  for (const file of FILES) {
+    const table = await tableOf(file);
+    for (const key of FORMAT_MESSAGES) {
+      assert.match(table[key], /Markdown/, `${file}: ${key}`);
+      assert.match(table[key], /EPUB/, `${file}: ${key}`);
+      assert.match(table[key], /PDF/, `${file}: ${key}`);
+    }
+  }
+});
+
 test('a language loads when it is asked for, and goes by its region where the table has one', async () => {
   assert.deepEqual(LANGS, ['en', 'it', 'de', 'es', 'fr', 'pt', 'ja', 'ko', 'zh']);
   await loadLang('pt-PT');
