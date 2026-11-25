@@ -15,6 +15,7 @@ import {
   prevSpeechSection,
   openEpub,
   readingBlocks,
+  bookProgress,
 } from '../app/readers/epub.js';
 import { HIGHLIGHT_RULE } from '../app/readers/epub-style.js';
 
@@ -1310,4 +1311,22 @@ test('a held place that cannot be found leaves the excerpt to the page', () => {
     throw new Error('this place is gone');
   };
   assert.equal(makeReader(view, { place: { cfi: 'epubcfi(/6/2!/4/4)', sentence: 0 } }).excerpt(), 'Visible text here');
+});
+
+/** What bookProgress reads of a book of two chapters, open on the first, scrolled to `start` of 1000. */
+function scrolledOn(start, { scrolled = true } = {}) {
+  return {
+    book: { sections: [{ size: 1 }, { size: 1 }], toc: [{ label: 'One', href: 'one.xhtml' }, { label: 'Two', href: 'two.xhtml' }] },
+    renderer: { scrolled, start, end: start + 300, viewSize: 1000, page: 1, pages: 5, atStart: start === 0, atEnd: false, getContents: () => [{ index: 0 }] },
+    lastLocation: { tocItem: { href: 'one.xhtml', label: 'One' }, fraction: 0.2 },
+    getProgressOf: (index) => ({ tocItem: { label: index === 1 ? 'Two' : 'One' } }),
+  };
+}
+
+test('scrolled to the end of a chapter, the next one is offered', () => {
+  assert.equal(bookProgress(scrolledOn(700)).next, 'Two');
+});
+
+test('scrolled within a chapter, the next one is not offered yet', () => {
+  assert.equal(bookProgress(scrolledOn(300)).next, '');
 });

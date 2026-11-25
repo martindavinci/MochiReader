@@ -92,6 +92,8 @@ const MOST_PROGRESS_PARTS = 40;
 const FULL = 100;
 // The paginator keeps an empty page at each end of a section.
 const SPARE_PAGES = 2;
+// Scrolled, a chapter is at its end when this little of it is left below the screen, as foliate counts it.
+const END_SLACK_PX = 2;
 
 /**
  * @param {object} view
@@ -122,7 +124,9 @@ export function bookProgress(view) {
       done: index < shown ? FULL : index === shown ? Math.round(seen * FULL) : 0,
     }));
 
-  const after = paged && page === pages ? order.find(({ index }) => index > shown) : null;
+  // At the last page, or scrolled to the bottom, of a chapter: the next one is offered.
+  const atChapterEnd = paged ? page === pages : scrolled && renderer.viewSize - renderer.end <= END_SLACK_PX;
+  const after = atChapterEnd ? order.find(({ index }) => index > shown) : null;
   const label = location?.tocItem?.label?.trim() ?? '';
   const nextLabel = after ? view.getProgressOf?.(after.index)?.tocItem?.label?.trim() ?? '' : '';
   return {
