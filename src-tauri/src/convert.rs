@@ -26,8 +26,8 @@ const UTF16_BE_MARK: [u8; 2] = [0xFE, 0xFF];
 const HIGHEST_HEADING: u8 = 6;
 // Windows-1252 from 0x80 to 0x9F; the rest of its bytes are the Latin-1 letters of the same number.
 const WINDOWS_1252_HIGH: [char; 32] = [
-    '€', '\u{81}', '‚', 'ƒ', '„', '…', '†', '‡', 'ˆ', '‰', 'Š', '‹', 'Œ', '\u{8D}', 'Ž', '\u{8F}', '\u{90}', '‘', '’',
-    '“', '”', '•', '–', '—', '˜', '™', 'š', '›', 'œ', '\u{9D}', 'ž', 'Ÿ',
+    '€', '\u{81}', '‚', 'ƒ', '„', '…', '†', '‡', 'ˆ', '‰', 'Š', '‹', 'Œ', '\u{8D}', 'Ž', '\u{8F}',
+    '\u{90}', '‘', '’', '“', '”', '•', '–', '—', '˜', '™', 'š', '›', 'œ', '\u{9D}', 'ž', 'Ÿ',
 ];
 
 /// What a document gives the reader: the blocks of its text, in order, each with its line.
@@ -47,7 +47,11 @@ impl Blocks {
         }
         let level = level.clamp(1, HIGHEST_HEADING);
         let line = self.block(None);
-        self.html.push_str(&format!("<h{level} {}>{}</h{level}>\n", sourcepos(line), escape(&text)));
+        self.html.push_str(&format!(
+            "<h{level} {}>{}</h{level}>\n",
+            sourcepos(line),
+            escape(&text)
+        ));
         self.headings.push(Heading { level, text, line });
     }
 
@@ -55,7 +59,8 @@ impl Blocks {
         let text = tidy(text);
         if !text.is_empty() {
             let line = self.block(None);
-            self.html.push_str(&format!("<p {}>{}</p>\n", sourcepos(line), escape(&text)));
+            self.html
+                .push_str(&format!("<p {}>{}</p>\n", sourcepos(line), escape(&text)));
         }
     }
 
@@ -64,7 +69,8 @@ impl Blocks {
         let text = tidy(text);
         if !text.is_empty() {
             let line = self.block(Some("ul"));
-            self.html.push_str(&format!("<li {}>{}</li>\n", sourcepos(line), escape(&text)));
+            self.html
+                .push_str(&format!("<li {}>{}</li>\n", sourcepos(line), escape(&text)));
         }
     }
 
@@ -75,14 +81,27 @@ impl Blocks {
             return;
         }
         let line = self.block(Some("table"));
-        let cells: String = cells.iter().map(|cell| format!("<td>{}</td>", escape(cell))).collect();
-        self.html.push_str(&format!("<tr {}>{cells}</tr>\n", sourcepos(line)));
+        let cells: String = cells
+            .iter()
+            .map(|cell| format!("<td>{}</td>", escape(cell)))
+            .collect();
+        self.html
+            .push_str(&format!("<tr {}>{cells}</tr>\n", sourcepos(line)));
     }
 
     pub fn finish(mut self) -> Rendered {
         self.close();
-        let title = self.headings.iter().find(|heading| heading.level == 1).map(|heading| heading.text.clone());
-        Rendered { html: self.html, title, lang: None, headings: self.headings }
+        let title = self
+            .headings
+            .iter()
+            .find(|heading| heading.level == 1)
+            .map(|heading| heading.text.clone());
+        Rendered {
+            html: self.html,
+            title,
+            lang: None,
+            headings: self.headings,
+        }
     }
 
     /// The line of the next block, inside the container it asks for (a list, a table) or none.
@@ -119,7 +138,10 @@ fn tidy(text: &str) -> String {
 }
 
 fn escape(text: &str) -> String {
-    text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
 }
 
 /// The text of a file whose encoding no one says: UTF-8 or UTF-16 by their mark, UTF-8 when it is valid, and
@@ -141,7 +163,12 @@ pub fn decode_any(bytes: &[u8]) -> String {
 }
 
 fn utf16(bytes: &[u8], unit: fn([u8; 2]) -> u16) -> String {
-    let units: Vec<u16> = bytes.chunks_exact(2).map(|pair| unit([pair[0], pair[1]])).collect();
+    let units: Vec<u16> = bytes
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|&pair| unit(pair))
+        .collect();
     String::from_utf16_lossy(&units)
 }
 
@@ -158,7 +185,10 @@ pub struct ConvertError;
 
 /// The document at `path`, from its bytes, by the kind its name says.
 pub fn convert(path: &Path, bytes: &[u8]) -> Result<Rendered, ConvertError> {
-    let extension = path.extension().map(|extension| extension.to_string_lossy().to_lowercase()).unwrap_or_default();
+    let extension = path
+        .extension()
+        .map(|extension| extension.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
     match extension.as_str() {
         "docx" => convert_docx(bytes),
         "odt" => convert_odt(bytes),
@@ -176,7 +206,9 @@ fn zip_part(bytes: &[u8], name: &str) -> Result<Option<String>, ConvertError> {
         Err(_) => return Err(ConvertError),
     };
     let mut text = String::new();
-    file.take(MOST_PART_BYTES + 1).read_to_string(&mut text).map_err(|_| ConvertError)?;
+    file.take(MOST_PART_BYTES + 1)
+        .read_to_string(&mut text)
+        .map_err(|_| ConvertError)?;
     if text.len() as u64 > MOST_PART_BYTES {
         return Err(ConvertError);
     }
@@ -193,7 +225,12 @@ fn attribute(element: &BytesStart, name: &str) -> Option<String> {
         .attributes()
         .flatten()
         .find(|attribute| attribute.key.local_name().as_ref() == name)
-        .and_then(|attribute| attribute.normalized_value(XmlVersion::Implicit1_0).ok().map(|value| value.into_owned()))
+        .and_then(|attribute| {
+            attribute
+                .normalized_value(XmlVersion::Implicit1_0)
+                .ok()
+                .map(|value| value.into_owned())
+        })
 }
 
 /// What an XML document says, event by event: its elements by local name, and its text with the references in it
@@ -226,7 +263,9 @@ fn walk(xml: &str, mut on: impl FnMut(Step)) -> Result<(), ConvertError> {
             Event::GeneralRef(reference) => {
                 let resolved = match reference.resolve_char_ref() {
                     Ok(Some(character)) => character.to_string(),
-                    _ => resolve_predefined_entity(&reference.xml10_content()).unwrap_or_default().to_string(),
+                    _ => resolve_predefined_entity(&reference.xml10_content())
+                        .unwrap_or_default()
+                        .to_string(),
                 };
                 on(Step::Text(resolved));
             }
@@ -250,8 +289,16 @@ fn word_styles(xml: &str) -> Result<HashMap<String, WordStyle>, ConvertError> {
     walk(xml, |step| match step {
         Step::Open(element, _) => match local_name(element).as_str() {
             "style" => {
-                current = attribute(element, "styleId")
-                    .map(|id| (id, WordStyle { outline: None, name: String::new(), based_on: None }));
+                current = attribute(element, "styleId").map(|id| {
+                    (
+                        id,
+                        WordStyle {
+                            outline: None,
+                            name: String::new(),
+                            based_on: None,
+                        },
+                    )
+                });
             }
             "name" => {
                 if let Some((_, style)) = &mut current {
@@ -297,10 +344,17 @@ fn style_heading(styles: &HashMap<String, WordStyle>, id: &str) -> Option<u8> {
         if current.name == "title" {
             return Some(1);
         }
-        if let Some(level) = current.name.strip_prefix("heading ").and_then(|level| level.parse::<u8>().ok()) {
+        if let Some(level) = current
+            .name
+            .strip_prefix("heading ")
+            .and_then(|level| level.parse::<u8>().ok())
+        {
             return Some(level);
         }
-        style = current.based_on.as_deref().and_then(|parent| styles.get(parent));
+        style = current
+            .based_on
+            .as_deref()
+            .and_then(|parent| styles.get(parent));
     }
     None
 }
@@ -358,7 +412,10 @@ pub fn convert_docx(bytes: &[u8]) -> Result<Rendered, ConvertError> {
                 };
                 match name.as_str() {
                     "pStyle" => open.style = attribute(element, "val"),
-                    "outlineLvl" => open.outline = attribute(element, "val").and_then(|level| level.parse().ok()),
+                    "outlineLvl" => {
+                        open.outline =
+                            attribute(element, "val").and_then(|level| level.parse().ok())
+                    }
                     "numPr" => open.numbered = true,
                     "t" => in_text = true,
                     "tab" | "br" | "cr" => open.text.push(' '),
@@ -379,10 +436,12 @@ pub fn convert_docx(bytes: &[u8]) -> Result<Rendered, ConvertError> {
                             cell.push(' ');
                             cell.push_str(&done.text);
                         }
-                    } else if let Some(level) = done
-                        .outline
-                        .and_then(outline_heading)
-                        .or_else(|| done.style.as_deref().and_then(|style| style_heading(&styles, style)))
+                    } else if let Some(level) =
+                        done.outline.and_then(outline_heading).or_else(|| {
+                            done.style
+                                .as_deref()
+                                .and_then(|style| style_heading(&styles, style))
+                        })
                     {
                         blocks.heading(level, &done.text);
                     } else if done.numbered {
@@ -438,10 +497,19 @@ pub fn convert_odt(bytes: &[u8]) -> Result<Rendered, ConvertError> {
                     ("s" | "tab" | "line-break", Some(open)) => open.text.push(' '),
                     (_, Some(_)) => {}
                     ("h", None) => {
-                        let level = attribute(element, "outline-level").and_then(|level| level.parse().ok());
-                        block = Some(OdfBlock { heading: Some(level.unwrap_or(1)), text: String::new() });
+                        let level = attribute(element, "outline-level")
+                            .and_then(|level| level.parse().ok());
+                        block = Some(OdfBlock {
+                            heading: Some(level.unwrap_or(1)),
+                            text: String::new(),
+                        });
                     }
-                    ("p", None) => block = Some(OdfBlock { heading: None, text: String::new() }),
+                    ("p", None) => {
+                        block = Some(OdfBlock {
+                            heading: None,
+                            text: String::new(),
+                        })
+                    }
                     ("list", None) => lists += 1,
                     ("table", None) => tables += 1,
                     ("table-row", None) if tables == 1 => cells.clear(),
@@ -480,8 +548,228 @@ pub fn convert_odt(bytes: &[u8]) -> Result<Rendered, ConvertError> {
     Ok(blocks.finish())
 }
 
-pub fn convert_rtf(_bytes: &[u8]) -> Result<Rendered, ConvertError> {
-    Err(ConvertError)
+// Groups of RTF whose text is not read: the tables of fonts, colours, styles and lists, what the document says of
+// itself, pictures and objects, headers and footers, notes and comments, the instructions of fields, list numbers.
+const RTF_SKIPPED: [&str; 26] = [
+    "fonttbl",
+    "colortbl",
+    "stylesheet",
+    "info",
+    "pict",
+    "object",
+    "header",
+    "headerl",
+    "headerr",
+    "headerf",
+    "footer",
+    "footerl",
+    "footerr",
+    "footerf",
+    "footnote",
+    "annotation",
+    "fldinst",
+    "pntext",
+    "listtext",
+    "listtable",
+    "listoverridetable",
+    "themedata",
+    "datastore",
+    "nonshppict",
+    "xmlnstbl",
+    "latentstyles",
+];
+const RTF_START: &[u8] = b"{\\rtf";
+// The characters RTF writes after a Unicode one, for readers that know no Unicode, unless it says otherwise.
+const RTF_DEFAULT_FALLBACK: usize = 1;
+const UTF16_UNITS: i32 = 0x1_0000;
+
+/// What a group of RTF carries: whether its text is read, how many characters follow a Unicode one, and the
+/// outline level of its paragraphs.
+#[derive(Clone, Copy)]
+struct RtfGroup {
+    skipped: bool,
+    fallback: usize,
+    outline: Option<u8>,
+}
+
+/// The text of an RTF document as it is read: the paragraph being written, and the characters still to skip.
+struct RtfText {
+    blocks: Blocks,
+    paragraph: String,
+    to_skip: usize,
+    high_half: Option<u16>,
+}
+
+impl RtfText {
+    fn push(&mut self, group: RtfGroup, character: char) {
+        if self.to_skip > 0 {
+            self.to_skip -= 1;
+        } else if !group.skipped {
+            self.high_half = None;
+            self.paragraph.push(character);
+        }
+    }
+
+    /// A UTF-16 unit, as RTF gives a character beyond the first plane: in two halves.
+    fn push_unit(&mut self, group: RtfGroup, unit: u16) {
+        if group.skipped {
+            return;
+        }
+        match (unit, self.high_half.take()) {
+            (0xD800..=0xDBFF, _) => self.high_half = Some(unit),
+            (0xDC00..=0xDFFF, Some(high)) => {
+                let code =
+                    0x1_0000 + ((u32::from(high) - 0xD800) << 10) + (u32::from(unit) - 0xDC00);
+                self.paragraph.extend(char::from_u32(code));
+            }
+            _ => self.paragraph.extend(char::from_u32(u32::from(unit))),
+        }
+    }
+
+    fn end_paragraph(&mut self, group: RtfGroup) {
+        let text = std::mem::take(&mut self.paragraph);
+        match group.outline {
+            Some(outline) => self.blocks.heading(outline.saturating_add(1), &text),
+            None => self.blocks.paragraph(&text),
+        }
+    }
+}
+
+/// A control word of RTF, its number, and where the text goes on after it.
+fn control_word(bytes: &[u8], start: usize) -> (&str, Option<i32>, usize) {
+    let mut at = start;
+    while at < bytes.len() && bytes[at].is_ascii_alphabetic() {
+        at += 1;
+    }
+    let word = std::str::from_utf8(&bytes[start..at]).unwrap_or_default();
+    let number_start = at;
+    if at < bytes.len() && bytes[at] == b'-' {
+        at += 1;
+    }
+    while at < bytes.len() && bytes[at].is_ascii_digit() {
+        at += 1;
+    }
+    let number = std::str::from_utf8(&bytes[number_start..at])
+        .ok()
+        .and_then(|digits| digits.parse().ok());
+    // One space ends a control word, and is not text.
+    if at < bytes.len() && bytes[at] == b' ' {
+        at += 1;
+    }
+    (word, number, at)
+}
+
+/// An RTF document: its paragraphs, with the headings it marks by outline level.
+pub fn convert_rtf(bytes: &[u8]) -> Result<Rendered, ConvertError> {
+    if !bytes.starts_with(RTF_START) {
+        return Err(ConvertError);
+    }
+    let mut groups = vec![RtfGroup {
+        skipped: false,
+        fallback: RTF_DEFAULT_FALLBACK,
+        outline: None,
+    }];
+    let mut text = RtfText {
+        blocks: Blocks::default(),
+        paragraph: String::new(),
+        to_skip: 0,
+        high_half: None,
+    };
+    let mut at = 0;
+    while at < bytes.len() {
+        let group = *groups.last().unwrap_or(&groups[0]);
+        match bytes[at] {
+            b'{' => {
+                groups.push(group);
+                text.to_skip = 0;
+                at += 1;
+            }
+            b'}' => {
+                if groups.len() > 1 {
+                    groups.pop();
+                }
+                text.to_skip = 0;
+                at += 1;
+            }
+            b'\r' | b'\n' => at += 1,
+            b'\\' if at + 1 < bytes.len() => {
+                let next = bytes[at + 1];
+                if next.is_ascii_alphabetic() {
+                    let (word, number, after) = control_word(bytes, at + 1);
+                    at = after;
+                    if text.to_skip > 0 {
+                        text.to_skip -= 1;
+                        continue;
+                    }
+                    let current = groups.last_mut().ok_or(ConvertError)?;
+                    match word {
+                        "par" | "sect" | "page" | "row" => text.end_paragraph(group),
+                        "line" | "tab" | "cell" | "emspace" | "enspace" | "qmspace" => {
+                            text.push(group, ' ')
+                        }
+                        "emdash" => text.push(group, '—'),
+                        "endash" => text.push(group, '–'),
+                        "bullet" => text.push(group, '•'),
+                        "lquote" => text.push(group, '‘'),
+                        "rquote" => text.push(group, '’'),
+                        "ldblquote" => text.push(group, '“'),
+                        "rdblquote" => text.push(group, '”'),
+                        "pard" => current.outline = None,
+                        "outlinelevel" => {
+                            current.outline = number.and_then(|level| u8::try_from(level).ok())
+                        }
+                        "uc" => {
+                            current.fallback = number
+                                .and_then(|count| usize::try_from(count).ok())
+                                .unwrap_or(0)
+                        }
+                        "u" => {
+                            if let Some(code) = number {
+                                let code = if code < 0 { code + UTF16_UNITS } else { code };
+                                if let Ok(unit) = u16::try_from(code) {
+                                    text.push_unit(group, unit);
+                                }
+                                text.to_skip = group.fallback;
+                            }
+                        }
+                        _ if RTF_SKIPPED.contains(&word) => current.skipped = true,
+                        _ => {}
+                    }
+                } else {
+                    at += 2;
+                    match next {
+                        b'\'' => {
+                            let hex = bytes
+                                .get(at..at + 2)
+                                .and_then(|pair| std::str::from_utf8(pair).ok());
+                            if let Some(byte) = hex.and_then(|hex| u8::from_str_radix(hex, 16).ok())
+                            {
+                                text.push(group, windows_1252(byte));
+                                at += 2;
+                            }
+                        }
+                        b'\\' | b'{' | b'}' => text.push(group, char::from(next)),
+                        b'~' => text.push(group, ' '),
+                        b'_' => text.push(group, '-'),
+                        b'*' => {
+                            if let Some(current) = groups.last_mut() {
+                                current.skipped = true;
+                            }
+                        }
+                        b'\r' | b'\n' => text.end_paragraph(group),
+                        _ => {}
+                    }
+                }
+            }
+            byte => {
+                text.push(group, windows_1252(byte));
+                at += 1;
+            }
+        }
+    }
+    let last = *groups.last().unwrap_or(&groups[0]);
+    text.end_paragraph(last);
+    Ok(text.blocks.finish())
 }
 
 /// A plain text: a paragraph between blank lines, or one for each line when it has none.
@@ -514,7 +802,8 @@ mod tests {
     fn zip_of(files: &[(&str, &str)]) -> Vec<u8> {
         use std::io::Write;
         let mut writer = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
-        let options = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
         for (name, text) in files {
             writer.start_file(*name, options).unwrap();
             writer.write_all(text.as_bytes()).unwrap();
@@ -526,8 +815,10 @@ mod tests {
                      xmlns:mc=\"http://schemas.openxmlformats.org/markup-compatibility/2006\"";
 
     fn docx(body: &str, styles: Option<&str>) -> Vec<u8> {
-        let document = format!("<?xml version=\"1.0\"?><w:document {W}><w:body>{body}</w:body></w:document>");
-        let styles = styles.map(|styles| format!("<?xml version=\"1.0\"?><w:styles {W}>{styles}</w:styles>"));
+        let document =
+            format!("<?xml version=\"1.0\"?><w:document {W}><w:body>{body}</w:body></w:document>");
+        let styles = styles
+            .map(|styles| format!("<?xml version=\"1.0\"?><w:styles {W}>{styles}</w:styles>"));
         let mut files = vec![("word/document.xml", document.as_str())];
         if let Some(styles) = &styles {
             files.push(("word/styles.xml", styles.as_str()));
@@ -536,7 +827,11 @@ mod tests {
     }
 
     fn headings_of(rendered: &Rendered) -> Vec<(u8, &str)> {
-        rendered.headings.iter().map(|heading| (heading.level, heading.text.as_str())).collect()
+        rendered
+            .headings
+            .iter()
+            .map(|heading| (heading.level, heading.text.as_str()))
+            .collect()
     }
 
     const DOCX_STYLES: &str = "<w:style w:type=\"paragraph\" w:styleId=\"Titolo1\"><w:name w:val=\"heading 1\"/></w:style>\
@@ -547,7 +842,9 @@ mod tests {
         <w:style w:type=\"paragraph\" w:styleId=\"Corpo\"><w:name w:val=\"Body Text\"/></w:style>";
 
     fn para(style: &str, text: &str) -> String {
-        format!("<w:p><w:pPr><w:pStyle w:val=\"{style}\"/></w:pPr><w:r><w:t>{text}</w:t></w:r></w:p>")
+        format!(
+            "<w:p><w:pPr><w:pStyle w:val=\"{style}\"/></w:pPr><w:r><w:t>{text}</w:t></w:r></w:p>"
+        )
     }
 
     #[test]
@@ -565,9 +862,17 @@ mod tests {
         let rendered = convert_docx(&docx(&body, Some(DOCX_STYLES))).unwrap();
         assert_eq!(
             headings_of(&rendered),
-            [(1, "Un capitolo"), (2, "Una sezione"), (2, "Una sezione figlia"), (3, "Livello tre"), (1, "Il titolo")]
+            [
+                (1, "Un capitolo"),
+                (2, "Una sezione"),
+                (2, "Una sezione figlia"),
+                (3, "Livello tre"),
+                (1, "Il titolo")
+            ]
         );
-        assert!(rendered.html.contains("<p data-sourcepos=\"6:1-6:1\">Un testo &amp; altro.</p>"));
+        assert!(rendered
+            .html
+            .contains("<p data-sourcepos=\"6:1-6:1\">Un testo &amp; altro.</p>"));
         assert!(rendered.html.contains(">Corpo anche questo</p>"));
         assert_eq!(rendered.title.as_deref(), Some("Un capitolo"));
     }
@@ -582,7 +887,10 @@ mod tests {
             <mc:AlternateContent><mc:Choice><w:r><w:t>scelta</w:t></w:r></mc:Choice>\
             <mc:Fallback><w:r><w:t>doppione</w:t></w:r></mc:Fallback></mc:AlternateContent></w:p>";
         let rendered = convert_docx(&docx(body, None)).unwrap();
-        assert_eq!(rendered.html, "<p data-sourcepos=\"1:1-1:1\">Uno due tre quattro aggiunto.scelta</p>\n");
+        assert_eq!(
+            rendered.html,
+            "<p data-sourcepos=\"1:1-1:1\">Uno due tre quattro aggiunto.scelta</p>\n"
+        );
     }
 
     #[test]
@@ -604,8 +912,18 @@ mod tests {
     #[test]
     fn a_damaged_word_document_says_so() {
         assert_eq!(convert_docx(b"not a zip").unwrap_err(), ConvertError);
-        assert_eq!(convert_docx(&zip_of(&[("word/other.xml", "<x/>")])).unwrap_err(), ConvertError);
-        assert_eq!(convert_docx(&zip_of(&[("word/document.xml", "<w:document><w:body><w:p>")])).unwrap_err(), ConvertError);
+        assert_eq!(
+            convert_docx(&zip_of(&[("word/other.xml", "<x/>")])).unwrap_err(),
+            ConvertError
+        );
+        assert_eq!(
+            convert_docx(&zip_of(&[(
+                "word/document.xml",
+                "<w:document><w:body><w:p>"
+            )]))
+            .unwrap_err(),
+            ConvertError
+        );
     }
 
     fn odt(text: &str) -> Vec<u8> {
@@ -617,7 +935,10 @@ mod tests {
              xmlns:draw=\"urn:oasis:names:tc:opendocument:xmlns:drawing:1.0\">\
              <office:body><office:text>{text}</office:text></office:body></office:document-content>"
         );
-        zip_of(&[("mimetype", "application/vnd.oasis.opendocument.text"), ("content.xml", &content)])
+        zip_of(&[
+            ("mimetype", "application/vnd.oasis.opendocument.text"),
+            ("content.xml", &content),
+        ])
     }
 
     #[test]
@@ -628,8 +949,13 @@ mod tests {
              <text:h>Senza livello</text:h><text:p>Un testo.</text:p>",
         ))
         .unwrap();
-        assert_eq!(headings_of(&rendered), [(1, "Un capitolo"), (2, "Una sezione"), (1, "Senza livello")]);
-        assert!(rendered.html.ends_with("<p data-sourcepos=\"4:1-4:1\">Un testo.</p>\n"));
+        assert_eq!(
+            headings_of(&rendered),
+            [(1, "Un capitolo"), (2, "Una sezione"), (1, "Senza livello")]
+        );
+        assert!(rendered
+            .html
+            .ends_with("<p data-sourcepos=\"4:1-4:1\">Un testo.</p>\n"));
     }
 
     #[test]
@@ -643,7 +969,10 @@ mod tests {
              <draw:frame><draw:text-box><text:p>in un riquadro</text:p></draw:text-box></draw:frame>",
         ))
         .unwrap();
-        assert_eq!(rendered.html, "<p data-sourcepos=\"1:1-1:1\">Uno due tre quattro. &amp; fine</p>\n");
+        assert_eq!(
+            rendered.html,
+            "<p data-sourcepos=\"1:1-1:1\">Uno due tre quattro. &amp; fine</p>\n"
+        );
     }
 
     #[test]
@@ -667,7 +996,61 @@ mod tests {
     #[test]
     fn a_damaged_opendocument_says_so() {
         assert_eq!(convert_odt(b"not a zip").unwrap_err(), ConvertError);
-        assert_eq!(convert_odt(&zip_of(&[("styles.xml", "<x/>")])).unwrap_err(), ConvertError);
+        assert_eq!(
+            convert_odt(&zip_of(&[("styles.xml", "<x/>")])).unwrap_err(),
+            ConvertError
+        );
+    }
+
+    fn paragraphs_of(rendered: &Rendered) -> Vec<String> {
+        rendered
+            .html
+            .lines()
+            .filter_map(|line| {
+                line.strip_prefix("<p ")
+                    .and_then(|rest| rest.split_once('>'))
+            })
+            .map(|(_, rest)| rest.trim_end_matches("</p>").to_string())
+            .collect()
+    }
+
+    #[test]
+    fn an_rtf_document_is_read_as_its_text_only() {
+        let rtf = br"{\rtf1\ansi\ansicpg1252\deff0{\fonttbl{\f0\froman Times;}}{\colortbl;\red0\green0\blue0;}
+{\*\generator Nessuno;}{\info{\title Nascosto}}
+{\pard\outlinelevel0\b Un capitolo\b0\par}
+\pard Caff\'e8 e perch\u233?\par
+Riga\line due\tab tre \{graffe\} \\ barra.\par
+{\pict\pngblip 89504e470d0a}Dopo l'immagine\par
+{\footnote\pard nota}fine\par
+{\field{\*\fldinst HYPERLINK x}{\fldrslt un link}}.\par
+\uc2 Doppio\u8220\'3f\'3ffine\par
+Ultimo senza fine";
+        let rendered = convert_rtf(rtf).unwrap();
+        assert_eq!(headings_of(&rendered), [(1, "Un capitolo")]);
+        assert_eq!(
+            paragraphs_of(&rendered),
+            [
+                "Caffè e perché",
+                "Riga due tre {graffe} \\ barra.",
+                "Dopo l'immagine",
+                "fine",
+                "un link.",
+                "Doppio“fine",
+                "Ultimo senza fine",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_character_beyond_the_first_plane_comes_from_its_two_halves() {
+        let rendered = convert_rtf(br"{\rtf1 Uno \u-10179?\u-8704? due\par}").unwrap();
+        assert_eq!(paragraphs_of(&rendered), ["Uno \u{1F600} due"]);
+    }
+
+    #[test]
+    fn what_is_not_rtf_says_so() {
+        assert_eq!(convert_rtf(b"plain words").unwrap_err(), ConvertError);
     }
 
     #[test]
@@ -677,8 +1060,14 @@ mod tests {
 
     #[test]
     fn utf16_with_its_mark_is_read() {
-        let little: Vec<u8> = [0xFF, 0xFE].into_iter().chain("Già".encode_utf16().flat_map(u16::to_le_bytes)).collect();
-        let big: Vec<u8> = [0xFE, 0xFF].into_iter().chain("Già".encode_utf16().flat_map(u16::to_be_bytes)).collect();
+        let little: Vec<u8> = [0xFF, 0xFE]
+            .into_iter()
+            .chain("Già".encode_utf16().flat_map(u16::to_le_bytes))
+            .collect();
+        let big: Vec<u8> = [0xFE, 0xFF]
+            .into_iter()
+            .chain("Già".encode_utf16().flat_map(u16::to_be_bytes))
+            .collect();
         assert_eq!(decode_any(&little), "Già");
         assert_eq!(decode_any(&big), "Già");
     }
@@ -729,7 +1118,11 @@ mod tests {
              <table><tbody>\n<tr data-sourcepos=\"5:1-5:1\"><td>a</td><td>b</td></tr>\n</tbody></table>\n\
              <h6 data-sourcepos=\"6:1-6:1\">Deep</h6>\n"
         );
-        let headings: Vec<_> = rendered.headings.iter().map(|heading| (heading.level, heading.line)).collect();
+        let headings: Vec<_> = rendered
+            .headings
+            .iter()
+            .map(|heading| (heading.level, heading.line))
+            .collect();
         assert_eq!(headings, [(1, 1), (6, 6)]);
         assert_eq!(rendered.title.as_deref(), Some("Title of it"));
     }

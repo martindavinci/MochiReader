@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Opens the files of the tabs. All the disk work stays off the interface thread and has a time limit.
+use crate::convert::convert;
 use crate::native::sha256;
 use crate::protocol::{file_url, Roots};
 use crate::render::{decode_text, render_markdown, RenderCtx, Rendered};
-use crate::convert::convert;
 use crate::vault::{find_vault, is_book, is_markdown, is_openable, is_pdf, is_plain_document};
 use serde::Serialize;
 use std::fs;
@@ -38,7 +38,11 @@ pub enum DocKind {
 
 /// The kind of a text, Word, OpenDocument or RTF document, by its name.
 fn plain_kind(file: &Path) -> DocKind {
-    match file.extension().map(|extension| extension.to_string_lossy().to_lowercase()).as_deref() {
+    match file
+        .extension()
+        .map(|extension| extension.to_string_lossy().to_lowercase())
+        .as_deref()
+    {
         Some("docx") => DocKind::Docx,
         Some("odt") => DocKind::Odt,
         Some("rtf") => DocKind::Rtf,
@@ -149,8 +153,14 @@ fn load(path: &str, read: impl FnOnce(&Path) -> io::Result<Vec<u8>>) -> LoadResu
         let key = markdown_key(file);
         (DocKind::Markdown, Some(key), Some(rendered), None)
     } else if is_plain_document(file) {
-        let rendered = convert(file, &read(file)?).map_err(|_| OpenError::from(OpenErrorCode::Unreadable))?;
-        (plain_kind(file), Some(markdown_key(file)), Some(rendered), None)
+        let rendered =
+            convert(file, &read(file)?).map_err(|_| OpenError::from(OpenErrorCode::Unreadable))?;
+        (
+            plain_kind(file),
+            Some(markdown_key(file)),
+            Some(rendered),
+            None,
+        )
     } else {
         if !fs::metadata(file)?.is_file() {
             return Err(OpenErrorCode::Unreadable.into());
@@ -455,7 +465,11 @@ mod tests {
         for name in ["a.docx", "a.odt"] {
             let path = dir.path().join(name);
             fs::write(&path, b"not a zip").unwrap();
-            assert_eq!(open(&path).unwrap_err().code, OpenErrorCode::Unreadable, "{name}");
+            assert_eq!(
+                open(&path).unwrap_err().code,
+                OpenErrorCode::Unreadable,
+                "{name}"
+            );
         }
         let path = dir.path().join("a.rtf");
         fs::write(&path, b"plain words").unwrap();
