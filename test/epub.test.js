@@ -1293,3 +1293,21 @@ test('only a bookmark is drawn as a mark', () => {
   ask(MARK_A);
   assert.deepEqual(drawn, [[MARK_B, 'function']]);
 });
+
+test('the excerpt of a held place starts at that place, not at the top of the page', () => {
+  const view = new FakeView();
+  const { doc } = view.renderer;
+  doc.body.innerHTML = '<p>Top of the page.</p>\n<p id="held">Who is <em>there</em> now?</p>\n<p>And after it.</p>';
+  const held = doc.getElementById('held');
+  view.resolveCFI = () => ({ index: 0, anchor: () => ({ startContainer: held.firstChild, startOffset: 4 }) });
+  const reader = makeReader(view, { place: { cfi: 'epubcfi(/6/2!/4/4)', sentence: 0 } });
+  assert.equal(reader.excerpt(), 'is there now? And after it.');
+});
+
+test('a held place that cannot be found leaves the excerpt to the page', () => {
+  const view = new FakeView();
+  view.resolveCFI = () => {
+    throw new Error('this place is gone');
+  };
+  assert.equal(makeReader(view, { place: { cfi: 'epubcfi(/6/2!/4/4)', sentence: 0 } }).excerpt(), 'Visible text here');
+});

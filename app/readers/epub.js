@@ -35,6 +35,8 @@ const DOCUMENT_TYPES = new Set(['application/xhtml+xml', 'text/html', 'image/svg
 const BLOCKS = 'p, li, h1, h2, h3, h4, h5, h6, blockquote, pre, dt, dd, figure, div, tr';
 const PICTURES = 'img, svg, image';
 const TEXT_NODE = 3;
+// More text than an excerpt keeps (excerpt.js), so that it is never cut short by a run of spaces.
+const EXCERPT_SOURCE_CHARS = 400;
 const SECTION_START = 0;
 const SECTION_END = 1;
 const FILE_NAME = /^.*\/|\.[^.]*$/g;
@@ -307,6 +309,20 @@ function watchSections(view, openExternal, handCallbacks) {
  *   screen was asked for, which can be anywhere inside it.
  * @returns {import('./reader.js').Reader}
  */
+/** The text of a section from a point on, as far as an excerpt needs it. */
+function textFrom(node, offset) {
+  const body = node.ownerDocument?.body;
+  let at = node.nodeType === TEXT_NODE ? node : node.childNodes[offset] ?? node;
+  let text = node.nodeType === TEXT_NODE ? node.data.slice(offset) : at === node ? '' : at.textContent;
+  while (text.length < EXCERPT_SOURCE_CHARS && at && at !== body) {
+    while (at && at !== body && !at.nextSibling) at = at.parentNode;
+    if (!at || at === body) break;
+    at = at.nextSibling;
+    text += at.textContent;
+  }
+  return text;
+}
+
 export function makeReader(view, { key, title, onInput = () => {}, place = null, handCallbacks = [] }) {
   const moveCallbacks = [];
   const sectionCallbacks = [];
@@ -387,6 +403,21 @@ export function makeReader(view, { key, title, onInput = () => {}, place = null,
     added.forEach((value) => view.addAnnotation({ value }).catch(() => {}));
   };
 
+  // The text at the place held, which a bookmark goes to: the page around it can start well before it.
+  const heldText = () => {
+    const at = placeHeld();
+    if (!at?.cfi) return null;
+    try {
+      const { index, anchor } = view.resolveCFI(at.cfi);
+      const shown = view.renderer.getContents().find((content) => content.index === index && content.doc);
+      const range = shown && anchor(shown.doc);
+      return (range && textFrom(range.startContainer, range.startOffset).trim()) || null;
+    } catch {
+      // A place that no longer resolves says nothing: the page speaks for it.
+      return null;
+    }
+  };
+
   const shownDocs = () => view.renderer.getContents().filter(({ doc }) => doc?.body && doc.URL !== EMPTY_FRAME_URL);
 
   const moveSection = (delta) => {
@@ -457,7 +488,7 @@ export function makeReader(view, { key, title, onInput = () => {}, place = null,
     onHandMove: (callback) => handCallbacks.push(callback),
     onSectionShown: (callback) => sectionCallbacks.push(callback),
     excerpt: () => {
-      const text = view.lastLocation?.range?.toString() ?? shownDocs()[0]?.doc.body.textContent ?? '';
+      const text = heldText() ?? view.lastLocation?.range?.toString() ?? shownDocs()[0]?.doc.body.textContent ?? '';
       return excerptOf(text.replace(SPACES, ' '));
     },
     moveBlock,
