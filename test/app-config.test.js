@@ -44,6 +44,23 @@ test('the installer puts the app in the Open with list of a PDF, never as its de
   assert.ok(uninstall.includes('DeleteRegKey SHCTX "Software\\Classes\\MochiReader.Pdf"'), uninstall.join('\n'));
 });
 
+test('the installer lists the app under Open with for a text, Word, OpenDocument or RTF document, never as its default', () => {
+  const hooks = read('src-tauri/windows/hooks.nsh');
+  const macro = (name) => hooks.split(`!macro ${name}\n`)[1]?.split('!macroend')[0] ?? '';
+  const lines = (text) => text.split('\n').map((line) => line.trim());
+  const install = lines(macro('NSIS_HOOK_POSTINSTALL'));
+  const uninstall = lines(macro('NSIS_HOOK_POSTUNINSTALL'));
+  assert.ok(install.includes(
+    'WriteRegStr SHCTX "Software\\Classes\\MochiReader.Document\\shell\\open\\command" "" \'"$INSTDIR\\${MAINBINARYNAME}.exe" "%1"\'',
+  ), install.join('\n'));
+  assert.ok(uninstall.includes('DeleteRegKey SHCTX "Software\\Classes\\MochiReader.Document"'), uninstall.join('\n'));
+  for (const extension of ['txt', 'docx', 'odt', 'rtf']) {
+    assert.ok(install.includes(`WriteRegStr SHCTX "Software\\Classes\\.${extension}\\OpenWithProgids" "MochiReader.Document" ""`), extension);
+    assert.ok(uninstall.includes(`DeleteRegValue SHCTX "Software\\Classes\\.${extension}\\OpenWithProgids" "MochiReader.Document"`), extension);
+    assert.ok(!hooks.includes(`"Software\\Classes\\.${extension}" ""`), extension);
+  }
+});
+
 test('the CSP blocks everything the app does not use', () => {
   assert.equal(
     conf.app.security.csp,
