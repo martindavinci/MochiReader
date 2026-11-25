@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.8.3] - 2026-11-25
+
+### Changed
+
+- Books scroll by default: a chapter reads as one long page, and at its end the next one is offered at the foot of the book. Pages and the automatic view are still in Options, and a view chosen there stays.
+
+### Fixed
+
+- The reading bar offers a voice as soon as it is downloaded, and drops one as soon as it is deleted, without stopping the reading.
+
+### Security
+
+- PDF files are read with pdf.js 6.5.438, past an advisory on pdf.js 5 (MochiReader runs no script of a PDF, so it was not exposed).
+
 ## [0.8.2] - 2026-11-25
 
 ### Fixed
