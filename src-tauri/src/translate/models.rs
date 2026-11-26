@@ -201,6 +201,8 @@ impl Models {
 
     /// One file of the installed version of `id`.
     pub fn model_file(&self, id: &str, kind: &str) -> Result<Vec<u8>, TtsError> {
+        // The id becomes a path: only a pair of the catalog may.
+        self.known(id)?;
         let version = self
             .installed(id)
             .ok_or_else(|| TtsError::Refused(format!("{id} is not installed")))?;
@@ -391,6 +393,16 @@ mod tests {
             models.cache().get("epub:a", "en-it", "2.1", 0).unwrap(),
             None
         );
+    }
+
+    #[test]
+    fn model_file_refuses_a_pair_the_catalog_does_not_have_even_if_a_folder_has_its_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let stray = dir.path().join(MODELS).join("xx-yy").join("1.0");
+        std::fs::create_dir_all(&stray).unwrap();
+        std::fs::write(stray.join("model"), b"not a model").unwrap();
+        let models = models(dir.path(), vec![full_pair("2.1")]);
+        assert!(models.model_file("xx-yy", "model").is_err());
     }
 
     #[test]

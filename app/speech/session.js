@@ -183,13 +183,20 @@ class SpeechSession {
   stop() {
     this.#run += 1;
     this.#switching = false;
+    this.#waiting = false;
     if (this.#player.state !== STATE_IDLE) this.#player.stop();
     if (this.#entry) this.#closeReading();
   }
 
   /** @param {string} action A name from `core/keys.js`, or `speech.stop` or `speech.follow` from the bar. */
   command(action) {
-    if (!this.active() || this.#switching) return;
+    // A wait for a translation can last a chapter: it can always be stopped.
+    const stopping = this.#waiting && (action === 'speech.stop' || action === 'speech.toggle');
+    if (!this.active() || (this.#switching && !stopping)) return;
+    if (stopping) {
+      this.stop();
+      return;
+    }
     const player = this.#player;
     const commands = {
       'speech.toggle': () => (player.state === STATE_PLAYING ? player.pause() : player.resume()),

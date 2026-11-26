@@ -3,16 +3,23 @@
 // child. The layouts are styles over that one page, and the main language only says which side is read aloud.
 import { ORIG_ATTR, TR_ATTR } from './marks.js';
 
-const BLOCKS = 'p, h1, h2, h3, h4, h5, h6, li, dt, dd, blockquote, figcaption, td, th, caption';
+// A book may put its paragraphs in any of these: the innermost one holding text is the block.
+const BLOCKS = 'p, h1, h2, h3, h4, h5, h6, li, dt, dd, blockquote, figcaption, td, th, caption, '
+  + 'div, section, article, aside, header, footer';
 // Code, formulas and pictures are not prose.
 const NOT_PROSE = 'pre, code, script, style, svg, math';
 const READABLE = /[\p{L}\p{N}]/u;
 const NOREAD = 'data-noread';
 // A block of the book left in its language: not read when the translation is the main language.
 const UNTRANSLATED = 'data-mochi-untranslated';
+// Text of the book outside every block (beside the blocks of a div that holds others): wrapped like an original,
+// so that it is read only in the book's language, and still shown.
+const STRAY = 'data-mochi-stray';
 const PENDING = 'data-mochi-pending';
 const MAIN = 'data-mochi-main';
 const LAYOUT = 'data-mochi-layout';
+const STYLE = 'data-mochi-style';
+const TEXT_NODE = 3;
 
 const isOurs = (el) => Boolean(el.closest(`[${TR_ATTR}]`));
 const originalOf = (block) => [...block.children].find((child) => child.hasAttribute(ORIG_ATTR)) ?? null;
@@ -44,17 +51,60 @@ export function blockSources(blocks) {
  * @param {{lang: string}} options The language of the translation.
  */
 export function applyTranslation(doc, texts, { lang }) {
-  translatableBlocks(doc.body).forEach((block, i) => {
+  const blocks = translatableBlocks(doc.body);
+  blocks.forEach((block, i) => {
     const text = texts[i];
     if (text == null || translationOf(block)) return;
-    const orig = doc.createElement('span');
-    orig.setAttribute(ORIG_ATTR, '');
-    orig.append(...block.childNodes);
-    const tr = doc.createElement('span');
-    tr.setAttribute(TR_ATTR, '');
-    tr.setAttribute('lang', lang);
-    tr.innerHTML = text;
-    block.append(orig, tr);
+    try {
+      // Built in full before the original moves: a translation that cannot be put in leaves its block as it was.
+      const tr = doc.createElement('span');
+      tr.setAttribute(TR_ATTR, '');
+      tr.setAttribute('lang', lang);
+      tr.append(...htmlNodes(doc, text));
+      // The translation was made from the book's file, whose pictures the page shows from addresses of its own.
+      const shown = [...block.querySelectorAll('img')];
+      [...tr.querySelectorAll('img')].forEach((img, k) => {
+        if (shown[k]) img.setAttribute('src', shown[k].getAttribute('src'));
+        else img.remove();
+      });
+      const orig = doc.createElement('span');
+      orig.setAttribute(ORIG_ATTR, '');
+      orig.append(...block.childNodes);
+      block.append(orig, tr);
+    } catch (error) {
+      console.warn(error);
+    }
+  });
+  wrapStrayText(doc, blocks);
+}
+
+/**
+ * The engine writes HTML (`<br>` unclosed), and a chapter is often XHTML, whose own parser refuses it: the translation
+ * is read as HTML and its nodes brought into the chapter.
+ */
+function htmlNodes(doc, text) {
+  const Parser = globalThis.DOMParser ?? doc.defaultView?.DOMParser;
+  const parsed = new Parser().parseFromString(`<!doctype html><html><body>${text}</body></html>`, 'text/html');
+  return [...parsed.body.childNodes].map((node) => doc.importNode(node, true));
+}
+
+/** Readable text of the book that no block holds, wrapped so that the voice reads it only in the book's language. */
+function wrapStrayText(doc, blocks) {
+  const inBlock = (node) => blocks.some((block) => block.contains(node));
+  const walker = doc.createTreeWalker(doc.body, 4);
+  const stray = [];
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    const parent = node.parentElement;
+    if (node.nodeType !== TEXT_NODE || !parent || !READABLE.test(node.nodeValue)) continue;
+    if (parent.closest(`[${ORIG_ATTR}], [${TR_ATTR}], ${NOT_PROSE}`) || inBlock(node)) continue;
+    stray.push(node);
+  }
+  stray.forEach((node) => {
+    const wrapper = doc.createElement('span');
+    wrapper.setAttribute(ORIG_ATTR, '');
+    wrapper.setAttribute(STRAY, '');
+    node.replaceWith(wrapper);
+    wrapper.append(node);
   });
 }
 
@@ -81,9 +131,9 @@ export function markPending(doc, text) {
  */
 export function setMain(doc, main, layout) {
   const root = doc.documentElement;
-  if (doc.head && !doc.head.querySelector(`style[${TR_ATTR}]`)) {
+  if (doc.head && !doc.head.querySelector(`style[${STYLE}]`)) {
     const sheet = doc.createElement('style');
-    sheet.setAttribute(TR_ATTR, '');
+    sheet.setAttribute(STYLE, '');
     sheet.textContent = BILINGUAL_CSS;
     doc.head.append(sheet);
   }
@@ -122,20 +172,22 @@ export function originalPoint(node, offset) {
  * Inside the frame of a chapter: how the layouts look. A place in the book is in the original, so an original hidden in
  * one language keeps its box, with no height: foliate can still scroll to it, and lands on its translation.
  */
+const TRANSLATED_BLOCK = `body :has(> [${TR_ATTR}]:not([${PENDING}]))`;
+const TRANSLATION = `body [${TR_ATTR}]:not([${PENDING}])`;
 export const BILINGUAL_CSS = `
-html[${LAYOUT}="single"][${MAIN}="translated"] [${ORIG_ATTR}] { display: block; height: 0; overflow: hidden; }
-html[${LAYOUT}="single"][${MAIN}="original"] [${TR_ATTR}] { display: none !important; }
+html[${LAYOUT}="single"][${MAIN}="translated"] body [${ORIG_ATTR}]:not([${STRAY}]) { display: block; height: 0; overflow: hidden; }
+html[${LAYOUT}="single"][${MAIN}="original"] ${TRANSLATION} { display: none !important; }
 html:not([${MAIN}="translated"]) [${PENDING}] { display: none !important; }
 [${PENDING}] { font-style: italic; opacity: 0.7; margin-bottom: 1em; }
-html[${LAYOUT}="interleaved"] [${TR_ATTR}]:not([${PENDING}]) { display: block; margin-top: 0.4em; }
-html[${LAYOUT}="columns"] :has(> [${TR_ATTR}]) {
+html[${LAYOUT}="interleaved"] ${TRANSLATION} { display: block; margin-top: 0.4em; }
+html[${LAYOUT}="columns"] ${TRANSLATED_BLOCK} {
   display: grid; grid-template-columns: 1fr 1fr; column-gap: 1.5em; align-items: start;
 }
-html[${LAYOUT}="columns"] :has(> [${TR_ATTR}]) > * { min-width: 0; }
-html:not([${LAYOUT}="single"])[${MAIN}="translated"] [${ORIG_ATTR}],
-html:not([${LAYOUT}="single"])[${MAIN}="original"] [${TR_ATTR}]:not([${PENDING}]) { opacity: 0.6; }
+html[${LAYOUT}="columns"] ${TRANSLATED_BLOCK} > * { min-width: 0; }
+html:not([${LAYOUT}="single"])[${MAIN}="translated"] body [${ORIG_ATTR}],
+html:not([${LAYOUT}="single"])[${MAIN}="original"] ${TRANSLATION} { opacity: 0.6; }
 @media (max-width: 600px) {
-  html[${LAYOUT}="columns"] :has(> [${TR_ATTR}]) { display: block; }
-  html[${LAYOUT}="columns"] [${TR_ATTR}] { display: block; margin-top: 0.4em; }
+  html[${LAYOUT}="columns"] ${TRANSLATED_BLOCK} { display: block; }
+  html[${LAYOUT}="columns"] ${TRANSLATION} { display: block; margin-top: 0.4em; }
 }
 `;

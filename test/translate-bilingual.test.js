@@ -120,7 +120,7 @@ test('a place in a translation is the start of the original of its block', () =>
 });
 
 test('in one language the hidden original keeps a place on the page, so a place in the book can be scrolled to', () => {
-  const rule = BILINGUAL_CSS.split('}').find((part) => part.includes('[data-mochi-main="translated"] [data-mochi-orig]')
+  const rule = BILINGUAL_CSS.split('}').find((part) => part.includes('[data-mochi-main="translated"] body [data-mochi-orig]')
     && part.includes('"single"'));
   assert.ok(rule, 'a rule hides the original in one language');
   assert.doesNotMatch(rule, /display: none/);
@@ -128,12 +128,70 @@ test('in one language the hidden original keeps a place on the page, so a place 
   assert.match(rule, /overflow: hidden/);
 });
 
-test('setMain puts the style of the layouts into the page once', () => {
+test('setMain puts the style of the layouts into the page once, apart from the translations', () => {
   const doc = docOf(CHAPTER);
   setMain(doc, 'translated', 'single');
   setMain(doc, 'original', 'columns');
   const styles = doc.head.querySelectorAll('style');
   assert.equal(styles.length, 1);
-  assert.ok(styles[0].hasAttribute(TR_ATTR));
+  assert.ok(!styles[0].hasAttribute(TR_ATTR), 'the head holds no translation, and no layout rule reaches it');
   assert.match(styles[0].textContent, /data-mochi-layout/);
+});
+
+test('the layout rules reach only the translated blocks of the body, never the head or the note of a pending chapter', () => {
+  const rules = BILINGUAL_CSS.split('}').map((rule) => rule.split('{')[0]).filter((selector) => selector.includes(':has('));
+  assert.ok(rules.length > 0);
+  for (const selector of rules) {
+    for (const one of selector.split(',')) {
+      assert.match(one, /\bbody :has\(> \[data-mochi-tr\]:not\(\[data-mochi-pending\]\)\)/, one);
+    }
+  }
+});
+
+test('a translation is put in as HTML, even in an XHTML chapter whose own parser refuses it, and the original stays', () => {
+  const doc = docOf('<p>He left.<br>Then came back.</p>');
+  // Chromium's XML parser throws on an unclosed <br>, which Bergamot writes; linkedom does not.
+  const make = doc.createElement.bind(doc);
+  doc.createElement = (tag) => {
+    const element = make(tag);
+    Object.defineProperty(element, 'innerHTML', { set() { throw new Error('invalid XML'); }, get() { return ''; } });
+    return element;
+  };
+  applyTranslation(doc, ['Se ne andò.<br>Poi tornò.'], { lang: 'it' });
+  const p = doc.body.querySelector('p');
+  assert.equal(p.querySelector(`[${ORIG_ATTR}]`).textContent, 'He left.Then came back.');
+  const tr = p.querySelector(`[${TR_ATTR}]`);
+  assert.equal(tr.textContent, 'Se ne andò.Poi tornò.');
+  assert.equal(tr.querySelectorAll('br').length, 1);
+});
+
+test('a block whose translation cannot be put in keeps its original, and the blocks after it are translated', () => {
+  const doc = docOf(CHAPTER);
+  const importNode = doc.importNode.bind(doc);
+  doc.importNode = (node, deep) => {
+    if (String(node.textContent).includes('BAD')) throw new Error('cannot');
+    return importNode(node, deep);
+  };
+  applyTranslation(doc, ['Capitolo uno', 'BAD', 'Primo elemento.', 'Una citazione.'], { lang: 'it' });
+  const blocks = translatableBlocks(doc.body);
+  assert.equal(blocks.length, 4);
+  assert.equal(blocks[1].textContent, 'The door was locked.');
+  assert.equal(blocks[1].querySelector(`[${TR_ATTR}]`), null);
+  assert.equal(blocks[3].querySelector(`[${TR_ATTR}]`).textContent, 'Una citazione.');
+});
+
+test('a picture in a translated block shows the picture of the page, not the address of the book', () => {
+  const doc = docOf('<p>See <img src="blob:page-1" alt="a"> here.</p>');
+  applyTranslation(doc, ['Vedi <img src="images/a.png" alt="a"> qui.'], { lang: 'it' });
+  assert.equal(doc.body.querySelector(`[${TR_ATTR}] img`).getAttribute('src'), 'blob:page-1');
+});
+
+test('text in a div, or loose in a block that holds others, is translated or left unread in Tradotto', () => {
+  const doc = docOf('<div>A plain div.</div><div>Loose words<p>A paragraph.</p></div>');
+  assert.deepEqual(translatableBlocks(doc.body).map((block) => block.textContent), ['A plain div.', 'A paragraph.']);
+  applyTranslation(doc, ['Un div semplice.', 'Un paragrafo.'], { lang: 'it' });
+  setMain(doc, 'translated', 'single');
+  assert.deepEqual(said(doc), ['Un div semplice.', 'Un paragrafo.']);
+  setMain(doc, 'original', 'single');
+  assert.deepEqual(said(doc), ['A plain div.', 'Loose words', 'A paragraph.']);
 });

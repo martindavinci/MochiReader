@@ -1023,6 +1023,22 @@ test('with Tradotto and the section not translated the voice waits, the bar says
   assert.equal(bar.view.waiting, false);
 });
 
+test('stop works while the voice waits for a translation, and nothing is said when it lands', async () => {
+  const { session, engine, bar } = setup();
+  const tab = fakeTab('<p>Ciao a tutti.</p>');
+  let release;
+  tab.reader.speechReady = () => new Promise((resolve) => { release = resolve; });
+  session.start(tab.entry);
+  await new Promise((resolve) => { setTimeout(resolve, 5); });
+  await flush();
+  assert.equal(bar.view.waiting, true);
+  session.command('speech.stop');
+  assert.equal(session.active(), false);
+  release();
+  await flush();
+  assert.deepEqual(engine.calls, []);
+});
+
 /** A book with each paragraph in English and in Italian; the main language says which one is read. */
 function bilingualTab() {
   const tab = fakeTab('<p><span data-en>Hello to all.</span><span data-it>Ciao a tutti.</span></p>'

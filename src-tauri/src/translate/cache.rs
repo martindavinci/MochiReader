@@ -34,7 +34,7 @@ impl Cache {
                 && !text.contains("..")
                 && text
                     .chars()
-                    .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-')
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '+'))
         };
         if !plain(pair) || !plain(version) {
             return Err(TtsError::Refused(format!(
@@ -165,6 +165,23 @@ mod tests {
             .sections("epub:other", "en-it", "2.1")
             .unwrap()
             .is_empty());
+    }
+
+    #[test]
+    fn a_pair_through_english_names_both_versions() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = Cache::new(dir.path());
+        cache
+            .put("epub:abc", "fr-it", "2.0+2.1", 1, &texts())
+            .unwrap();
+        assert_eq!(
+            cache.get("epub:abc", "fr-it", "2.0+2.1", 1).unwrap(),
+            Some(texts())
+        );
+        assert_eq!(
+            cache.sections("epub:abc", "fr-it", "2.0+2.1").unwrap(),
+            vec![1]
+        );
     }
 
     #[test]

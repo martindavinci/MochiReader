@@ -123,3 +123,23 @@ test('start reports the progress of the sections already on disk', async () => {
   book.close();
   assert.deepEqual(heard[0], { done: 2, total: 5 });
 });
+
+test('a section that is not a page (a picture in the reading order) counts as done with nothing to translate', async () => {
+  const store = new Map();
+  const book = createBookTranslation({
+    key: 'k', from: 'en', to: 'it', version: '2.1', sections: 2,
+    sourceOf: async (index) => {
+      if (index === 1) throw new Error('image/jpeg is not a document');
+      return docOf('<p>Zero.</p>');
+    },
+    engine: { translate: async (f, t, htmls) => htmls, close: async () => {} },
+    invoke: async (command, args) => {
+      if (command === 'tr_cache_put') store.set(args.section, args.texts);
+      if (command === 'tr_cache_sections') return [];
+      return null;
+    },
+  });
+  assert.deepEqual(await book.ready(1), []);
+  assert.deepEqual(store.get(1), []);
+  book.close();
+});

@@ -3,12 +3,10 @@
 // when the voice may read them. The book is translated only once Tradotto has been chosen for it.
 import { applyTranslation, markPending, setMain as styleDoc } from './bilingual.js';
 import { CancelledError, createBookTranslation } from './book.js';
-import { modelsFor, versionFor } from './models.js';
+import { catalogLanguage, modelsFor, versionFor } from './models.js';
 
 const ORIGINAL = 'original';
 const TRANSLATED = 'translated';
-
-const languageOf = (tag) => (tag ? String(tag).toLowerCase().split(/[-_]/)[0] : null);
 
 /**
  * @param {{key: string, sourceLang: string|null, target: string, layout: string, fixedLayout: boolean,
@@ -18,8 +16,8 @@ const languageOf = (tag) => (tag ? String(tag).toLowerCase().split(/[-_]/)[0] : 
 export function createReaderTranslation({
   key, sourceLang, target, layout, fixedLayout, sections, shown, sourceOf, invoke, makeEngine, pendingText,
 }) {
-  const from = languageOf(sourceLang);
-  const to = languageOf(target);
+  const from = catalogLanguage(sourceLang);
+  const to = catalogLanguage(target);
   const available = Boolean(from && to && from !== to && !fixedLayout);
   const changeCallbacks = [];
   const progressCallbacks = [];
@@ -61,7 +59,8 @@ export function createReaderTranslation({
       if (main === TRANSLATED) shownDocs().forEach(({ doc, index }) => fill(doc, index).catch(() => {}));
       progressCallbacks.forEach((callback) => callback(progress));
     });
-    book.start();
+    // A book that cannot start its background work still translates what is asked of it.
+    book.start().catch((error) => console.warn(error));
     return book;
   };
 

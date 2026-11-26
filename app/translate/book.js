@@ -46,8 +46,9 @@ export function createBookTranslation({ key, from, to, version, sections, source
   };
 
   const translate = async (index) => {
-    const doc = await sourceOf(index);
-    const blocks = translatableBlocks(doc.body);
+    // A section that is no page (a picture in the reading order) has nothing to translate, now or ever.
+    const doc = await sourceOf(index).catch(() => null);
+    const blocks = doc?.body ? translatableBlocks(doc.body) : [];
     const texts = blocks.length === 0 ? [] : await engine.translate(from, to, blockSources(blocks));
     if (closed) return null;
     await invoke('tr_cache_put', { ...where, section: index, texts });

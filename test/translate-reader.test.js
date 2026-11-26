@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseHTML } from 'linkedom';
-import { MissingModelsError, modelsFor, versionFor } from '../app/translate/models.js';
+import { catalogLanguage, MissingModelsError, modelsFor, versionFor } from '../app/translate/models.js';
 import { createReaderTranslation } from '../app/translate/reader-translation.js';
 import { TR_ATTR } from '../app/translate/marks.js';
 
@@ -17,6 +17,47 @@ test('modelsFor a pair without a direct model asks for both halves through Engli
   assert.deepEqual(modelsFor('fr', 'it', PAIRS), ['fr-en', 'en-it']);
   assert.deepEqual(modelsFor('fr', 'de', PAIRS), ['fr-en', 'en-de']);
   assert.equal(modelsFor('xx', 'it', PAIRS), null);
+});
+
+test('a language as a book or the options name it becomes the language as the models name it', () => {
+  assert.equal(catalogLanguage('eng'), 'en');
+  assert.equal(catalogLanguage('English'), 'en');
+  assert.equal(catalogLanguage('it-IT'), 'it');
+  assert.equal(catalogLanguage('pt-BR'), 'pt');
+  assert.equal(catalogLanguage('zh-CN'), 'zh-Hans');
+  assert.equal(catalogLanguage('zh-Hans'), 'zh-Hans');
+  assert.equal(catalogLanguage('zh-TW'), 'zh-Hant');
+  assert.equal(catalogLanguage('und'), null);
+  assert.equal(catalogLanguage(null), null);
+});
+
+test('a book that names its language in three letters translates', async () => {
+  const translation = createReaderTranslation({
+    key: 'k', sourceLang: 'eng', target: 'it', layout: 'single', fixedLayout: false, sections: 1,
+    shown: () => [], sourceOf: async () => docOf('<p>x</p>'),
+    invoke: async (command) => (command === 'tr_catalog' ? { pairs: PAIRS } : command === 'tr_cache_sections' ? [] : null),
+    makeEngine: () => ({ translate: async (f, t, h) => h, close: async () => {} }), pendingText: '',
+  });
+  await translation.setMain('translated');
+  assert.equal(translation.main(), 'translated');
+  translation.close();
+});
+
+test('a book translation that cannot start is quiet: the page stays in its language', async () => {
+  const translation = createReaderTranslation({
+    key: 'k', sourceLang: 'en', target: 'it', layout: 'single', fixedLayout: false, sections: 1,
+    shown: () => [], sourceOf: async () => docOf('<p>x</p>'),
+    invoke: async (command) => {
+      if (command === 'tr_catalog') return { pairs: PAIRS };
+      if (command === 'state_get_translation') return 'translated';
+      if (command === 'tr_cache_sections') throw new Error('refused');
+      return null;
+    },
+    makeEngine: () => ({ translate: async (f, t, h) => h, close: async () => {} }), pendingText: '',
+  });
+  await translation.restore();
+  await new Promise((resolve) => { setTimeout(resolve, 5); });
+  translation.close();
 });
 
 test('versionFor joins the installed versions and refuses a missing model', () => {
