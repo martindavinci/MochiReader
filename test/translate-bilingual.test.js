@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseHTML } from 'linkedom';
 import { extractBlocks } from '../app/speech/extract.js';
-import { applyTranslation, blockSources, markPending, setMain, translatableBlocks } from '../app/translate/bilingual.js';
+import { applyTranslation, blockSources, markPending, originalPoint, setMain, translatableBlocks } from '../app/translate/bilingual.js';
 import { ORIG_ATTR, TR_ATTR } from '../app/translate/marks.js';
 
 const docOf = (html) => parseHTML(`<!doctype html><html><head></head><body>${html}</body></html>`).document;
@@ -50,12 +50,12 @@ test('setMain translated marks every original data-noread and no translation', (
   applyTranslation(doc, ITALIAN, { lang: 'it' });
   setMain(doc, 'translated', 'single');
   assert.ok([...doc.querySelectorAll(`[${ORIG_ATTR}]`)].every((el) => el.hasAttribute('data-noread')));
-  assert.ok([...doc.querySelectorAll(`[${TR_ATTR}]`)].every((el) => !el.hasAttribute('data-noread')));
+  assert.ok([...doc.body.querySelectorAll(`[${TR_ATTR}]`)].every((el) => !el.hasAttribute('data-noread')));
   assert.equal(doc.documentElement.getAttribute('data-mochi-main'), 'translated');
   assert.equal(doc.documentElement.getAttribute('data-mochi-layout'), 'single');
   setMain(doc, 'original', 'columns');
   assert.ok([...doc.querySelectorAll(`[${ORIG_ATTR}]`)].every((el) => !el.hasAttribute('data-noread')));
-  assert.ok([...doc.querySelectorAll(`[${TR_ATTR}]`)].every((el) => el.hasAttribute('data-noread')));
+  assert.ok([...doc.body.querySelectorAll(`[${TR_ATTR}]`)].every((el) => el.hasAttribute('data-noread')));
 });
 
 test('a block left untranslated is not read in Tradotto', () => {
@@ -106,4 +106,25 @@ test('the blocks found do not change once the page is translated', () => {
   applyTranslation(doc, ITALIAN, { lang: 'it' });
   markPending(doc, 'x');
   assert.deepEqual(translatableBlocks(doc.body), before);
+});
+
+test('a place in a translation is the start of the original of its block', () => {
+  const doc = docOf(CHAPTER);
+  applyTranslation(doc, ITALIAN, { lang: 'it' });
+  const tr = translatableBlocks(doc.body)[1].lastElementChild;
+  const point = originalPoint(tr.firstChild, 3);
+  assert.ok(point.node.hasAttribute(ORIG_ATTR));
+  assert.equal(point.offset, 0);
+  const text = doc.querySelector('i').firstChild;
+  assert.deepEqual(originalPoint(text, 2), { node: text, offset: 2 });
+});
+
+test('setMain puts the style of the layouts into the page once', () => {
+  const doc = docOf(CHAPTER);
+  setMain(doc, 'translated', 'single');
+  setMain(doc, 'original', 'columns');
+  const styles = doc.head.querySelectorAll('style');
+  assert.equal(styles.length, 1);
+  assert.ok(styles[0].hasAttribute(TR_ATTR));
+  assert.match(styles[0].textContent, /data-mochi-layout/);
 });

@@ -105,3 +105,12 @@ test('progress counts cached sections', async () => {
   await book.start();
   assert.deepEqual(book.progress(), { done: 2, total: 5 });
 });
+
+test('known says at once which sections are translated, on disk or here', async () => {
+  const { book } = fakes({ cached: { 3: ['x'] } });
+  assert.equal(book.known(3), false);
+  await book.start();
+  book.close();
+  assert.equal(book.known(3), true);
+  assert.equal(book.known(1), false);
+});

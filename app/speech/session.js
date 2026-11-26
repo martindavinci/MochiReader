@@ -77,6 +77,8 @@ class SpeechSession {
   #wasPaused = false;
   /** The tab that was read to its end: to start it again is to start from the top. */
   #finished = null;
+  /** The text on screen is being translated, and the voice waits for it. */
+  #waiting = false;
   #tabVoices = new WeakMap();
   #watched = new WeakSet();
   /** Whether this reading already said that the downloaded voice could not read. */
@@ -305,7 +307,7 @@ class SpeechSession {
     };
   }
 
-  async #begin(entry, from) {
+  async #begin(entry, from, { silent = false } = {}) {
     this.stop();
     const run = this.#run;
     this.#entry = entry;
@@ -323,7 +325,32 @@ class SpeechSession {
     const voices = await this.#listVoices().catch(() => []);
     if (run !== this.#run) return;
     this.#voices = voices;
-    await this.#loadSection(run, from);
+    await this.#loadSection(run, from, { silent });
+  }
+
+  /** The book switched between its language and its translation: the reading starts again, in the other one. */
+  async #languageChanged() {
+    const entry = this.#entry;
+    const silent = this.#player.state === STATE_PAUSED;
+    await this.#begin(entry, entry.reader.speechStart(), { silent });
+  }
+
+  /** Waits until the reader has the text on screen in the language to read; the bar says so if it takes a while. */
+  async #ready(reader, run) {
+    if (!reader.speechReady) return true;
+    let settled = false;
+    const ready = Promise.resolve(reader.speechReady()).catch((error) => console.warn(error)).finally(() => {
+      settled = true;
+    });
+    await Promise.race([ready, nextTurn()]);
+    if (!settled && run === this.#run) {
+      this.#waiting = true;
+      this.#draw();
+      await ready;
+      this.#waiting = false;
+    }
+    await ready;
+    return run === this.#run;
   }
 
   /** Puts the sections on screen through the player, from the first with something to read, and starts or parks. */
@@ -351,8 +378,12 @@ class SpeechSession {
 
   /** @returns {Promise<{blocks: object[], lang: string}|null>} `null` if the change under way was dropped. */
   async #extract(reader, run) {
+    if (!(await this.#ready(reader, run))) return null;
     const roots = await reader.speechRoots();
     if (run !== this.#run) return null;
+    // The voice will need the next chapter: a book being translated does it before the rest.
+    const last = roots.at(-1)?.section;
+    if (Number.isInteger(last)) reader.translation?.want?.(last + 1);
     const text = roots.map(({ root }) => root.textContent).join('\n');
     const lang = this.#lang ?? (parseLangTag(reader.lang).language ? reader.lang : detectLang(text)) ?? getLang();
     const options = { sourceMode: this.#sourceMode(), lang };
@@ -500,6 +531,9 @@ class SpeechSession {
     reader.onSectionShown?.(() => {
       if (this.#entry?.reader === reader && !this.#switching) this.#readHere();
     });
+    reader.translation?.onChange?.(() => {
+      if (this.#entry?.reader === reader) this.#languageChanged();
+    });
   }
 
   #handMoved(reader) {
@@ -618,6 +652,7 @@ class SpeechSession {
       voiceId: this.#voiceId,
       following: this.#following,
       elsewhere: !this.#isInFront(this.#entry),
+      waiting: this.#waiting,
     });
     this.#onReading(this.#entry);
   }

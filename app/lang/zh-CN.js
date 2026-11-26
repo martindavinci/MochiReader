@@ -235,6 +235,8 @@ export default {
   'speech.readFromHere': '从这里开始朗读',
   'speech.follow': '回到正在朗读的句子',
   'speech.reading': '正在朗读',
+  'translate.waiting': '正在翻译…',
+  'translate.pending': '正在翻译本章…',
   'speech.paused': '已暂停',
   'speech.elsewhere': '正在另一个标签页中朗读',
   'speech.goToTab': '转到标签页',

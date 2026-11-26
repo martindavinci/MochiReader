@@ -81,11 +81,17 @@ export function markPending(doc, text) {
  */
 export function setMain(doc, main, layout) {
   const root = doc.documentElement;
+  if (doc.head && !doc.head.querySelector(`style[${TR_ATTR}]`)) {
+    const sheet = doc.createElement('style');
+    sheet.setAttribute(TR_ATTR, '');
+    sheet.textContent = BILINGUAL_CSS;
+    doc.head.append(sheet);
+  }
   root.setAttribute(MAIN, main);
   root.setAttribute(LAYOUT, layout);
   const translated = main === 'translated';
   doc.querySelectorAll(`[${ORIG_ATTR}]`).forEach((el) => el.toggleAttribute(NOREAD, translated));
-  doc.querySelectorAll(`[${TR_ATTR}]:not([${PENDING}])`).forEach((el) => el.toggleAttribute(NOREAD, !translated));
+  doc.body.querySelectorAll(`[${TR_ATTR}]:not([${PENDING}])`).forEach((el) => el.toggleAttribute(NOREAD, !translated));
   doc.querySelectorAll(`[${UNTRANSLATED}]`).forEach((el) => {
     el.removeAttribute(UNTRANSLATED);
     el.removeAttribute(NOREAD);
@@ -96,6 +102,20 @@ export function setMain(doc, main, layout) {
     block.setAttribute(UNTRANSLATED, '');
     block.setAttribute(NOREAD, '');
   });
+}
+
+/**
+ * A place inside a translation is nowhere in the book: it stands for the start of its block.
+ * @param {Node} node
+ * @param {number} offset
+ * @returns {{node: Node, offset: number}}
+ */
+export function originalPoint(node, offset) {
+  const element = node.nodeType === 1 ? node : node.parentElement;
+  const tr = element?.closest(`[${TR_ATTR}]`);
+  if (!tr) return { node, offset };
+  const block = tr.parentElement;
+  return { node: (block && originalOf(block)) ?? block ?? tr, offset: 0 };
 }
 
 /** Inside the frame of a chapter: how the layouts look. */

@@ -250,8 +250,10 @@ export function createSpeechBar({ onCommand, onVoice, onRate = () => {}, onVolum
   };
 
   return {
-    show({ name: fileName, playing, rate: speed, rates = [speed], volume = 1, voices, voiceId, following, elsewhere = false }) {
-      status.textContent = t(elsewhere ? 'speech.elsewhere' : playing ? 'speech.reading' : 'speech.paused');
+    show({ name: fileName, playing, rate: speed, rates = [speed], volume = 1, voices, voiceId, following, elsewhere = false,
+      waiting = false }) {
+      const said = waiting ? 'translate.waiting' : elsewhere ? 'speech.elsewhere' : playing ? 'speech.reading' : 'speech.paused';
+      status.textContent = t(said);
       name.textContent = fileName;
       name.setAttribute('title', fileName);
       goToTab.textContent = t('speech.goToTab');

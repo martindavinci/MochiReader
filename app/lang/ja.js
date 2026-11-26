@@ -235,6 +235,8 @@ export default {
   'speech.readFromHere': 'ここから読み上げ',
   'speech.follow': '読んでいる文に戻る',
   'speech.reading': '読み上げ中',
+  'translate.waiting': '翻訳中…',
+  'translate.pending': 'この章を翻訳しています…',
   'speech.paused': '一時停止中',
   'speech.elsewhere': 'ほかのタブで読み上げ中',
   'speech.goToTab': 'タブへ移動',

@@ -235,6 +235,8 @@ export default {
   'speech.readFromHere': '여기서부터 소리 내어 읽기',
   'speech.follow': '읽는 문장으로 돌아가기',
   'speech.reading': '소리 내어 읽는 중',
+  'translate.waiting': '번역 중…',
+  'translate.pending': '이 장을 번역하고 있습니다…',
   'speech.paused': '일시 정지됨',
   'speech.elsewhere': '다른 탭에서 읽는 중',
   'speech.goToTab': '탭으로 이동',

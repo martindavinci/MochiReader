@@ -6,6 +6,9 @@ import { drawBookmarkMark } from './bookmark-mark.js';
 import { epubKey, mainTitle } from './epub-key.js';
 import { isUnreadablePage, keepSectionsLoading, sectionPage, sectionType } from './epub-section.js';
 import { excerptOf } from './excerpt.js';
+import { detectLang, parseLangTag } from '../speech/lang.js';
+import { originalPoint } from '../translate/bilingual.js';
+import { createReaderTranslation } from '../translate/reader-translation.js';
 
 export { epubKey, mainTitle };
 
@@ -327,7 +330,24 @@ function textFrom(node, offset) {
   return text;
 }
 
-export function makeReader(view, { key, title, onInput = () => {}, place = null, handCallbacks = [] }) {
+/**
+ * A section as the frame shows it, whether or not it is on screen: what the translation works from.
+ * @param {{sections: {createDocument: () => Promise<Document>}[]}} book
+ */
+async function sectionSource(book, index, { parser = new DOMParser(), serializer = new XMLSerializer() } = {}) {
+  const doc = await book.sections[index].createDocument();
+  const type = doc.contentType || 'application/xhtml+xml';
+  const page = await sectionPage(serializer.serializeToString(doc), type, { fixed: false, parser, serializer });
+  return parser.parseFromString(page, sectionType(type, false));
+}
+
+/**
+ * @param {object} view
+ * @param {{key: string, title: string, onInput?: Function, place?: object|null, handCallbacks?: Function[],
+ *   translation?: {invoke: Function, target: string, layout: string, pendingText: string, makeEngine: Function,
+ *   parser?: DOMParser, serializer?: XMLSerializer}|null}} options With `translation`, the book can be translated.
+ */
+export function makeReader(view, { key, title, onInput = () => {}, place = null, handCallbacks = [], translation: translating = null }) {
   const moveCallbacks = [];
   const sectionCallbacks = [];
   // A page only says where it starts, and a place inside it holds for as long as it stays on screen.
@@ -424,6 +444,39 @@ export function makeReader(view, { key, title, onInput = () => {}, place = null,
 
   const shownDocs = () => view.renderer.getContents().filter(({ doc }) => doc?.body && doc.URL !== EMPTY_FRAME_URL);
 
+  // A book that does not say its language (a PDF read as a book) is in the language of its text.
+  const sourceLang = () => {
+    const said = bookLang(view.book.metadata);
+    if (parseLangTag(said).language) return said;
+    return detectLang(shownDocs().map(({ doc }) => doc.body.textContent).join('\n'));
+  };
+  const translation = translating && createReaderTranslation({
+    key,
+    sourceLang: sourceLang(),
+    target: translating.target,
+    layout: translating.layout,
+    fixedLayout: Boolean(view.isFixedLayout),
+    sections: view.book.sections.length,
+    shown: () => shownDocs().map(({ doc, index }) => ({ doc, index: index ?? view.renderer.index })),
+    sourceOf: (index) => sectionSource(view.book, index, translating),
+    invoke: translating.invoke,
+    makeEngine: translating.makeEngine,
+    pendingText: translating.pendingText,
+  });
+  const onTranslatedLoad = ({ detail: { doc, index } }) => {
+    translation.sectionLoaded(doc, index).catch(() => {});
+  };
+  if (translation?.available) view.addEventListener('load', onTranslatedLoad);
+  /** A place in a translation is nowhere in the book: it is kept as the start of its block. */
+  const inBook = (range) => {
+    const start = originalPoint(range.startContainer, range.startOffset);
+    if (start.node === range.startContainer) return range;
+    const moved = range.startContainer.ownerDocument.createRange();
+    moved.setStart(start.node, start.offset);
+    moved.collapse(true);
+    return moved;
+  };
+
   const moveSection = (delta) => {
     const { renderer } = view;
     if (view.isFixedLayout) return renderer.goToSpread(spreadOfSection(view) + delta, SPREAD_START);
@@ -445,7 +498,14 @@ export function makeReader(view, { key, title, onInput = () => {}, place = null,
     kind: 'epub',
     key,
     title,
-    lang: bookLang(view.book.metadata),
+    /** The language the voice reads: the translation's when it is the main one. */
+    get lang() {
+      return translation?.lang() ?? bookLang(view.book.metadata);
+    },
+    /** null when the app cannot translate here; else see app/translate/reader-translation.js. */
+    translation: translation?.available ? translation : null,
+    /** Resolves when the voice can read what is on screen in the main language. */
+    speechReady: async () => translation?.speechReady(),
     toc: () => flattenToc(view.book.toc),
     currentToc: () => flattenToc(view.book.toc).findIndex(({ target }) => target.href === view.lastLocation?.tocItem?.href),
     progress: () => ({ ...bookProgress(view), damaged: shownDocs().some(({ doc }) => isUnreadablePage(doc)) }),
@@ -454,7 +514,7 @@ export function makeReader(view, { key, title, onInput = () => {}, place = null,
       const range = node.ownerDocument.createRange();
       range.setStart(node, offset);
       range.collapse(true);
-      return { position: { kind: 'epub', cfi: placeOf(range), sentence: FIRST_SENTENCE }, excerpt: excerptOf((node.parentElement ?? node).textContent.replace(SPACES, ' ')) };
+      return { position: { kind: 'epub', cfi: placeOf(inBook(range)), sentence: FIRST_SENTENCE }, excerpt: excerptOf((node.parentElement ?? node).textContent.replace(SPACES, ' ')) };
     },
     position,
     goTo: async ({ cfi, href, sentence }) => {
@@ -482,7 +542,7 @@ export function makeReader(view, { key, title, onInput = () => {}, place = null,
     speakAt: ({ range, sentence, follow }) => {
       // Text the app added is nowhere in the book, so the place stays on the sentence before it.
       if (!range) return;
-      spoken = { cfi: placeOf(range), sentence };
+      spoken = { cfi: placeOf(inBook(range)), sentence };
       if (follow && !view.isFixedLayout && !onPage(range)) view.renderer.scrollToAnchor(range);
     },
     speechStopped: () => {
@@ -516,6 +576,8 @@ export function makeReader(view, { key, title, onInput = () => {}, place = null,
       view.removeEventListener('load', onSectionLoad);
       view.removeEventListener('create-overlay', markSection);
       view.removeEventListener('draw-annotation', drawMark);
+      view.removeEventListener('load', onTranslatedLoad);
+      translation?.close();
       closeView(view);
     },
   };

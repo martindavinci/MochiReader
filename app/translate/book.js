@@ -98,6 +98,8 @@ export function createBookTranslation({ key, from, to, version, sections, source
 
   return {
     cached,
+    /** Whether the section is translated, on disk or here: known without waiting. */
+    known: (index) => done.has(index),
     async ready(index) {
       if (closed) throw new CancelledError(pair);
       const texts = await cached(index);

@@ -235,6 +235,8 @@ export default {
   'speech.readFromHere': 'Leggi ad alta voce da qui',
   'speech.follow': 'Torna alla frase',
   'speech.reading': 'Lettura ad alta voce',
+  'translate.waiting': 'Traduzione…',
+  'translate.pending': 'Traduzione in corso…',
   'speech.paused': 'In pausa',
   'speech.elsewhere': 'Lettura in un’altra scheda',
   'speech.goToTab': 'Vai alla scheda',

@@ -1330,3 +1330,70 @@ test('scrolled to the end of a chapter, the next one is offered', () => {
 test('scrolled within a chapter, the next one is not offered yet', () => {
   assert.equal(bookProgress(scrolledOn(300)).next, '');
 });
+
+/** A book in English whose sections the translation can read, and the app's answers about en-it. */
+function translatableBook({ saved = null, cached = {} } = {}) {
+  const pages = ['<p>Page text</p>', '<p>Second page.</p>', '<p>Third page.</p>'];
+  const sections = SECTIONS.map((section, index) => ({
+    ...section,
+    createDocument: async () => {
+      const { document } = parseHTML(`<html><head></head><body>${pages[index]}</body></html>`);
+      // as foliate parses an HTML section; linkedom does not say it
+      Object.defineProperty(document, 'contentType', { value: 'text/html' });
+      return document;
+    },
+  }));
+  const view = new FakeView(new FakeRenderer(sections), { metadata: { language: 'en' } });
+  const store = new Map(Object.entries(cached).map(([k, v]) => [Number(k), v]));
+  const invoke = async (command, args) => {
+    switch (command) {
+      case 'tr_catalog': return { pairs: [{ id: 'en-it', from: 'en', to: 'it', installed: '2.1' }] };
+      case 'state_get_translation': return saved;
+      case 'state_set_translation': return null;
+      case 'tr_cache_get': return store.get(args.section) ?? null;
+      case 'tr_cache_put': store.set(args.section, args.texts); return null;
+      case 'tr_cache_sections': return [...store.keys()];
+      default: throw new Error(`unexpected ${command}`);
+    }
+  };
+  const translation = {
+    invoke,
+    target: 'it',
+    layout: 'single',
+    pendingText: 'Traduzione in corso…',
+    makeEngine: () => ({ translate: async (from, to, htmls) => htmls.map((h) => `it:${h}`), close: async () => {} }),
+    serializer: { serializeToString: (doc) => doc.toString() },
+    parser,
+  };
+  return { view, translation };
+}
+
+test('reader.lang follows the main language', async () => {
+  const { view, translation } = translatableBook();
+  const reader = makeReader(view, { key: 'k', title: 'T', translation });
+  assert.equal(reader.lang, 'en');
+  assert.equal(reader.translation.available, true);
+  await reader.translation.setMain('translated');
+  assert.equal(reader.lang, 'it');
+  await reader.speechReady();
+  assert.match(view.renderer.doc.body.innerHTML, /it:Page text/);
+  await reader.translation.setMain('original');
+  assert.equal(reader.lang, 'en');
+});
+
+test('a section loaded with a cached translation shows it at once', async () => {
+  const { view, translation } = translatableBook({ saved: 'translated', cached: { 2: ['it:Third page.'] } });
+  const reader = makeReader(view, { key: 'k', title: 'T', translation });
+  await reader.translation.restore();
+  const doc = parseHTML('<html><head></head><body><p>Third page.</p></body></html>').document;
+  view.dispatchEvent(new CustomEvent('load', { detail: { doc, index: 2 } }));
+  await after(0);
+  assert.match(doc.body.innerHTML, /it:Third page\./);
+});
+
+test('a book read without translation has no translation to offer and speech is ready at once', async () => {
+  const reader = makeReader(new FakeView(new FakeRenderer(), { metadata: { language: 'en' } }), { key: 'k', title: 'T' });
+  assert.equal(reader.translation, null);
+  assert.equal(reader.lang, 'en');
+  await reader.speechReady();
+});

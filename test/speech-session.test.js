@@ -1005,3 +1005,66 @@ test('a voice deleted while reading leaves the bar', async () => {
   await flush();
   assert.deepEqual(bar.view.voices.own.map(({ id }) => id), ['elsa', 'cosimo']);
 });
+
+test('with Tradotto and the section not translated the voice waits, the bar says Traduzione…, and it plays when ready', async () => {
+  const { session, engine, bar } = setup();
+  const tab = fakeTab('<p>Ciao a tutti.</p>');
+  let release;
+  tab.reader.speechReady = () => new Promise((resolve) => { release = resolve; });
+  session.start(tab.entry);
+  // the bar speaks of the wait only once it has lasted a turn of the timers
+  await new Promise((resolve) => { setTimeout(resolve, 5); });
+  await flush();
+  assert.deepEqual(engine.calls, []);
+  assert.equal(bar.view.waiting, true);
+  release();
+  await flush();
+  assert.deepEqual(engine.said, ['Ciao a tutti.']);
+  assert.equal(bar.view.waiting, false);
+});
+
+/** A book with each paragraph in English and in Italian; the main language says which one is read. */
+function bilingualTab() {
+  const tab = fakeTab('<p><span data-en>Hello to all.</span><span data-it>Ciao a tutti.</span></p>'
+    + '<p><span data-en>Second one.</span><span data-it>Il secondo.</span></p>', { lang: 'it' });
+  const changes = [];
+  const doc = tab.document();
+  const setMain = (main) => {
+    doc.querySelectorAll('[data-en]').forEach((el) => el.toggleAttribute('data-noread', main === 'translated'));
+    doc.querySelectorAll('[data-it]').forEach((el) => el.toggleAttribute('data-noread', main !== 'translated'));
+    tab.reader.lang = main === 'translated' ? 'it' : 'en';
+  };
+  setMain('translated');
+  tab.reader.translation = {
+    wanted: [],
+    want(index) { this.wanted.push(index); },
+    onChange: (callback) => changes.push(callback),
+  };
+  const choose = (main) => {
+    setMain(main);
+    changes.forEach((callback) => callback(main));
+  };
+  return { tab, choose };
+}
+
+test('switching to Originale while reading restarts on the same block with a voice of the book\'s language', async () => {
+  const { session, engine } = setup();
+  const { tab, choose } = bilingualTab();
+  await session.start(tab.entry);
+  await flush();
+  assert.deepEqual(engine.said, ['Ciao a tutti.']);
+  assert.equal(engine.calls[0].voiceId, 'elsa');
+  tab.reader.start = { node: tab.document().querySelector('[data-en]').firstChild, offset: 0 };
+  choose('original');
+  await flush();
+  assert.equal(engine.said.at(-1), 'Hello to all.');
+  assert.equal(engine.calls.at(-1).voiceId, 'zira');
+});
+
+test('in Tradotto the next chapter is wanted before the voice reaches it', async () => {
+  const { session } = setup();
+  const { tab } = bilingualTab();
+  await session.start(tab.entry);
+  await flush();
+  assert.deepEqual(tab.reader.translation.wanted, [1]);
+});

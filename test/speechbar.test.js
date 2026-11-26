@@ -48,6 +48,13 @@ test('it says which file is being read and how fast', () => {
   assert.equal(element().querySelector('.speech-rate').textContent, '1.3×');
 });
 
+test('while a chapter is being translated the bar says so', () => {
+  setLang('en');
+  const { bar, element } = setup();
+  bar.show({ ...VIEW, playing: false, waiting: true });
+  assert.equal(element().querySelector('.speech-status').textContent, en['translate.waiting']);
+});
+
 test('every button does its action and says what it is in the language of the interface', () => {
   const { bar, element, click, commands } = setup();
   setLang('it');

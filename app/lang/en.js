@@ -235,6 +235,8 @@ export default {
   'speech.readFromHere': 'Read aloud from here',
   'speech.follow': 'Back to the sentence',
   'speech.reading': 'Reading aloud',
+  'translate.waiting': 'Translating…',
+  'translate.pending': 'Translating this chapter…',
   'speech.paused': 'Paused',
   'speech.elsewhere': 'Reading in another tab',
   'speech.goToTab': 'Go to tab',
