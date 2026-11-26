@@ -188,6 +188,8 @@ export const compare = (a, b) => {
 const isTextNode = ({ nodeType }) => nodeType === 3 || nodeType === 4
 const isElementNode = ({ nodeType }) => nodeType === 1
 
+const mochiFilter = node => node.nodeType !== 1 ? NodeFilter.FILTER_ACCEPT : node.hasAttribute('data-mochi-tr') ? NodeFilter.FILTER_REJECT : node.hasAttribute('data-mochi-orig') ? NodeFilter.FILTER_SKIP : NodeFilter.FILTER_ACCEPT
+
 const getChildNodes = (node, filter) => {
     const nodes = Array.from(node.childNodes)
         // "content other than element and character data is ignored"
@@ -285,7 +287,7 @@ const nodeToParts = (node, offset, filter) => {
         .filter(x => x.index !== -1)
 }
 
-export const fromRange = (range, filter) => {
+export const fromRange = (range, filter = mochiFilter) => {
     const { startContainer, startOffset, endContainer, endOffset } = range
     const start = nodeToParts(startContainer, startOffset, filter)
     if (range.collapsed) return toString([start])
@@ -293,7 +295,7 @@ export const fromRange = (range, filter) => {
     return buildRange([start], [end])
 }
 
-export const toRange = (doc, parts, filter) => {
+export const toRange = (doc, parts, filter = mochiFilter) => {
     const startParts = collapse(parts)
     const endParts = collapse(parts, true)
 

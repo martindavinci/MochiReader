@@ -89,6 +89,24 @@ sed -i \
   -e 's/^\( *\)else this.#justAnchored = true$/\1else {\n\1    this.#justAnchored = true\n\1    this.#anchoredAt = this.start\n\1}/' \
   "${source_dir}/${SCROLL_ECHO_FILE}"
 
+# A translated page holds the original of each block in a wrapper and its translation as the block's last child
+# (app/translate/marks.js). Places in the book are counted as if neither were there, so a place is the same whether
+# the page is translated or not.
+readonly CFI_FILE=epubcfi.js
+readonly CFI_FILTER="const mochiFilter = node => node.nodeType !== 1 ? NodeFilter.FILTER_ACCEPT : node.hasAttribute('data-mochi-tr') ? NodeFilter.FILTER_REJECT : node.hasAttribute('data-mochi-orig') ? NodeFilter.FILTER_SKIP : NodeFilter.FILTER_ACCEPT"
+for mark in 'const getChildNodes = (node, filter) => {' 'export const fromRange = (range, filter) => {' \
+  'export const toRange = (doc, parts, filter) => {'; do
+  if ! grep -qxF "${mark}" "${source_dir}/${CFI_FILE}"; then
+    echo "foliate-js ${FOLIATE_COMMIT} has no '${mark}' in ${CFI_FILE}" >&2
+    exit 1
+  fi
+done
+sed -i \
+  -e "s/^const getChildNodes = (node, filter) => {$/${CFI_FILTER}\n\n&/" \
+  -e 's/^export const fromRange = (range, filter) => {$/export const fromRange = (range, filter = mochiFilter) => {/' \
+  -e 's/^export const toRange = (doc, parts, filter) => {$/export const toRange = (doc, parts, filter = mochiFilter) => {/' \
+  "${source_dir}/${CFI_FILE}"
+
 rm -rf "${target}"
 for file in "${KEPT_FILES[@]}"; do
   mkdir -p "$(dirname "${target}/${file}")"
