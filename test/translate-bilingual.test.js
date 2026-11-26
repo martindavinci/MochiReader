@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseHTML } from 'linkedom';
 import { extractBlocks } from '../app/speech/extract.js';
-import { applyTranslation, blockSources, markPending, originalPoint, setMain, translatableBlocks } from '../app/translate/bilingual.js';
+import { applyTranslation, BILINGUAL_CSS, blockSources, markPending, originalPoint, setMain, translatableBlocks } from '../app/translate/bilingual.js';
 import { ORIG_ATTR, TR_ATTR } from '../app/translate/marks.js';
 
 const docOf = (html) => parseHTML(`<!doctype html><html><head></head><body>${html}</body></html>`).document;
@@ -117,6 +117,15 @@ test('a place in a translation is the start of the original of its block', () =>
   assert.equal(point.offset, 0);
   const text = doc.querySelector('i').firstChild;
   assert.deepEqual(originalPoint(text, 2), { node: text, offset: 2 });
+});
+
+test('in one language the hidden original keeps a place on the page, so a place in the book can be scrolled to', () => {
+  const rule = BILINGUAL_CSS.split('}').find((part) => part.includes('[data-mochi-main="translated"] [data-mochi-orig]')
+    && part.includes('"single"'));
+  assert.ok(rule, 'a rule hides the original in one language');
+  assert.doesNotMatch(rule, /display: none/);
+  assert.match(rule, /height: 0/);
+  assert.match(rule, /overflow: hidden/);
 });
 
 test('setMain puts the style of the layouts into the page once', () => {

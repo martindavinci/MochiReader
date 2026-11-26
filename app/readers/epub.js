@@ -466,16 +466,24 @@ export function makeReader(view, { key, title, onInput = () => {}, place = null,
   const onTranslatedLoad = ({ detail: { doc, index } }) => {
     translation.sectionLoaded(doc, index).catch(() => {});
   };
-  if (translation?.available) view.addEventListener('load', onTranslatedLoad);
-  /** A place in a translation is nowhere in the book: it is kept as the start of its block. */
+  /** A place in a translation is nowhere in the book: each end is kept at the start of its block. */
   const inBook = (range) => {
     const start = originalPoint(range.startContainer, range.startOffset);
-    if (start.node === range.startContainer) return range;
+    const end = originalPoint(range.endContainer ?? range.startContainer, range.endOffset ?? range.startOffset);
+    if (start.node === range.startContainer && end.node === (range.endContainer ?? range.startContainer)) return range;
     const moved = range.startContainer.ownerDocument.createRange();
     moved.setStart(start.node, start.offset);
-    moved.collapse(true);
+    moved.setEnd(end.node, end.offset);
     return moved;
   };
+  if (translation?.available) {
+    view.addEventListener('load', onTranslatedLoad);
+    // foliate names the places it is shown (the page on screen, a selection) by the ranges of the page as it is.
+    if (typeof view.getCFI === 'function') {
+      const bookCFI = view.getCFI.bind(view);
+      view.getCFI = (index, range) => bookCFI(index, range && inBook(range));
+    }
+  }
 
   const moveSection = (delta) => {
     const { renderer } = view;

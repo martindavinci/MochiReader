@@ -87,6 +87,7 @@ export function createReaderTranslation({
       }
       main = saved;
       refreshShown();
+      changeCallbacks.forEach((callback) => callback(main));
     },
     /** @throws {import('./models.js').MissingModelsError} With Tradotto, when a model is not downloaded. */
     async setMain(next) {

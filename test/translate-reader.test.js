@@ -151,6 +151,14 @@ test('close stops the book translation and frees its engine', async () => {
   assert.equal(engines[0].closed, true);
 });
 
+test('restore tells onChange the main language saved for the book', async () => {
+  const { translation } = fakes({ saved: 'translated' });
+  const heard = [];
+  translation.onChange((main) => heard.push(main));
+  await translation.restore();
+  assert.deepEqual(heard, ['translated']);
+});
+
 test('onChange hears the main language change', async () => {
   const { translation } = fakes();
   const heard = [];

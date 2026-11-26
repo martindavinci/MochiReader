@@ -1391,6 +1391,31 @@ test('a section loaded with a cached translation shows it at once', async () => 
   assert.match(doc.body.innerHTML, /it:Third page\./);
 });
 
+test('a place foliate takes on a translated page is the place of its block in the book', async () => {
+  const { view, translation } = translatableBook();
+  const seen = [];
+  view.getCFI = (index, range) => {
+    seen.push(range);
+    return 'cfi';
+  };
+  const reader = makeReader(view, { key: 'k', title: 'T', translation });
+  await reader.translation.setMain('translated');
+  await reader.speechReady();
+  const { doc } = view.renderer;
+  // linkedom's ranges cannot be placed; foliate's are real ones
+  doc.createRange = () => ({
+    setStart(node, offset) { Object.assign(this, { startContainer: node, startOffset: offset }); },
+    setEnd(node, offset) { Object.assign(this, { endContainer: node, endOffset: offset }); },
+    collapse() {},
+  });
+  const inTranslation = doc.body.querySelector('[data-mochi-tr]').firstChild;
+  view.getCFI(0, { startContainer: inTranslation, startOffset: 3, endContainer: inTranslation, endOffset: 5 });
+  const range = seen.at(-1);
+  assert.ok(range.startContainer.hasAttribute('data-mochi-orig'));
+  assert.equal(range.startOffset, 0);
+  assert.ok(range.endContainer.hasAttribute('data-mochi-orig'));
+});
+
 test('a book read without translation has no translation to offer and speech is ready at once', async () => {
   const reader = makeReader(new FakeView(new FakeRenderer(), { metadata: { language: 'en' } }), { key: 'k', title: 'T' });
   assert.equal(reader.translation, null);

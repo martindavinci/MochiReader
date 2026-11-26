@@ -118,9 +118,12 @@ export function originalPoint(node, offset) {
   return { node: (block && originalOf(block)) ?? block ?? tr, offset: 0 };
 }
 
-/** Inside the frame of a chapter: how the layouts look. */
+/**
+ * Inside the frame of a chapter: how the layouts look. A place in the book is in the original, so an original hidden in
+ * one language keeps its box, with no height: foliate can still scroll to it, and lands on its translation.
+ */
 export const BILINGUAL_CSS = `
-html[${LAYOUT}="single"][${MAIN}="translated"] [${ORIG_ATTR}],
+html[${LAYOUT}="single"][${MAIN}="translated"] [${ORIG_ATTR}] { display: block; height: 0; overflow: hidden; }
 html[${LAYOUT}="single"][${MAIN}="original"] [${TR_ATTR}] { display: none !important; }
 html:not([${MAIN}="translated"]) [${PENDING}] { display: none !important; }
 [${PENDING}] { font-style: italic; opacity: 0.7; margin-bottom: 1em; }

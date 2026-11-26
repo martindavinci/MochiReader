@@ -114,3 +114,12 @@ test('known says at once which sections are translated, on disk or here', async 
   assert.equal(book.known(3), true);
   assert.equal(book.known(1), false);
 });
+
+test('start reports the progress of the sections already on disk', async () => {
+  const { book } = fakes({ cached: { 0: ['x'], 3: ['y'] } });
+  const heard = [];
+  book.onProgress((progress) => heard.push(progress));
+  await book.start();
+  book.close();
+  assert.deepEqual(heard[0], { done: 2, total: 5 });
+});

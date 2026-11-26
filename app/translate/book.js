@@ -122,6 +122,7 @@ export function createBookTranslation({ key, from, to, version, sections, source
       const known = await invoke('tr_cache_sections', where);
       known.forEach((index) => done.add(index));
       started = true;
+      progressCallbacks.forEach((callback) => callback(progress()));
       pump();
     },
     progress,
