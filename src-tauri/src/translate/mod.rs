@@ -2,6 +2,7 @@
 //! Translation of books with the models of Firefox Translations. The engine runs in the page; here the models are
 //! downloaded, checked and handed to it.
 
+pub mod cache;
 pub mod catalog;
 pub mod models;
 
@@ -62,4 +63,41 @@ pub async fn tr_model_file(
     let models = Arc::clone(&models);
     let bytes = off_the_workers(move || models.model_file(&pair, &kind)).await?;
     Ok(tauri::ipc::Response::new(bytes))
+}
+
+#[tauri::command]
+pub async fn tr_cache_get(
+    key: String,
+    pair: String,
+    version: String,
+    section: u32,
+    models: tauri::State<'_, Arc<models::Models>>,
+) -> Result<Option<cache::Texts>, TtsError> {
+    let models = Arc::clone(&models);
+    off_the_workers(move || models.cache().get(&key, &pair, &version, section)).await
+}
+
+#[tauri::command]
+pub async fn tr_cache_put(
+    key: String,
+    pair: String,
+    version: String,
+    section: u32,
+    texts: cache::Texts,
+    models: tauri::State<'_, Arc<models::Models>>,
+) -> Result<(), TtsError> {
+    let models = Arc::clone(&models);
+    off_the_workers(move || models.cache().put(&key, &pair, &version, section, &texts)).await
+}
+
+/// The sections of a book already translated with this pair and version.
+#[tauri::command]
+pub async fn tr_cache_sections(
+    key: String,
+    pair: String,
+    version: String,
+    models: tauri::State<'_, Arc<models::Models>>,
+) -> Result<Vec<u32>, TtsError> {
+    let models = Arc::clone(&models);
+    off_the_workers(move || models.cache().sections(&key, &pair, &version)).await
 }

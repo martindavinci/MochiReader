@@ -68,6 +68,8 @@ pub struct AppState {
     pub bookmarks: Vec<Bookmark>,
     pub options: Map<String, Value>,
     pub voices: BTreeMap<String, String>,
+    /// By book key: `original` or `translated`, the language read and shown first. Absent: never translated.
+    pub translations: BTreeMap<String, String>,
 }
 
 impl Default for AppState {
@@ -80,6 +82,7 @@ impl Default for AppState {
             bookmarks: Vec::new(),
             options: Map::new(),
             voices: BTreeMap::new(),
+            translations: BTreeMap::new(),
         }
     }
 }
@@ -334,6 +337,23 @@ impl Store {
             }
         }
         self.persist();
+    }
+
+    /// The main language of a translated book.
+    pub fn translation(&self, key: &str) -> Option<String> {
+        self.state().translations.get(key).cloned()
+    }
+
+    pub fn set_translation(&self, key: &str, main: &str) {
+        let changed = self
+            .state()
+            .translations
+            .insert(key.to_string(), main.to_string())
+            .as_deref()
+            != Some(main);
+        if changed {
+            self.persist();
+        }
     }
 
     pub fn options(&self) -> Map<String, Value> {
@@ -874,5 +894,14 @@ mod tests {
         let voices = store.state().voices.clone();
         assert!(!voices.contains_key("en"));
         assert_eq!(voices.get("it").map(String::as_str), Some("elsa"));
+    }
+
+    #[test]
+    fn state_keeps_the_main_language_of_a_book_across_a_reload() {
+        let dir = tempfile::tempdir().unwrap();
+        store_in(dir.path()).set_translation("epub:abc", "translated");
+        let store = store_in(dir.path());
+        assert_eq!(store.translation("epub:abc").as_deref(), Some("translated"));
+        assert_eq!(store.translation("epub:other"), None);
     }
 }

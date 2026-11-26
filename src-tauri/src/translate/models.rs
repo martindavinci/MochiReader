@@ -3,6 +3,7 @@
 //! `<version>.part` and takes its name only once every file is there and checked; the version it replaces is removed
 //! after that, so an update never leaves a pair unusable.
 
+use super::cache::Cache;
 use super::catalog::{compare_versions, Catalog, Pair};
 use crate::tts::download::{Emit, Http, Queue, Report};
 use crate::tts::paths::{part_of, PART_SUFFIX};
@@ -37,6 +38,7 @@ pub struct Models {
     catalog: Catalog,
     http: Http,
     queue: Queue,
+    cache: Cache,
 }
 
 fn local(error: impl std::fmt::Display) -> TtsError {
@@ -47,6 +49,7 @@ impl Models {
     /// `root` is the translation folder: beside the voices, in the portable data or the local app data.
     pub fn new(root: PathBuf, catalog: Catalog, version: &str, emit: Emit) -> Self {
         Self {
+            cache: Cache::new(&root),
             root,
             catalog,
             http: Http::new(version),
@@ -56,6 +59,10 @@ impl Models {
 
     pub fn root(&self) -> &Path {
         &self.root
+    }
+
+    pub fn cache(&self) -> &Cache {
+        &self.cache
     }
 
     fn pair_dir(&self, id: &str) -> PathBuf {
@@ -181,6 +188,7 @@ impl Models {
 
     pub fn delete(&self, id: &str) -> Result<(), TtsError> {
         self.known(id)?;
+        self.cache.delete_pair(id)?;
         let dir = self.pair_dir(id);
         if dir.exists() {
             std::fs::remove_dir_all(&dir).map_err(local)?;
@@ -362,6 +370,23 @@ mod tests {
         let models = models(dir.path(), vec![full_pair("2.1")]);
         models.delete("en-it").unwrap();
         assert!(!dir.path().join(MODELS).join("en-it").exists());
+    }
+
+    #[test]
+    fn delete_also_removes_the_translations_made_with_the_pair() {
+        let dir = tempfile::tempdir().unwrap();
+        put_installed(dir.path(), "2.1", b"m");
+        let models = models(dir.path(), vec![full_pair("2.1")]);
+        let texts = vec![Some("ciao".to_owned())];
+        models
+            .cache()
+            .put("epub:a", "en-it", "2.1", 0, &texts)
+            .unwrap();
+        models.delete("en-it").unwrap();
+        assert_eq!(
+            models.cache().get("epub:a", "en-it", "2.1", 0).unwrap(),
+            None
+        );
     }
 
     #[test]

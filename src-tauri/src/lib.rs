@@ -195,6 +195,16 @@ fn state_set_voice(lang: String, voice_id: String, store: State<'_, Store>) {
     store.set_voice(&lang, &voice_id);
 }
 
+#[tauri::command(async)]
+fn state_get_translation(key: String, store: State<'_, Store>) -> Option<String> {
+    store.translation(&key)
+}
+
+#[tauri::command(async)]
+fn state_set_translation(key: String, main: String, store: State<'_, Store>) {
+    store.set_translation(&key, &main);
+}
+
 /// Separate from `state_get`, because the page needs them before its first frame, whatever else the state has grown to.
 #[tauri::command(async)]
 fn state_get_options(store: State<'_, Store>) -> Map<String, Value> {
@@ -590,6 +600,8 @@ pub fn run() {
             state_set_option,
             state_get_options,
             state_set_voice,
+            state_get_translation,
+            state_set_translation,
             state_toggle_bookmark,
             state_move_bookmarks,
             state_bookmark_count,
@@ -613,6 +625,9 @@ pub fn run() {
             translate::tr_cancel,
             translate::tr_delete,
             translate::tr_model_file,
+            translate::tr_cache_get,
+            translate::tr_cache_put,
+            translate::tr_cache_sections,
             #[cfg(feature = "smoke")]
             smoke_write_dump,
             #[cfg(feature = "smoke")]
