@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- Books translate offline, with the models of Mozilla's Firefox Translations. Original | Translated at the top of a book chooses the language shown and read aloud, and the voice never mixes the two: when it reaches a chapter not translated yet it waits for it, and switching language while it reads goes on from the same paragraph. The first time, the model of the pair is offered for download (about 35 MB); a pair without its own model goes through English. The chapter on screen is translated first, then the one the voice needs next, then the rest of the book in the background, and every chapter is kept on disk. Options choose the language to translate into and how a translated book looks: one language at a time, both side by side, or each paragraph followed by its translation; they also list the models. Places and bookmarks stay the same with or without the translation. A PDF read as a book translates too.
+
 ## [0.9.0] - 2026-11-25
 
 ### Added
