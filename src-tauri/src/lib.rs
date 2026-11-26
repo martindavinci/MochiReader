@@ -10,6 +10,7 @@ mod raw_html;
 pub mod render;
 pub mod state;
 pub mod timing;
+pub mod translate;
 pub mod tts;
 pub mod vault;
 
@@ -33,6 +34,9 @@ const OPEN_PATHS_EVENT: &str = "open-paths";
 const SHELL_COMMAND_EVENT: &str = "shell-command";
 const CLOSING_EVENT: &str = "app-closing";
 const TTS_DOWNLOAD_EVENT: &str = "tts-download";
+const TRANSLATION_DOWNLOAD_EVENT: &str = "translation-download";
+/// Beside the folder of the voices.
+const TRANSLATION_FOLDER: &str = "translation";
 const LICENSES_ASSET: &str = "licenses.txt";
 // A copy with a file of this name beside it is portable: it keeps all it writes in a folder beside it.
 const PORTABLE_MARKER: &str = "portable";
@@ -502,6 +506,28 @@ fn manage_voices(app: &mut tauri::App) -> tauri::Result<()> {
     Ok(())
 }
 
+fn manage_translation(app: &mut tauri::App) -> tauri::Result<()> {
+    let catalog = translate::catalog::Catalog::embedded()
+        .map_err(|error| tauri::Error::Anyhow(error.into()))?;
+    let places = voice_places(app)?;
+    let root = places.voices.parent().map_or_else(
+        || places.voices.join(TRANSLATION_FOLDER),
+        |parent| parent.join(TRANSLATION_FOLDER),
+    );
+    let handle = app.handle().clone();
+    let emit: tts::download::Emit = std::sync::Arc::new(move |progress| {
+        let _ = handle.emit(TRANSLATION_DOWNLOAD_EVENT, progress);
+    });
+    let version = app.package_info().version.to_string();
+    let models = std::sync::Arc::new(translate::models::Models::new(
+        root, catalog, &version, emit,
+    ));
+    let sweeping = std::sync::Arc::clone(&models);
+    std::thread::spawn(move || sweeping.sweep());
+    app.manage(models);
+    Ok(())
+}
+
 pub fn run() {
     let created_ms = timing::process_created_unix_ms();
     let main_ms = timing::now_unix_ms() - created_ms;
@@ -582,6 +608,11 @@ pub fn run() {
             tts::tts_mix_save,
             tts::tts_mix_delete,
             tts::tts_mix_preview,
+            translate::tr_catalog,
+            translate::tr_download,
+            translate::tr_cancel,
+            translate::tr_delete,
+            translate::tr_model_file,
             #[cfg(feature = "smoke")]
             smoke_write_dump,
             #[cfg(feature = "smoke")]
@@ -598,6 +629,7 @@ pub fn run() {
         .setup(|app| {
             app.manage(Store::load(&state_folder(app)?, timing::now_unix_ms()));
             manage_voices(app)?;
+            manage_translation(app)?;
             Ok(create_window(app)?)
         })
         .build(tauri::generate_context!())
