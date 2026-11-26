@@ -32,6 +32,7 @@ Double-click a file and read it, or have it read aloud. What you read never leav
 - Table of contents, bookmarks with undo, and recent files, each a click away beside the tabs. The bookmark button lists the bookmarks of the document being read and adds one where you are.
 - Light and dark themes, or the one Windows uses. Nine languages: English, Italian, German, Spanish, French, Portuguese (Brazil), Japanese, Korean and Simplified Chinese. Every action has a key, and F1 lists them.
 - The speed and the volume of the voice from the reading bar, kept between sessions.
+- Translates books offline with the models of Firefox Translations. Original | Translated at the top of a book chooses the language shown and read aloud; the voice never mixes the two. In Options a translated book shows one language at a time, both side by side, or each paragraph followed by its translation. The chapter on screen comes first, then the rest of the book in the background, kept on disk.
 
 <p align="center">
   <img src="docs/screenshots/reading-aloud.png" width="49%" alt="A Markdown note being read aloud, with the sentence highlighted and the reading bar at the bottom" valign="top">
@@ -63,9 +64,13 @@ For more natural voices, open Options with Ctrl+, and choose "Manage voices…".
 
 The voices are kept in `%LOCALAPPDATA%\io.github.martindavinci.mochireader\voices`; a portable copy keeps them in its `data` folder. The voice engine, ONNX Runtime and eSpeak NG, is in the `engine` folder of the app.
 
+### Translate a book
+
+Press Translated at the top of a book. The first time, MochiReader offers the model of that pair of languages, about 35 MB, from Mozilla's Firefox Translations (MPL-2.0); a pair without a model of its own goes through English, with two. The models and the translated chapters are kept in `%LOCALAPPDATA%\io.github.martindavinci.mochireader\translation`, and Options lists the models with a way to remove them.
+
 ## Privacy
 
-MochiReader sends nothing about you or what you read. It connects to the internet only when you ask it to download a voice, or to play the sample of one, from [rhasspy/piper-voices](https://huggingface.co/rhasspy/piper-voices) on Hugging Face, at a fixed revision.
+MochiReader sends nothing about you or what you read. It connects to the internet only when you ask it to download a voice, or to play the sample of one, from [rhasspy/piper-voices](https://huggingface.co/rhasspy/piper-voices) on Hugging Face, at a fixed revision, or to download a translation model from Mozilla's servers. Translating happens entirely on your computer.
 
 Every file is checked against the SHA-256 the app carries before it is used. Opening the voice manager connects to nothing. Reading aloud happens entirely on your computer.
 
