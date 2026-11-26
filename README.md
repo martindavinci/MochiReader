@@ -4,7 +4,7 @@
 
 <h1 align="center">MochiReader</h1>
 
-<p align="center">A calm Windows reader for Markdown and EPUB, which can read aloud with the voices of Windows or with natural voices you download once. Offline by default.</p>
+<p align="center">A calm Windows reader for Markdown, EPUB and PDF, which can read aloud with the voices of Windows or with natural voices you download once, and translate books. Offline by default.</p>
 
 <p align="center">
   <a href="https://github.com/martindavinci/MochiReader/actions/workflows/ci.yml"><img src="https://github.com/martindavinci/MochiReader/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
@@ -22,17 +22,19 @@ Double-click a file and read it, or have it read aloud. What you read never leav
 ## Features
 
 - Opens `.md`, `.markdown` and `.epub` files in tabs, and reopens each one where you stopped. The recent files show the chapter a book was left at.
+- Opens PDF files as books: their text flows like an EPUB's, with chapters from the PDF's own table of contents and its figures. Scanned PDFs and PDFs with a password are not read.
+- Reads aloud text (`.txt`), Word (`.docx`), OpenDocument (`.odt`) and RTF (`.rtf`) documents: their text in order, with their headings, list items and table rows.
 - Reads aloud with the Windows voices, or with natural voices that work offline once downloaded, sentence by sentence, highlighting the sentence and following it down the page. It goes on with the window minimised.
 - Marks the word being said, for the downloaded voices and for the Windows voices that tell their words. It can be turned off in Options.
 - The downloaded voices read from 0.5× to 4× without changing their pitch, and a new speed or volume reaches the sentence being read instead of starting it again.
 - The downloaded voices can sound natural, warm, clear, soft, like a radio or quiet for the night, and every sentence comes at the same loudness; or they keep their original sound untouched. The sound is chosen and heard in Options.
 - Skips what sounds wrong when spoken: link addresses, source citations and frontmatter.
 - Remembers the last voice used for each language.
-- Books show their chapter, page and progress, with arrows to turn the page, in pages or in one long scroll.
+- Books show their chapter, page and progress. A chapter reads as one long scroll by default, with the next one offered at its foot; pages, with arrows to turn them, are in Options.
 - Table of contents, bookmarks with undo, and recent files, each a click away beside the tabs. The bookmark button lists the bookmarks of the document being read and adds one where you are.
 - Light and dark themes, or the one Windows uses. Nine languages: English, Italian, German, Spanish, French, Portuguese (Brazil), Japanese, Korean and Simplified Chinese. Every action has a key, and F1 lists them.
 - The speed and the volume of the voice from the reading bar, kept between sessions.
-- Translates books offline with the models of Firefox Translations. Original | Translated at the top of a book chooses the language shown and read aloud; the voice never mixes the two. In Options a translated book shows one language at a time, both side by side, or each paragraph followed by its translation. The chapter on screen comes first, then the rest of the book in the background, kept on disk.
+- Translates books offline with the models of Firefox Translations, EPUB and PDF alike. Original | Translated at the top of a book chooses the language shown and read aloud; the voice never mixes the two, and waits for a chapter not translated yet. In Options a translated book shows one language at a time, both side by side, or each paragraph followed by its translation. The chapter on screen comes first, then the rest of the book in the background, kept on disk. Places and bookmarks stay the same with or without the translation.
 
 <p align="center">
   <img src="docs/screenshots/reading-aloud.png" width="49%" alt="A Markdown note being read aloud, with the sentence highlighted and the reading bar at the bottom" valign="top">
@@ -54,7 +56,7 @@ The installer is not signed, so Windows SmartScreen may warn you. Choose "More i
 
 ### Make it the default app
 
-The installer registers MochiReader for `.md`, `.markdown` and `.epub`. Windows may still ask you to confirm: right-click a file, choose "Open with", then "Choose another app", select MochiReader and tick "Always use this app".
+The installer registers MochiReader for `.md`, `.markdown` and `.epub`. Windows may still ask you to confirm: right-click a file, choose "Open with", then "Choose another app", select MochiReader and tick "Always use this app". For PDF, `.txt`, `.docx`, `.odt` and `.rtf` files the installer only lists MochiReader under "Open with", without making it their default app.
 
 ### Add a voice
 
@@ -66,7 +68,9 @@ The voices are kept in `%LOCALAPPDATA%\io.github.martindavinci.mochireader\voice
 
 ### Translate a book
 
-Press Translated at the top of a book. The first time, MochiReader offers the model of that pair of languages, about 35 MB, from Mozilla's Firefox Translations (MPL-2.0); a pair without a model of its own goes through English, with two. The models and the translated chapters are kept in `%LOCALAPPDATA%\io.github.martindavinci.mochireader\translation`, and Options lists the models with a way to remove them.
+Press Translated at the top of a book. The first time, MochiReader offers the model of that pair of languages, about 35 MB, from Mozilla's Firefox Translations (MPL-2.0); a pair without a model of its own goes through English, with two. The models and the translated chapters are kept in `%LOCALAPPDATA%\io.github.martindavinci.mochireader\translation`, and Options lists the models with a way to remove them, or to update one when the app brings a newer model (the books then translate again with it).
+
+The language to translate into is the language of the app unless you choose another in Options, where you also choose how a translated book looks. Books with a fixed layout are not translated.
 
 ## Privacy
 
