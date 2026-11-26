@@ -10,10 +10,12 @@ const BOOK = 'foliate-view, .book-stage';
 /**
  * @param {HTMLElement} pane Holds the view of the book.
  * @param {import('../readers/reader.js').Reader} reader
- * @param {{title: string, onChapter: (chapter: number, chapters: number) => void}} options
- * @returns {{destroy: () => void}}
+ * @param {{title: string, onChapter: (chapter: number, chapters: number) => void,
+ *   onTranslate?: (main: 'original'|'translated') => void}} options
+ * @returns {{destroy: () => void, offerDownload: (offer: {text: string, onAccept: () => void}) => void,
+ *   showStatus: (text: string|null) => void}}
  */
-export function mountBookChrome(pane, reader, { title, onChapter }) {
+export function mountBookChrome(pane, reader, { title, onChapter, onTranslate = () => {} }) {
   const doc = pane.ownerDocument;
   const element = elementIn(pane);
 
@@ -27,8 +29,49 @@ export function mountBookChrome(pane, reader, { title, onChapter }) {
     return button;
   };
 
-  const head = element('div', 'book-head', title);
-  head.setAttribute('title', title);
+  const head = element('div', 'book-head');
+  const heading = element('span', 'book-title', title);
+  heading.setAttribute('title', title);
+  head.append(heading);
+
+  // Originale | Tradotto: which language is shown first and read aloud. Only where the book can be translated.
+  const { translation } = reader;
+  const status = element('span', 'book-translate-status');
+  status.hidden = true;
+  let statusByHand = null;
+  const showProgress = () => {
+    const progress = translation?.progress();
+    const text = statusByHand
+      ?? (progress && progress.done < progress.total ? t('translate.progress', progress) : null);
+    status.hidden = !text;
+    status.textContent = text ?? '';
+  };
+  if (translation) {
+    const switcher = element('div', 'book-translate');
+    switcher.setAttribute('role', 'group');
+    switcher.setAttribute('aria-label', t('translate.switch'));
+    const choices = ['original', 'translated'].map((main) => {
+      const button = element('button', 'book-translate-choice', t(`translate.${main}`));
+      button.addEventListener('mousedown', (event) => event.preventDefault());
+      button.addEventListener('click', () => {
+        if ((translation.main() ?? 'original') !== main) onTranslate(main);
+      });
+      return { main, button };
+    });
+    const pressed = () => choices.forEach(({ main, button }) => {
+      button.setAttribute('aria-pressed', String((translation.main() ?? 'original') === main));
+    });
+    switcher.append(...choices.map(({ button }) => button));
+    head.append(switcher, status);
+    pressed();
+    translation.onChange(() => {
+      pressed();
+      showProgress();
+    });
+    translation.onProgress(showProgress);
+  }
+  const offer = element('div', 'book-offer');
+  offer.hidden = true;
   const prev = turn('prev', 'back', t('book.prevPage'), '←', () => reader.goLeft());
   const next = turn('next', 'forward', t('book.nextPage'), '→', () => reader.goRight());
   const bar = element('div', 'book-progress');
@@ -59,7 +102,7 @@ export function mountBookChrome(pane, reader, { title, onChapter }) {
   }));
 
   pane.querySelector(BOOK).before(head);
-  pane.append(prev, next, foot, damaged);
+  pane.append(prev, next, foot, damaged, offer);
 
   let chapterShown = null;
   const draw = () => {
@@ -82,7 +125,7 @@ export function mountBookChrome(pane, reader, { title, onChapter }) {
     upNext.hidden = !following || progress.damaged;
     upNext.textContent = following ? `${t('book.next')} ${following} →` : '';
     damaged.hidden = !progress.damaged;
-    head.textContent = progress.damaged && label ? `${title} · ${label}` : title;
+    heading.textContent = progress.damaged && label ? `${title} · ${label}` : title;
     if (chapter !== chapterShown) {
       chapterShown = chapter;
       onChapter(chapter, chapters);
@@ -91,9 +134,32 @@ export function mountBookChrome(pane, reader, { title, onChapter }) {
 
   reader.onProgress(draw);
   draw();
+  showProgress();
   return {
     destroy() {
-      [head, prev, next, foot, damaged].forEach((part) => part.remove());
+      [head, prev, next, foot, damaged, offer].forEach((part) => part.remove());
+    },
+    /** Asks once whether to download the models a translation needs. */
+    offerDownload({ text, onAccept }) {
+      const close = () => {
+        offer.hidden = true;
+        offer.replaceChildren();
+      };
+      offer.replaceChildren(statePage(pane, {
+        glyph: 'down',
+        title: t('translate.offerTitle'),
+        text,
+        actions: [
+          { label: t('translate.later'), run: close },
+          { label: t('translate.get'), primary: true, run: () => { close(); onAccept(); } },
+        ],
+      }));
+      offer.hidden = false;
+    },
+    /** A status of the shell's own, a download for instance, in place of the progress; null gives it back. */
+    showStatus(text) {
+      statusByHand = text;
+      showProgress();
     },
   };
 }

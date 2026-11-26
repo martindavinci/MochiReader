@@ -1082,6 +1082,19 @@ sup a, a.footnote-ref, .footnote-ref a { padding: 0 .15em; text-decoration: none
 .book-next { flex: 0 1 auto; min-width: 0; margin-left: auto; padding: 2px 4px; overflow: hidden; border: 0; border-radius: var(--radius-xs); background: none; color: var(--link); font: inherit; text-overflow: ellipsis; cursor: pointer; }
 .book-next:hover { text-decoration: underline; }
 .book-damaged { position: absolute; inset: 36px 0 46px; z-index: 1; overflow: auto; background: var(--bg); }
+/* The head of a translatable book: its title in the middle, Originale | Tradotto at the right, how far the translation is at the left. */
+.book-head:has(.book-translate) { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: var(--space-3); }
+.book-head:has(.book-translate) .book-title { grid-column: 2; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.book-translate { grid-column: 3; justify-self: end; display: inline-flex; padding: 2px; border: 1px solid var(--line); border-radius: var(--radius-m); background: var(--surface); line-height: 1; }
+.book-translate-choice { padding: 4px 9px; border: 0; border-radius: var(--radius-s); background: none; color: var(--muted); font: 12px/1 var(--font-ui-s); cursor: pointer; }
+.book-translate-choice:hover { background: var(--surface-2); color: var(--fg); }
+.book-translate-choice[aria-pressed="true"] { background: var(--raised); box-shadow: 0 0 0 1px var(--line-strong); color: var(--fg); font-weight: 600; }
+.book-translate-choice:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.book-translate-status { grid-column: 1; grid-row: 1; justify-self: start; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+.book-offer { position: absolute; inset: 36px 0 46px; z-index: 2; overflow: auto; background: var(--bg); }
+.translation-model .option-label { display: grid; gap: 2px; }
+.option-subgroup { margin: var(--space-3) var(--space-3) var(--space-1); font: 600 13px/1.2 var(--font-ui-s); }
+.translation-models > .option-hint { margin: 0 var(--space-3) var(--space-2); }
 @media (max-width: 559px) { .book-next { display: none; } .book-foot { padding-inline: var(--space-4); } }
 
 /* Shown only after a while, so a file that opens fast never flashes it. */

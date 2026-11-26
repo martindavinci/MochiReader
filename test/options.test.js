@@ -15,6 +15,7 @@ import {
   readOptions,
   renderOptions,
   TEXT_SIZES,
+  translationTargetOf,
 } from '../app/ui/options.js';
 
 function page() {
@@ -56,9 +57,24 @@ test('nothing saved means the defaults, which follow Windows', () => {
   assert.ok(TEXT_SIZES.includes(DEFAULT_OPTIONS.textSize));
 });
 
+test('a translated book shows one language at a time, into the language of the interface, unless chosen', () => {
+  assert.equal(DEFAULT_OPTIONS.translationLayout, 'single');
+  assert.equal(DEFAULT_OPTIONS.translationTarget, 'system');
+  assert.equal(readOptions({ translationLayout: 'columns' }).translationLayout, 'columns');
+  assert.equal(readOptions({ translationLayout: 'sideways' }).translationLayout, 'single');
+});
+
+test('the language to translate into follows the interface, in the names the models use', () => {
+  assert.equal(translationTargetOf({ translationTarget: 'system' }, 'it'), 'it');
+  assert.equal(translationTargetOf({ translationTarget: 'system' }, 'pt-BR'), 'pt');
+  assert.equal(translationTargetOf({ translationTarget: 'system' }, 'zh-CN'), 'zh-Hans');
+  assert.equal(translationTargetOf({ translationTarget: 'de' }, 'it'), 'de');
+});
+
 test('saved options come back', () => {
   const saved = {
     theme: 'dark', textSize: 22, sourceMode: 'name', speechWords: 'off', voiceSound: 'warm', epubView: 'scrolled', language: 'it',
+    translationLayout: 'interleaved', translationTarget: 'de',
   };
   assert.deepEqual(readOptions(saved), saved);
 });

@@ -9,7 +9,10 @@ import { openMarkdown } from '../readers/markdown.js';
 import { caretAt } from '../core/caret.js';
 import { renderHome, mascot } from './home.js';
 import { icon } from './icons.js';
-import { applyOptions, focusedOption, focusOption, interfaceLang, nextTextSize, readOptions, renderOptions, renderVoiceOptions } from './options.js';
+import {
+  applyOptions, focusedOption, focusOption, interfaceLang, nextTextSize, readOptions, renderOptions, renderVoiceOptions,
+  TRANSLATION_MODELS_CLASS, translationTargetOf,
+} from './options.js';
 import { createClickShield, createPanels, createRowGuard, keepFocus, renderBookmarks, renderDocumentBookmarks, renderLicenses, renderShortcuts, renderTabList, renderToc, renderVoiceHelp } from './panels.js';
 import { renderRecents } from './recents.js';
 import { loadingPage, statePage } from './states.js';
@@ -57,6 +60,10 @@ const KOKORO_PREFIX = 'kokoro:';
 /** A voice downloaded to this PC, by its id as the reader speaks with it. */
 const downloadedId = (id) => typeof id === 'string' && (id.startsWith(PIPER_PREFIX) || id.startsWith(KOKORO_PREFIX));
 const DOWNLOAD_EVENT = 'tts-download';
+const MODEL_DOWNLOAD_EVENT = 'translation-download';
+// How often the head of a book tells how far a model download is.
+const MODEL_STATUS_MS = 500;
+const PERCENT = 100;
 const GAP_PX = 6;
 const DROP_MASCOT_PX = 88;
 const FORWARD = 1;
@@ -539,7 +546,11 @@ function onBookInput(entry, event) {
 }
 
 async function showBook(doc, host, savedPosition) {
-  const [{ openEpub }, { pdfFoliate }] = await Promise.all([import('../readers/epub.js'), import('../readers/pdf-open.js')]);
+  const [{ openEpub }, { pdfFoliate }, { createEngine }] = await Promise.all([
+    import('../readers/epub.js'),
+    import('../readers/pdf-open.js'),
+    import('../translate/engine.js'),
+  ]);
   const hash = () => invoke('file_hash', { path: doc.path });
   // A PDF is read as an EPUB made from it: only the way the book is made differs.
   const loadFoliate = doc.kind === KIND_PDF
@@ -552,6 +563,14 @@ async function showBook(doc, host, savedPosition) {
     savedPosition,
     openExternal: (url) => invoke('open_external', { url }),
     unreadableSection: t('epub.sectionError'),
+    // Nothing of the engine loads until the book is first translated.
+    translation: {
+      invoke,
+      target: translationTargetOf(options, getLang()),
+      layout: options.translationLayout,
+      pendingText: t('translate.pending'),
+      makeEngine: () => createEngine({ invoke }),
+    },
   }, loadFoliate);
 }
 
@@ -591,11 +610,108 @@ async function dressBook(entry, reader) {
       onChapter: (chapter, chapters) => {
         if (entry.restored) invoke('state_recent_progress', { path: entry.path, chapter, chapters });
       },
+      onTranslate: (main) => chooseBookLanguage(entry, main),
     });
   } catch (error) {
     // The book can be read without them.
     console.warn(error);
   }
+}
+
+/** Downloads of translation models under way: percent by pair, and who waits for each one to end. */
+const modelDownloads = {};
+const modelWaiters = new Map();
+
+/** Originale or Tradotto, chosen in the head of a book. Tradotto without its models offers them first. */
+async function chooseBookLanguage(entry, main) {
+  const translation = entry.reader?.translation;
+  if (!translation) return;
+  const { chooseMain } = await import('../translate/choose.js');
+  try {
+    await chooseMain(translation, main, { offerModels: (missing) => offerModels(entry, missing, main) });
+  } catch (error) {
+    console.warn(error);
+    showToast(t('translate.failed'), { glyph: 'alert' });
+  }
+}
+
+async function offerModels(entry, missing, main) {
+  const [{ pairs }, { languageName }, { sizeText }] = await Promise.all([
+    invoke('tr_catalog'),
+    import('../speech/engine-web.js'),
+    import('./translation-models.js'),
+  ]);
+  const wanted = pairs.filter(({ id }) => missing.includes(id));
+  if (wanted.length === 0) return;
+  const text = t('translate.offerText', {
+    from: languageName(wanted[0].from),
+    to: languageName(wanted.at(-1).to),
+    size: sizeText(wanted.reduce((sum, { bytes }) => sum + bytes, 0)),
+  });
+  entry.chrome?.offerDownload({ text, onAccept: () => downloadModels(entry, missing, main) });
+}
+
+/** Resolves when the model is on disk; rejects if its download fails or is cancelled. */
+function downloadModel(id) {
+  const done = new Promise((resolve, reject) => {
+    modelWaiters.set(id, [...(modelWaiters.get(id) ?? []), { resolve, reject }]);
+  });
+  invoke('tr_download', { pair: id }).catch((error) => onModelDownload({ voiceId: id, phase: 'error', error }));
+  return done;
+}
+
+async function downloadModels(entry, ids, main) {
+  const status = () => {
+    const percents = ids.map((id) => modelDownloads[id] ?? 0);
+    entry.chrome?.showStatus(t('translate.downloading', { percent: Math.round(Math.min(...percents)) }));
+  };
+  status();
+  const ticker = setInterval(status, MODEL_STATUS_MS);
+  try {
+    await Promise.all(ids.map(downloadModel));
+    entry.chrome?.showStatus(null);
+    await chooseBookLanguage(entry, main);
+  } catch (error) {
+    console.warn(error);
+    entry.chrome?.showStatus(null);
+    showToast(t('translate.downloadFailed'), { glyph: 'alert' });
+  } finally {
+    clearInterval(ticker);
+  }
+}
+
+/** What a model download says as it goes (the event `translation-download`). */
+function onModelDownload({ voiceId: id, phase, received, total, error }) {
+  if (phase === 'done' || phase === 'error' || phase === 'canceled') {
+    delete modelDownloads[id];
+    const waiters = modelWaiters.get(id) ?? [];
+    modelWaiters.delete(id);
+    waiters.forEach(({ resolve, reject }) => (phase === 'done' ? resolve() : reject(error ?? new Error(phase))));
+  } else {
+    modelDownloads[id] = total ? Math.floor((received / total) * PERCENT) : 0;
+  }
+  if (panels.current() === PANEL_OPTIONS) drawTranslationModels();
+}
+
+/** The list of translation models in the Options panel. */
+async function drawTranslationModels() {
+  const host = panelHost.querySelector(`.${TRANSLATION_MODELS_CLASS}`);
+  if (!host) return;
+  const [catalog, { renderTranslationModels }] = await Promise.all([
+    invoke('tr_catalog').catch((error) => console.warn(error)),
+    import('./translation-models.js'),
+  ]);
+  // Without a catalog there is nothing to list: the rest of the options do not depend on it.
+  const pairs = catalog?.pairs;
+  if (!pairs || panels.current() !== PANEL_OPTIONS) return;
+  renderTranslationModels(host, { pairs, target: translationTargetOf(options, getLang()), downloads: modelDownloads }, {
+    onDownload: (id) => downloadModel(id).catch((error) => console.warn(error)),
+    onCancel: (id) => invoke('tr_cancel', { pair: id }),
+    onRemove: async (id) => {
+      await invoke('tr_delete', { pair: id });
+      drawTranslationModels();
+    },
+  });
 }
 
 function adoptBook(doc, entry, reader) {
@@ -608,6 +724,7 @@ function adoptBook(doc, entry, reader) {
   entry.status = STATUS_OK;
   entry.restored = true;
   invoke('state_move_bookmarks', { key: entry.key, path: entry.path }).then(showBookmarkCount);
+  reader.translation?.restore().catch((error) => console.warn(error));
   dressBook(entry, reader);
   if (activeEntry() === entry && !panels.current()) focusText();
 }
@@ -1049,6 +1166,7 @@ async function changeOption(name, value) {
   else useOptions({ ...options, [name]: value });
   invoke('state_set_option', { name, value });
   if (name === 'epubView') openBooks().forEach(({ reader }) => reader.setFlow(value));
+  if (name === 'translationLayout') openBooks().forEach(({ reader }) => reader.translation?.setLayout(value));
   if (name === 'voiceSound') {
     speech?.soundChanged();
     soundSample?.resound();
@@ -1361,6 +1479,7 @@ function drawOptionsPanel() {
     onLicenses: () => showPanel(PANEL_LICENSES),
   });
   drawVoiceOptions();
+  drawTranslationModels();
 }
 
 async function drawLicensesPanel() {
@@ -1613,6 +1732,7 @@ function listenAfterFirstPaint() {
   getCurrentWindow().onFocusChanged(onWindowFocus);
   listen('app-closing', onAppClosing);
   listen(DOWNLOAD_EVENT, ({ payload }) => onDownload(payload));
+  listen(MODEL_DOWNLOAD_EVENT, ({ payload }) => onModelDownload(payload));
 }
 
 async function boot() {

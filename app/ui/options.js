@@ -8,6 +8,9 @@ const THEME_ATTRIBUTE = 'data-theme';
 const TEXT_SIZE_VARIABLE = '--text-size';
 const SYSTEM = 'system';
 const VOICE_OPTIONS_CLASS = 'voice-options';
+/** Where the list of translation models goes, drawn by `translation-models.js`. */
+export const TRANSLATION_MODELS_CLASS = 'translation-models';
+const BOOKS_GROUP = 'options.groupBooks';
 /** The value of the last entry of each list of voices, which opens the voice manager instead. */
 const ABOUT_CLASS = 'about';
 const ABOUT_MASCOT_PX = 32;
@@ -46,10 +49,41 @@ const FIELDS = [
   {
     name: 'epubView',
     label: 'options.epubView',
-    group: 'options.groupBooks',
+    group: BOOKS_GROUP,
     // A chapter reads as one long page, and the next one comes at its end.
     fallback: 'scrolled',
     choices: [keyed('auto', 'options.epubAuto'), keyed('paginated', 'options.epubPaginated'), keyed('scrolled', 'options.epubScrolled')],
+  },
+  {
+    name: 'translationLayout',
+    label: 'options.translationLayout',
+    group: BOOKS_GROUP,
+    choices: [
+      keyed('single', 'options.layoutSingle'),
+      keyed('columns', 'options.layoutColumns'),
+      keyed('interleaved', 'options.layoutInterleaved'),
+    ],
+  },
+  {
+    name: 'translationTarget',
+    label: 'options.translationTarget',
+    group: BOOKS_GROUP,
+    list: true,
+    // As the models name them; each in its own language, as for the interface.
+    choices: [
+      keyed(SYSTEM, 'options.themeSystem'),
+      plain('en', 'English'),
+      plain('it', 'Italiano'),
+      plain('de', 'Deutsch'),
+      plain('es', 'Español'),
+      plain('fr', 'Français'),
+      plain('pt', 'Português'),
+      plain('nl', 'Nederlands'),
+      plain('pl', 'Polski'),
+      plain('ja', '日本語'),
+      plain('ko', '한국어'),
+      plain('zh-Hans', '中文（简体）'),
+    ],
   },
   {
     name: 'sourceMode',
@@ -131,6 +165,19 @@ export function applyOptions({ theme, textSize }, root) {
  */
 export function interfaceLang({ language }, systemLang) {
   return language === SYSTEM ? systemLang : language;
+}
+
+// The languages of the interface that the models name otherwise.
+const MODEL_LANGUAGE = { 'pt-BR': 'pt', 'zh-CN': 'zh-Hans' };
+
+/**
+ * @param {{translationTarget: string}} options
+ * @param {string} uiLang The language of the interface.
+ * @returns {string} The language books are translated into, as the models name it.
+ */
+export function translationTargetOf({ translationTarget }, uiLang) {
+  if (translationTarget !== SYSTEM) return translationTarget;
+  return MODEL_LANGUAGE[uiLang] ?? uiLang.split('-')[0];
 }
 
 /**
@@ -263,10 +310,13 @@ export function renderOptions(host, options, { onChange, onLicenses, version = '
 
   // What the voices drew stays until they are asked for again, so the panel does not jump while it waits.
   const voices = host.querySelector(`.${VOICE_OPTIONS_CLASS}`) ?? make('section', VOICE_OPTIONS_CLASS);
+  // The same for the translation models, after the options of the books.
+  const models = host.querySelector(`.${TRANSLATION_MODELS_CLASS}`) ?? make('section', TRANSLATION_MODELS_CLASS);
   const body = make('div', 'panel-body');
   let group = null;
   for (const description of FIELDS) {
     if (description.group !== group) {
+      if (group === BOOKS_GROUP) body.append(models);
       group = description.group;
       body.append(make('h2', 'option-group', t(group)));
       if (description.name === 'sourceMode') body.append(voices);

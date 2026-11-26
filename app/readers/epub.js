@@ -683,6 +683,7 @@ export async function openEpub(url, host, opts, loadFoliate = importFoliate) {
       onInput,
       handCallbacks,
       place: landed ? saved : null,
+      translation: opts.translation ? { ...opts.translation, parser: opts.parser, serializer: opts.serializer } : null,
     });
   } catch (error) {
     closeView(view);
