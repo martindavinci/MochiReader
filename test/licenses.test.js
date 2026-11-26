@@ -77,7 +77,7 @@ test('the vendored list is allowed and its license files exist', () => {
   assert.doesNotThrow(() => checkLicenses(VENDORED));
   assert.deepEqual(
     VENDORED.map(({ name }) => name),
-    ['foliate-js', 'pdf.js', 'zip.js', 'fflate', 'WebView2 loader', 'Sonic', 'ONNX Runtime', 'eSpeak NG', 'Rust standard library'],
+    ['foliate-js', 'bergamot-translator', 'pdf.js', 'zip.js', 'fflate', 'WebView2 loader', 'Sonic', 'ONNX Runtime', 'eSpeak NG', 'Rust standard library'],
   );
   for (const { licenseFile } of VENDORED) {
     assert.ok(existsSync(join(REPO_ROOT, licenseFile)), licenseFile);
@@ -300,6 +300,25 @@ test('an MPL-2.0 component from outside crates.io is refused, not given a false 
   const fromGit = mplCrate({ source: 'git+https://example.test/fork' });
   assert.throws(() => renderLicenses([fromGit]), /cssparser 0\.38\.0/);
   assert.throws(() => renderLicenses([mplCrate({ source: null })]), /cssparser 0\.38\.0/);
+});
+
+test('an MPL-2.0 component vendored from npm names its published package', () => {
+  const text = renderLicenses([{
+    name: 'engine', version: '0.4.9', license: 'MPL-2.0', texts: ['mpl text'],
+    sourcePackage: 'https://registry.npmjs.org/engine/-/engine-0.4.9.tgz', repository: 'https://example.test/engine',
+  }]);
+  assert.ok(text.includes(
+    'engine 0.4.9\n  https://registry.npmjs.org/engine/-/engine-0.4.9.tgz\n  https://example.test/engine',
+  ));
+});
+
+test('the vendored translation engine names its published package', () => {
+  const engine = VENDORED.find(({ name }) => name === 'bergamot-translator');
+  assert.equal(engine.license, 'MPL-2.0');
+  assert.equal(
+    engine.sourcePackage,
+    'https://registry.npmjs.org/@browsermt/bergamot-translator/-/bergamot-translator-0.4.9.tgz',
+  );
 });
 
 test('components with the same license text share one block', () => {

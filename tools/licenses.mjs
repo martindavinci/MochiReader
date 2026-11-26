@@ -81,6 +81,15 @@ export const VENDORED = [
     licenseFile: 'app/vendor/foliate/LICENSE',
   },
   {
+    name: 'bergamot-translator',
+    version: '0.4.9',
+    license: 'MPL-2.0',
+    licenseFile: 'app/vendor/bergamot/LICENSE',
+    // The source of an MPL-2.0 component is named in the licenses (mplSourceSection).
+    sourcePackage: 'https://registry.npmjs.org/@browsermt/bergamot-translator/-/bergamot-translator-0.4.9.tgz',
+    repository: 'https://github.com/browsermt/bergamot-translator',
+  },
+  {
     name: 'pdf.js',
     version: '6.5.438',
     license: 'Apache-2.0',
@@ -312,21 +321,22 @@ export function checkLicenseTexts(components) {
 }
 
 // The section that says where the source of the MPL-2.0 components is, or nothing
-// without such a component. Only a package on crates.io has an address known here,
-// and a wrong address is worse than a refusal.
+// without such a component. Only a package on crates.io, or one vendored with the
+// address of its published package, has an address known here, and a wrong address
+// is worse than a refusal.
 function mplSourceSection(components) {
   const covered = components.filter(({ license }) => MPL_LICENSE.test(license));
   if (covered.length === 0) return [];
-  const elsewhere = covered.filter(({ source }) => source !== CRATES_IO_SOURCE);
+  const elsewhere = covered.filter(({ source, sourcePackage }) => source !== CRATES_IO_SOURCE && !sourcePackage);
   if (elsewhere.length > 0) {
     const lines = elsewhere.map(({ name, version }) => `  ${name} ${version}`);
     throw new Error(`MPL-2.0 components from outside crates.io:\n${lines.join('\n')}`);
   }
   const entries = covered
-    .map(({ name, version, repository }) =>
+    .map(({ name, version, repository, sourcePackage }) =>
       [
         `${name} ${version}`,
-        `  https://static.crates.io/crates/${name}/${name}-${version}.crate`,
+        `  ${sourcePackage ?? `https://static.crates.io/crates/${name}/${name}-${version}.crate`}`,
         ...(repository ? [`  ${repository}`] : []),
       ].join('\n'),
     )

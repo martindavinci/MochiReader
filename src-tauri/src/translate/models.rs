@@ -26,6 +26,8 @@ pub struct PairView {
     pub installed: Option<String>,
     /// Installed at an older version than the catalog's.
     pub update: bool,
+    /// The kinds of its files: the engine needs to know whether it has one vocabulary or two.
+    pub kinds: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -105,6 +107,7 @@ impl Models {
                     bytes: pair.bytes(),
                     installed,
                     update,
+                    kinds: pair.files.keys().cloned().collect(),
                 }
             })
             .collect();
@@ -308,6 +311,7 @@ mod tests {
         let view = models.view();
         assert_eq!(view.pairs[0].installed.as_deref(), Some("2.1"));
         assert!(!view.pairs[0].update);
+        assert_eq!(view.pairs[0].kinds, vec!["lex", "model", "vocab"]);
         assert_eq!(models.model_file("en-it", "model").unwrap(), b"model bytes");
         assert_eq!(models.model_file("en-it", "vocab").unwrap(), b"vocab bytes");
     }
