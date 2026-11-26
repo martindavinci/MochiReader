@@ -39,11 +39,13 @@ Double-click a file and read it, or have it read aloud. What you read never leav
 <p align="center">
   <img src="docs/screenshots/reading-aloud.png" width="49%" alt="A Markdown note being read aloud, with the sentence highlighted and the reading bar at the bottom" valign="top">
   &nbsp;
-  <img src="docs/screenshots/book-dark.png" width="49%" alt="An EPUB book read aloud in the dark theme, with its chapter, page and progress" valign="top">
+  <img src="docs/screenshots/book-dark.png" width="49%" alt="An EPUB book read aloud in the dark theme, with its chapter, its progress and the Original | Translated switch" valign="top">
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/options-dark.png" width="49%" alt="The Options panel in the dark theme">
+  <img src="docs/screenshots/book-translated.png" width="49%" alt="A book translated into Italian, the original and the translation side by side, read aloud in Italian" valign="top">
+  &nbsp;
+  <img src="docs/screenshots/options-dark.png" width="49%" alt="The Options panel in the dark theme, with the view of books, the layout of translated books and the translation models" valign="top">
 </p>
 
 ## Install
